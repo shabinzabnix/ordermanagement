@@ -79,6 +79,13 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 42. Rule-based Adherence Scoring - High (on-time), Medium (5-10d delay), Low (15+d overdue)
 43. Bulk Customer Import via sales data upload
 
+## What's Been Implemented (Phase 6 - Intelligence Layer Batch A - March 2026)
+44. Unified Intelligence Dashboard - Admin Control Center with 3 sections: Inventory, Customer, Operations (9 clickable widgets)
+45. Demand Forecasting Engine - Rule-based using CRM sales (primary) + store stock sales (fallback). Avg daily sales x 30d = reorder qty. Shows urgency (critical/low/normal)
+46. Expiry Risk Detection - Optional expiry_date column in stock uploads. Alerts for 30d/60d/90d expiry windows with at-risk value tracking
+47. Dead Stock Auto Redistribution Engine - Detects dead stock with demand at other stores, generates transfer recommendations with recoverable value
+48. CRM Task Automation - Auto-generates daily CRM call lists from due/overdue medicines. One-click task generation from Intelligence Dashboard
+
 ## P0 - Remaining (Phase 3)
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
