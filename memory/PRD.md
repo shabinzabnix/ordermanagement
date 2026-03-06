@@ -52,6 +52,13 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 21. Transfer quantity validation (checks source store stock, shows availability indicator, blocks excess transfers)
 22. Auto-store selection for store_staff users across all forms
 
+## What's Been Implemented (Phase 3 - March 2026)
+23. Store Performance Scorecard - ranks stores by composite score (Turnover 40% + Stock Health 30% + Compliance 30%)
+24. Per-store radar chart showing 5 dimensions: Turnover, Stock Health, Compliance, Sales Velocity, Freshness
+25. Performance Comparison bar chart across all stores
+26. Network average KPIs (Avg Score, Avg Turnover, Avg Dead Stock, Avg Compliance)
+27. Scorecard Excel export with all metrics
+
 ## P0 - Remaining (Phase 3)
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
