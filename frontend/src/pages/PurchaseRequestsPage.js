@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -14,6 +15,7 @@ import { ShoppingCart, Plus, AlertTriangle, Download } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
 
 export default function PurchaseRequestsPage() {
+  const { user } = useAuth();
   const [purchases, setPurchases] = useState([]);
   const [stores, setStores] = useState([]);
   const [products, setProducts] = useState([]);
@@ -32,6 +34,12 @@ export default function PurchaseRequestsPage() {
     api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {});
     api.get('/products', { params: { limit: 500 } }).then(r => setProducts(r.data.products)).catch(() => {});
   }, []);
+  // Auto-set store for store_staff
+  useEffect(() => {
+    if (user?.role === 'store_staff' && user?.store_id && !form.store_id) {
+      setForm(f => ({ ...f, store_id: String(user.store_id) }));
+    }
+  }, [user]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -95,7 +103,7 @@ export default function PurchaseRequestsPage() {
               <form onSubmit={handleSubmit} className="mt-4 space-y-3">
                 <div className="space-y-1.5">
                   <Label className="font-body text-xs">Store *</Label>
-                  <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})}>
+                  <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})} disabled={user?.role === 'store_staff'}>
                     <SelectTrigger className="rounded-sm" data-testid="purchase-store"><SelectValue placeholder="Select store" /></SelectTrigger>
                     <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
                   </Select>

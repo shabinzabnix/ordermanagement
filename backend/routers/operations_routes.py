@@ -336,6 +336,34 @@ async def create_transfer(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    # Validate: source != requesting
+    if data.requesting_store_id == data.source_store_id:
+        raise HTTPException(400, "Source and requesting store cannot be the same")
+
+    # Validate stock at source store
+    stock_query = select(func.sum(StoreStockBatch.closing_stock_strips)).where(
+        and_(
+            StoreStockBatch.store_id == data.source_store_id,
+            StoreStockBatch.ho_product_id == data.product_id,
+        )
+    )
+    if data.batch:
+        stock_query = stock_query.where(StoreStockBatch.batch == data.batch)
+    available = (await db.execute(stock_query)).scalar() or 0
+
+    # Also check HO stock if source is conceptually HO (store_id 0 isn't used, but check anyway)
+    if available <= 0:
+        ho_q = select(func.sum(HOStockBatch.closing_stock)).where(HOStockBatch.product_id == data.product_id)
+        if data.batch:
+            ho_q = ho_q.where(HOStockBatch.batch == data.batch)
+        ho_available = (await db.execute(ho_q)).scalar() or 0
+        if ho_available <= 0:
+            raise HTTPException(400, f"No stock available for this product at the source. Available: 0 units")
+        available = ho_available
+
+    if data.quantity > available:
+        raise HTTPException(400, f"Requested quantity ({data.quantity}) exceeds available stock ({available:.1f} units) at source store")
+
     transfer = InterStoreTransfer(
         requesting_store_id=data.requesting_store_id, source_store_id=data.source_store_id,
         product_id=data.product_id, product_name=data.product_name,
@@ -345,7 +373,7 @@ async def create_transfer(
     db.add(transfer)
     await db.commit()
     await db.refresh(transfer)
-    return {"id": transfer.id, "status": "pending", "message": "Transfer request created"}
+    return {"id": transfer.id, "status": "pending", "message": "Transfer request created", "available_stock": available}
 
 
 @router.get("/transfers")
@@ -360,9 +388,13 @@ async def get_transfers(
     query = select(InterStoreTransfer)
     if status:
         query = query.where(InterStoreTransfer.status == TransferStatus(status))
-    if store_id:
+    # Role-based filtering: store_staff sees only their store
+    effective_store = store_id
+    if user.get("role") == "store_staff" and user.get("store_id"):
+        effective_store = user["store_id"]
+    if effective_store:
         query = query.where(
-            (InterStoreTransfer.requesting_store_id == store_id) | (InterStoreTransfer.source_store_id == store_id)
+            (InterStoreTransfer.requesting_store_id == effective_store) | (InterStoreTransfer.source_store_id == effective_store)
         )
     query = query.order_by(InterStoreTransfer.created_at.desc()).offset((page - 1) * limit).limit(limit)
     transfers = (await db.execute(query)).scalars().all()
@@ -458,7 +490,7 @@ async def create_purchase_request(
             .where(StoreStockBatch.ho_product_id == data.product_id)
             .group_by(StoreStockBatch.store_id)
         )).all()
-        store_stocks = {r.store_id: r.t or 0 for r in store_q}
+        store_stocks = {r[0]: float(r[1] or 0) for r in store_q}  # Access by index and convert to float
 
         store_names = {}
         if store_stocks:
@@ -506,8 +538,12 @@ async def get_purchase_requests(
     query = select(PurchaseRequest)
     if status:
         query = query.where(PurchaseRequest.status == PurchaseStatus(status))
-    if store_id:
-        query = query.where(PurchaseRequest.store_id == store_id)
+    # Role-based filtering: store_staff sees only their store
+    effective_store = store_id
+    if user.get("role") == "store_staff" and user.get("store_id"):
+        effective_store = user["store_id"]
+    if effective_store:
+        query = query.where(PurchaseRequest.store_id == effective_store)
     query = query.order_by(PurchaseRequest.created_at.desc()).offset((page - 1) * limit).limit(limit)
     purchases = (await db.execute(query)).scalars().all()
 
@@ -585,18 +621,26 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    is_store_staff = user.get("role") == "store_staff" and user.get("store_id")
+    user_store_id = user.get("store_id") if is_store_staff else None
+
     total_products = (await db.execute(select(func.count(Product.id)))).scalar() or 0
     total_stores = (await db.execute(select(func.count(Store.id)).where(Store.is_active == True))).scalar() or 0
     ho_stock_value = (await db.execute(select(func.sum(HOStockBatch.landing_cost_value)))).scalar() or 0
     ho_stock_units = (await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0
-    pending_transfers = (await db.execute(
-        select(func.count(InterStoreTransfer.id)).where(InterStoreTransfer.status == TransferStatus.PENDING)
-    )).scalar() or 0
-    pending_purchases = (await db.execute(
-        select(func.count(PurchaseRequest.id)).where(
-            PurchaseRequest.status.in_([PurchaseStatus.PENDING, PurchaseStatus.TRANSFER_SUGGESTED])
+
+    transfer_q = select(func.count(InterStoreTransfer.id)).where(InterStoreTransfer.status == TransferStatus.PENDING)
+    purchase_q = select(func.count(PurchaseRequest.id)).where(
+        PurchaseRequest.status.in_([PurchaseStatus.PENDING, PurchaseStatus.TRANSFER_SUGGESTED])
+    )
+    if user_store_id:
+        transfer_q = transfer_q.where(
+            (InterStoreTransfer.requesting_store_id == user_store_id) | (InterStoreTransfer.source_store_id == user_store_id)
         )
-    )).scalar() or 0
+        purchase_q = purchase_q.where(PurchaseRequest.store_id == user_store_id)
+
+    pending_transfers = (await db.execute(transfer_q)).scalar() or 0
+    pending_purchases = (await db.execute(purchase_q)).scalar() or 0
 
     recent_uploads = (await db.execute(
         select(UploadHistory).order_by(UploadHistory.created_at.desc()).limit(5)

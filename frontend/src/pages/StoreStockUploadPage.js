@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -10,6 +11,7 @@ import { Upload, Search, Archive, Download } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
 
 export default function StoreStockUploadPage() {
+  const { user } = useAuth();
   const [stores, setStores] = useState([]);
   const [selectedStore, setSelectedStore] = useState('');
   const [stocks, setStocks] = useState([]);
@@ -19,6 +21,12 @@ export default function StoreStockUploadPage() {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
+  // Auto-select store for store_staff
+  useEffect(() => {
+    if (user?.role === 'store_staff' && user?.store_id && !selectedStore) {
+      setSelectedStore(String(user.store_id));
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!selectedStore) return;

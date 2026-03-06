@@ -8,18 +8,26 @@ import {
   Package, Building2, ArrowLeftRight, ShoppingCart, Warehouse,
   TrendingUp, FileUp, AlertTriangle, TrendingDown, Zap,
 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
+} from 'recharts';
+
+const COLORS = ['#0EA5E9', '#10B981', '#F59E0B', '#E11D48', '#8B5CF6', '#3B82F6', '#EC4899', '#14B8A6'];
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [intel, setIntel] = useState(null);
+  const [charts, setCharts] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       api.get('/dashboard/stats'),
       api.get('/intelligence/summary'),
+      api.get('/dashboard/chart-data'),
     ])
-      .then(([s, i]) => { setStats(s.data); setIntel(i.data); })
+      .then(([s, i, c]) => { setStats(s.data); setIntel(i.data); setCharts(c.data); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -45,6 +53,23 @@ export default function DashboardPage() {
     { label: 'Slow Moving', value: `${intel?.slow_moving_count || 0} items`, icon: TrendingDown, bg: 'bg-orange-50', fg: 'text-orange-600', sub: `INR ${(intel?.slow_moving_value || 0).toLocaleString('en-IN')}` },
   ];
 
+  const agingHasData = charts?.aging_chart?.some(d => d.units > 0);
+  const stockDistHasData = charts?.stock_distribution?.length > 0;
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div className="bg-white border border-slate-200 rounded-sm p-2.5 shadow-md">
+        <p className="text-[11px] font-heading font-semibold text-slate-700 mb-1">{label || payload[0]?.name}</p>
+        {payload.map((p, i) => (
+          <p key={i} className="text-[11px] font-body text-slate-500">
+            {p.dataKey === 'units' ? 'Units' : p.dataKey === 'value' ? 'Value (INR)' : p.name}: <span className="font-medium text-slate-800">{typeof p.value === 'number' ? p.value.toLocaleString('en-IN') : p.value}</span>
+          </p>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div data-testid="dashboard-page" className="space-y-6">
       <div>
@@ -52,6 +77,7 @@ export default function DashboardPage() {
         <p className="text-sm font-body text-slate-500 mt-0.5">Network-wide inventory intelligence</p>
       </div>
 
+      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {kpis.map((kpi, i) => (
           <Card key={kpi.label} className={`border-slate-200 shadow-sm hover:-translate-y-px transition-transform duration-200 rounded-sm animate-fade-in-delay-${Math.min(i+1, 5)}`}>
@@ -62,13 +88,63 @@ export default function DashboardPage() {
                   <p className="text-xl font-heading font-bold text-slate-900 mt-0.5 tabular-nums">{kpi.value}</p>
                   {kpi.sub && <p className="text-[11px] font-body text-slate-500 mt-0.5">{kpi.sub}</p>}
                 </div>
-                <div className={`p-2 rounded-sm ${kpi.bg}`}>
-                  <kpi.icon className={`w-4 h-4 ${kpi.fg}`} strokeWidth={1.75} />
-                </div>
+                <div className={`p-2 rounded-sm ${kpi.bg}`}><kpi.icon className={`w-4 h-4 ${kpi.fg}`} strokeWidth={1.75} /></div>
               </div>
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Aging Distribution Bar Chart */}
+        <Card className="border-slate-200 shadow-sm rounded-sm">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-sm font-heading font-semibold">Inventory Aging Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {agingHasData ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={charts.aging_chart} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 11, fontFamily: 'Public Sans', fill: '#94A3B8' }} />
+                  <YAxis tick={{ fontSize: 11, fontFamily: 'Public Sans', fill: '#94A3B8' }} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="units" fill="#0EA5E9" radius={[3, 3, 0, 0]} name="Units" />
+                  <Bar dataKey="value" fill="#8B5CF6" radius={[3, 3, 0, 0]} name="Value (INR)" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-[220px] text-xs text-slate-400 font-body">No aging data to display</div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Stock Distribution Pie Chart */}
+        <Card className="border-slate-200 shadow-sm rounded-sm">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-sm font-heading font-semibold">Stock Distribution by Location</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {stockDistHasData ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={charts.stock_distribution} cx="50%" cy="50%" innerRadius={50} outerRadius={85}
+                    dataKey="value" nameKey="name" paddingAngle={2}>
+                    {charts.stock_distribution.map((_, idx) => (
+                      <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: 11, fontFamily: 'Public Sans' }}
+                    formatter={(value) => <span className="text-slate-600 text-[11px]">{value}</span>} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-[220px] text-xs text-slate-400 font-body">No stock data to display</div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Transfer Recommendations */}
@@ -106,8 +182,8 @@ export default function DashboardPage() {
         </Card>
       )}
 
+      {/* Bottom Row: Dead Stock + Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Dead Stock Alerts */}
         <Card className="border-slate-200 shadow-sm rounded-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
@@ -116,12 +192,12 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {intel?.dead_stock?.length > 0 ? (
-              <div className="space-y-0 max-h-[240px] overflow-auto">
-                {intel.dead_stock.slice(0, 10).map((d, i) => (
+              <div className="space-y-0 max-h-[200px] overflow-auto">
+                {intel.dead_stock.slice(0, 8).map((d, i) => (
                   <div key={i} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
                     <div className="min-w-0 flex-1">
                       <p className="text-[13px] font-body font-medium text-slate-800 truncate">{d.product_name}</p>
-                      <p className="text-[11px] font-body text-slate-400">{d.store} | Batch: {d.batch} | {d.stock} units</p>
+                      <p className="text-[11px] font-body text-slate-400">{d.store} | {d.stock} units</p>
                     </div>
                     <Badge className="text-[10px] rounded-sm bg-red-50 text-red-700 hover:bg-red-50 ml-2 shrink-0">{d.days}d</Badge>
                   </div>
@@ -136,7 +212,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Uploads + Transfers */}
         <Card className="border-slate-200 shadow-sm rounded-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
@@ -144,7 +219,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-0 max-h-[240px] overflow-auto">
+            <div className="space-y-0 max-h-[200px] overflow-auto">
               {stats?.recent_uploads?.map(u => (
                 <div key={`u-${u.id}`} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
                   <div className="min-w-0 flex-1">

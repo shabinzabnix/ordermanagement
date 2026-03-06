@@ -128,10 +128,15 @@ async def intelligence_summary(
 ):
     now = datetime.now(timezone.utc)
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    is_store_staff = user.get("role") == "store_staff" and user.get("store_id")
+    user_store_id = user.get("store_id") if is_store_staff else None
 
     dead_items, slow_items, recommendations = [], [], []
 
-    for s in (await db.execute(select(StoreStockBatch))).scalars().all():
+    ss_query = select(StoreStockBatch)
+    if user_store_id:
+        ss_query = ss_query.where(StoreStockBatch.store_id == user_store_id)
+    for s in (await db.execute(ss_query)).scalars().all():
         if s.closing_stock_strips <= 0:
             continue
         days = (now - s.created_at).days if s.created_at else 0
@@ -147,25 +152,26 @@ async def intelligence_summary(
         elif (s.sales or 0) == 0 and days > 30:
             slow_items.append(item)
 
-    # HO dead stock
-    for s in (await db.execute(select(HOStockBatch))).scalars().all():
-        if s.closing_stock <= 0:
-            continue
-        days = (now - s.created_at).days if s.created_at else 0
-        if days > 60:
-            dead_items.append({
-                "store": "Head Office", "store_id": None,
-                "product_id": s.product_id, "product_name": s.product_name,
-                "batch": s.batch, "stock": s.closing_stock, "days": days,
-                "sales": 0, "value": s.landing_cost_value or 0,
-            })
-        elif days > 30:
-            slow_items.append({
-                "store": "Head Office", "store_id": None,
-                "product_id": s.product_id, "product_name": s.product_name,
-                "batch": s.batch, "stock": s.closing_stock, "days": days,
-                "sales": 0, "value": s.landing_cost_value or 0,
-            })
+    # HO dead stock (only for admin/ho_staff)
+    if not user_store_id:
+        for s in (await db.execute(select(HOStockBatch))).scalars().all():
+            if s.closing_stock <= 0:
+                continue
+            days = (now - s.created_at).days if s.created_at else 0
+            if days > 60:
+                dead_items.append({
+                    "store": "Head Office", "store_id": None,
+                    "product_id": s.product_id, "product_name": s.product_name,
+                    "batch": s.batch, "stock": s.closing_stock, "days": days,
+                    "sales": 0, "value": s.landing_cost_value or 0,
+                })
+            elif days > 30:
+                slow_items.append({
+                    "store": "Head Office", "store_id": None,
+                    "product_id": s.product_id, "product_name": s.product_name,
+                    "batch": s.batch, "stock": s.closing_stock, "days": days,
+                    "sales": 0, "value": s.landing_cost_value or 0,
+                })
 
     # Transfer recommendations: dead stock in one store, sales in another
     product_sales = {}
@@ -200,6 +206,23 @@ async def intelligence_summary(
 
 
 # ─── Batch Details ────────────────────────────────────────
+
+@router.get("/stock/check-availability")
+async def check_transfer_availability(
+    source_store_id: int = Query(...),
+    product_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Check available stock at source store for a product."""
+    stocks = (await db.execute(
+        select(StoreStockBatch.batch, StoreStockBatch.closing_stock_strips, StoreStockBatch.mrp)
+        .where(and_(StoreStockBatch.store_id == source_store_id, StoreStockBatch.ho_product_id == product_id))
+    )).all()
+    total = sum(float(s.closing_stock_strips or 0) for s in stocks)
+    batches = [{"batch": s.batch, "stock": float(s.closing_stock_strips or 0), "mrp": s.mrp or 0} for s in stocks if (s.closing_stock_strips or 0) > 0]
+    return {"total_available": round(total, 1), "batches": batches}
+
 
 @router.get("/stock/batch-details/{product_id}")
 async def batch_details(
@@ -524,6 +547,71 @@ async def refill_reminders(
 
 
 # ─── Audit Logs ───────────────────────────────────────────
+
+@router.get("/dashboard/chart-data")
+async def get_chart_data(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc)
+    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    # 1. Aging distribution buckets
+    aging_buckets = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
+    aging_values = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
+    for s in (await db.execute(select(HOStockBatch))).scalars().all():
+        if s.closing_stock <= 0:
+            continue
+        days = (now - s.created_at).days if s.created_at else 0
+        b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
+        aging_buckets[b] += float(s.closing_stock or 0)
+        aging_values[b] += float(s.landing_cost_value or 0)
+    for s in (await db.execute(select(StoreStockBatch))).scalars().all():
+        if s.closing_stock_strips <= 0:
+            continue
+        days = (now - s.created_at).days if s.created_at else 0
+        b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
+        aging_buckets[b] += float(s.closing_stock_strips or 0)
+        aging_values[b] += float(s.cost_value or 0)
+
+    aging_chart = [{"bucket": k, "units": round(v, 0), "value": round(aging_values[k], 0)} for k, v in aging_buckets.items()]
+
+    # 2. Stock distribution by location
+    ho_total = float((await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0)
+    store_dist = []
+    store_stock_q = (await db.execute(
+        select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
+        .group_by(StoreStockBatch.store_id)
+    )).all()
+    if ho_total > 0:
+        store_dist.append({"name": "Head Office", "value": round(ho_total, 0)})
+    for r in store_stock_q:
+        v = float(r[1] or 0)  # Access by index instead of attribute
+        if v > 0:
+            store_dist.append({"name": stores_map.get(r[0], f"Store {r[0]}"), "value": round(v, 0)})
+
+    # 3. Top categories by product count
+    cat_q = (await db.execute(
+        select(Product.category, func.count(Product.id).label("cnt"))
+        .where(Product.category.isnot(None))
+        .group_by(Product.category).order_by(func.count(Product.id).desc()).limit(8)
+    )).all()
+    category_chart = [{"name": r.category or "Uncategorized", "count": r.cnt} for r in cat_q]
+
+    # 4. Transfer status breakdown
+    transfer_q = (await db.execute(
+        select(InterStoreTransfer.status, func.count(InterStoreTransfer.id).label("cnt"))
+        .group_by(InterStoreTransfer.status)
+    )).all()
+    transfer_chart = [{"status": r.status.value if hasattr(r.status, 'value') else r.status, "count": r.cnt} for r in transfer_q]
+
+    return {
+        "aging_chart": aging_chart,
+        "stock_distribution": store_dist,
+        "category_chart": category_chart,
+        "transfer_chart": transfer_chart,
+    }
+
 
 @router.get("/audit-logs")
 async def get_audit_logs(

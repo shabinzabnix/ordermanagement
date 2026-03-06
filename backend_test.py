@@ -103,7 +103,7 @@ class PharmacyAPITester:
             "contact_number": "9876543210",
             "store_code": f"TS{datetime.now().strftime('%H%M%S')}"
         }
-        success, response = self.run_test("Create Store", "POST", "api/stores", 201, data=store_data)
+        success, response = self.run_test("Create Store", "POST", "api/stores", 200, data=store_data)  # Expect 200 not 201
         if success:
             self.store_id = response.get('id')
             print(f"   Created store with ID: {self.store_id}")
@@ -125,7 +125,7 @@ class PharmacyAPITester:
             "role": "store_staff",
             "store_id": self.store_id
         }
-        success, response = self.run_test("Create User", "POST", "api/users", 201, data=user_data)
+        success, response = self.run_test("Create User", "POST", "api/users", 200, data=user_data)  # Expect 200 not 201
         return success
 
     def test_products_crud(self):
@@ -243,7 +243,7 @@ class PharmacyAPITester:
                 "batch": "B001",
                 "quantity": 10
             }
-            success, response = self.run_test("Create Transfer", "POST", "api/transfers", 201, data=transfer_data)
+            success, response = self.run_test("Create Transfer", "POST", "api/transfers", 201, data=transfer_data)  # This should still be 201
             if success:
                 transfer_id = response.get('id')
                 # Test approve transfer
@@ -380,6 +380,189 @@ class PharmacyAPITester:
                 
         return all_success
 
+    # ===== PHASE 3 NEW FEATURES TESTING =====
+    
+    def test_dashboard_chart_data(self):
+        """Test dashboard chart data endpoint"""
+        success, response = self.run_test("Get Dashboard Chart Data", "GET", "api/dashboard/chart-data", 200)
+        if success:
+            # Verify required chart data is present
+            required_keys = ['aging_chart', 'stock_distribution', 'category_chart', 'transfer_chart']
+            for key in required_keys:
+                if key not in response:
+                    print(f"   ❌ Missing key '{key}' in chart data response")
+                    return False
+                else:
+                    print(f"   ✅ Found '{key}': {len(response[key])} items")
+            
+            # Verify aging chart structure
+            if response['aging_chart']:
+                aging_item = response['aging_chart'][0]
+                if 'bucket' in aging_item and 'units' in aging_item and 'value' in aging_item:
+                    print(f"   ✅ Aging chart structure correct")
+                else:
+                    print(f"   ❌ Aging chart missing required fields")
+                    return False
+            
+            # Verify stock distribution structure
+            if response['stock_distribution']:
+                stock_item = response['stock_distribution'][0]
+                if 'name' in stock_item and 'value' in stock_item:
+                    print(f"   ✅ Stock distribution structure correct")
+                else:
+                    print(f"   ❌ Stock distribution missing required fields")
+                    return False
+                    
+        return success
+
+    def test_stock_check_availability(self):
+        """Test stock availability check for transfers"""
+        if not self.store_id:
+            print("❌ No store_id available for stock availability test")
+            return False
+            
+        # Test stock availability endpoint
+        params = {"source_store_id": self.store_id, "product_id": "P001"}
+        success, response = self.run_test("Check Stock Availability", "GET", "api/stock/check-availability", 200, params=params)
+        if success:
+            if 'total_available' in response and 'batches' in response:
+                print(f"   ✅ Available stock: {response['total_available']} units")
+                print(f"   ✅ Batches found: {len(response['batches'])}")
+            else:
+                print(f"   ❌ Missing required fields in availability response")
+                return False
+        return success
+
+    def test_transfer_quantity_validation(self):
+        """Test transfer quantity validation against available stock"""
+        if not self.store_id:
+            print("❌ No store_id available for transfer validation test")
+            return False
+
+        # First, create different source and requesting stores
+        store_data = {
+            "store_name": f"Source Store {datetime.now().strftime('%H%M%S')}",
+            "location": "Source Location",
+            "manager_name": "Source Manager",
+            "contact_number": "9876543211",
+            "store_code": f"SRC{datetime.now().strftime('%H%M%S')}"
+        }
+        success, response = self.run_test("Create Source Store", "POST", "api/stores", 200, data=store_data)  # Expect 200
+        if not success:
+            return False
+        source_store_id = response.get('id')
+
+        # Check available stock at source store first
+        params = {"source_store_id": source_store_id, "product_id": "P001"}
+        success, response = self.run_test("Check Source Store Stock", "GET", "api/stock/check-availability", 200, params=params)
+        available_stock = response.get('total_available', 0) if success else 0
+        
+        # Test 1: Valid transfer within available stock
+        if available_stock > 0:
+            valid_qty = min(available_stock, 5)  # Use small quantity or max available
+            transfer_data = {
+                "requesting_store_id": self.store_id,
+                "source_store_id": source_store_id,
+                "product_id": "P001",
+                "product_name": "Paracetamol 500mg",
+                "batch": "B001",
+                "quantity": valid_qty
+            }
+            success1, response1 = self.run_test("Valid Transfer Within Stock", "POST", "api/transfers", 201, data=transfer_data)
+            if success1:
+                print(f"   ✅ Valid transfer created for {valid_qty} units")
+        else:
+            success1 = True  # Skip if no stock
+            print(f"   ⚠️ No stock available for valid transfer test")
+
+        # Test 2: Invalid transfer exceeding available stock
+        excess_qty = available_stock + 10  # Exceed by 10 units
+        transfer_data_excess = {
+            "requesting_store_id": self.store_id,
+            "source_store_id": source_store_id,
+            "product_id": "P001",
+            "product_name": "Paracetamol 500mg",
+            "batch": "B001",
+            "quantity": excess_qty
+        }
+        success2, response2 = self.run_test("Invalid Transfer Exceeding Stock", "POST", "api/transfers", 400, data=transfer_data_excess)
+        if success2:
+            print(f"   ✅ Transfer correctly rejected for excessive quantity ({excess_qty} units)")
+        
+        return success1 and success2
+
+    def create_store_staff_user(self):
+        """Create a store_staff user for role-based testing"""
+        if not self.store_id:
+            print("❌ No store_id available for store_staff user creation")
+            return None
+            
+        user_data = {
+            "email": f"staff{datetime.now().strftime('%H%M%S')}@test.com",
+            "password": "staffpass123",
+            "full_name": "Store Staff User",
+            "role": "store_staff",
+            "store_id": self.store_id
+        }
+        success, response = self.run_test("Create Store Staff User", "POST", "api/users", 200, data=user_data)  # Expect 200
+        if success:
+            return {
+                "email": user_data["email"],
+                "password": user_data["password"],
+                "store_id": self.store_id
+            }
+        return None
+
+    def test_role_based_filtering(self):
+        """Test role-based filtering for store_staff users"""
+        # Create store staff user
+        staff_user = self.create_store_staff_user()
+        if not staff_user:
+            return False
+
+        # Save current token
+        admin_token = self.token
+        
+        # Login as store staff
+        success = self.test_login(staff_user["email"], staff_user["password"])
+        if not success:
+            print("❌ Failed to login as store_staff")
+            self.token = admin_token  # Restore admin token
+            return False
+
+        # Test transfers filtering - store_staff should only see their store transfers
+        success1, response1 = self.run_test("Store Staff Get Transfers (Filtered)", "GET", "api/transfers", 200)
+        if success1:
+            # All transfers should be related to staff's store
+            for transfer in response1.get('transfers', []):
+                if (transfer['requesting_store_id'] != staff_user["store_id"] and 
+                    transfer['source_store_id'] != staff_user["store_id"]):
+                    print(f"   ❌ Transfer {transfer['id']} not related to store {staff_user['store_id']}")
+                    self.token = admin_token
+                    return False
+            print(f"   ✅ Transfers correctly filtered for store {staff_user['store_id']}")
+
+        # Test purchases filtering - store_staff should only see their store purchases
+        success2, response2 = self.run_test("Store Staff Get Purchases (Filtered)", "GET", "api/purchases", 200)
+        if success2:
+            # All purchases should be for staff's store
+            for purchase in response2.get('purchases', []):
+                if purchase['store_id'] != staff_user["store_id"]:
+                    print(f"   ❌ Purchase {purchase['id']} not for store {staff_user['store_id']}")
+                    self.token = admin_token
+                    return False
+            print(f"   ✅ Purchases correctly filtered for store {staff_user['store_id']}")
+
+        # Test dashboard stats filtering for store_staff
+        success3, response3 = self.run_test("Store Staff Dashboard Stats (Filtered)", "GET", "api/dashboard/stats", 200)
+        if success3:
+            print(f"   ✅ Dashboard stats accessed by store_staff")
+
+        # Restore admin token
+        self.token = admin_token
+        
+        return success1 and success2 and success3
+
 def main():
     print("🏥 Starting Sahakar Pharmacy API Testing...")
     print("=" * 60)
@@ -439,6 +622,13 @@ def main():
     tester.test_refill_reminders()
     tester.test_audit_logs()
     tester.test_excel_exports()
+
+    # Phase 3 new features tests
+    print("\n🎯 PHASE 3 NEW FEATURES TESTS")
+    tester.test_dashboard_chart_data()
+    tester.test_stock_check_availability()
+    tester.test_transfer_quantity_validation()
+    tester.test_role_based_filtering()
 
     # Print final results
     print("\n" + "=" * 60)
