@@ -479,6 +479,7 @@ class PurchaseCreate(BaseModel):
     customer_name: str
     customer_contact: str
     is_registered_product: bool = True
+    purchase_reason: str = "customer_enquiry"
 
 
 @router.post("/purchases")
@@ -521,8 +522,8 @@ async def create_purchase_request(
         store_id=data.store_id, product_id=data.product_id, product_name=data.product_name,
         brand_name=data.brand_name, quantity=data.quantity,
         customer_name=data.customer_name, customer_contact=data.customer_contact,
-        is_registered_product=data.is_registered_product, status=status,
-        network_stock_info=network_info, requested_by=user["user_id"],
+        is_registered_product=data.is_registered_product, purchase_reason=data.purchase_reason,
+        status=status, network_stock_info=network_info, requested_by=user["user_id"],
     )
     db.add(purchase)
     await db.commit()
@@ -567,6 +568,7 @@ async def get_purchase_requests(
              "brand_name": p.brand_name, "quantity": p.quantity,
              "customer_name": p.customer_name, "customer_contact": p.customer_contact,
              "is_registered_product": p.is_registered_product,
+             "purchase_reason": p.purchase_reason or "customer_enquiry",
              "status": p.status.value if isinstance(p.status, PurchaseStatus) else p.status,
              "network_stock_info": json.loads(p.network_stock_info) if p.network_stock_info else None,
              "created_at": p.created_at.isoformat() if p.created_at else None}

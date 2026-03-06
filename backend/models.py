@@ -134,6 +134,7 @@ class PurchaseRequest(Base):
     customer_name = Column(String(255))
     customer_contact = Column(String(50))
     is_registered_product = Column(Boolean, default=True)
+    purchase_reason = Column(String(50), default="customer_enquiry")
     status = Column(SQLEnum(PurchaseStatus), default=PurchaseStatus.PENDING)
     network_stock_info = Column(Text, nullable=True)
     requested_by = Column(Integer, ForeignKey("users.id"))

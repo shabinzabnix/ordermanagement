@@ -24,6 +24,7 @@ export default function PurchaseRequestsPage() {
   const [form, setForm] = useState({
     store_id: '', product_id: '', product_name: '', brand_name: '',
     quantity: '', customer_name: '', customer_contact: '', is_registered_product: true,
+    purchase_reason: 'customer_enquiry',
   });
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
@@ -53,6 +54,7 @@ export default function PurchaseRequestsPage() {
         customer_name: form.customer_name,
         customer_contact: form.customer_contact,
         is_registered_product: tab === 'registered',
+        purchase_reason: form.purchase_reason,
       };
       if (tab === 'registered') payload.product_id = form.product_id;
       else payload.brand_name = form.brand_name;
@@ -130,6 +132,17 @@ export default function PurchaseRequestsPage() {
                     <Input data-testid="purchase-brand" value={form.brand_name} onChange={e => setForm({...form, brand_name: e.target.value})} className="rounded-sm" />
                   </div>
                 </TabsContent>
+                <div className="space-y-1.5">
+                  <Label className="font-body text-xs">Purchase Reason *</Label>
+                  <Select value={form.purchase_reason} onValueChange={v => setForm({...form, purchase_reason: v})}>
+                    <SelectTrigger className="rounded-sm" data-testid="purchase-reason"><SelectValue placeholder="Select reason" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="customer_enquiry">Customer Enquiry</SelectItem>
+                      <SelectItem value="stock_refill">Stock Refill</SelectItem>
+                      <SelectItem value="emergency_purchase">Emergency Purchase</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1.5">
                     <Label className="font-body text-xs">Quantity *</Label>
@@ -181,7 +194,7 @@ export default function PurchaseRequestsPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['ID', 'Store', 'Product', 'Qty', 'Customer', 'Type', 'Status', 'Date'].map(h => (
+                {['ID', 'Store', 'Product', 'Qty', 'Reason', 'Customer', 'Status', 'Date'].map(h => (
                   <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3">{h}</TableHead>
                 ))}
               </TableRow>
@@ -198,8 +211,12 @@ export default function PurchaseRequestsPage() {
                   <TableCell className="text-[12px] font-body text-slate-600">{p.store_name}</TableCell>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.product_name}</TableCell>
                   <TableCell className="text-[12px] tabular-nums">{p.quantity}</TableCell>
+                  <TableCell><Badge className={`text-[10px] rounded-sm ${
+                    p.purchase_reason === 'emergency_purchase' ? 'bg-red-50 text-red-700' :
+                    p.purchase_reason === 'stock_refill' ? 'bg-sky-50 text-sky-700' :
+                    'bg-slate-100 text-slate-600'
+                  }`}>{(p.purchase_reason || 'customer_enquiry').replace('_', ' ')}</Badge></TableCell>
                   <TableCell className="text-[12px] font-body text-slate-500">{p.customer_name}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-[10px] rounded-sm">{p.is_registered_product ? 'Registered' : 'New'}</Badge></TableCell>
                   <TableCell><Badge className={`text-[10px] rounded-sm ${statusColor(p.status)}`}>{p.status?.replace('_', ' ')}</Badge></TableCell>
                   <TableCell className="text-[11px] text-slate-400">{p.created_at ? new Date(p.created_at).toLocaleDateString() : '-'}</TableCell>
                 </TableRow>

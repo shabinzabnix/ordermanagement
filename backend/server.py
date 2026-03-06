@@ -58,6 +58,7 @@ async def startup():
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS chronic_tags TEXT"))
             await conn.execute(text("ALTER TABLE ho_stock_batches ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE"))
             await conn.execute(text("ALTER TABLE store_stock_batches ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE"))
+            await conn.execute(text("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS purchase_reason VARCHAR(50) DEFAULT 'customer_enquiry'"))
             # Performance indexes
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(customer_id, product_name)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_store_date ON sales_records(store_id, invoice_date)"))
