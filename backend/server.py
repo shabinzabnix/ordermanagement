@@ -58,6 +58,16 @@ async def startup():
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS chronic_tags TEXT"))
             await conn.execute(text("ALTER TABLE ho_stock_batches ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE"))
             await conn.execute(text("ALTER TABLE store_stock_batches ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE"))
+            # Performance indexes
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(customer_id, product_name)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_store_date ON sales_records(store_id, invoice_date)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_medpurchase_customer_status ON medicine_purchases(customer_id, status)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_medpurchase_due ON medicine_purchases(next_due_date) WHERE status = 'active'"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_store_stock_product ON store_stock_batches(ho_product_id, store_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_crm_customer_type ON crm_customers(customer_type)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_crm_customer_store ON crm_customers(assigned_store_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_transfer_status ON inter_store_transfers(status)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ho_stock_expiry ON ho_stock_batches(expiry_date) WHERE expiry_date IS NOT NULL"))
         except Exception:
             pass
     # Ensure new tables exist

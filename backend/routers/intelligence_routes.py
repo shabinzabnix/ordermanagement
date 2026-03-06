@@ -420,3 +420,202 @@ async def get_task_queue(
         })
 
     return {"queue": result, "total": len(result)}
+
+
+# ─── Supplier Intelligence ─────────────────────────────────
+
+@router.get("/intel/supplier-intelligence")
+async def supplier_intelligence(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """Analyze suppliers from Product Master: price trends, best supplier per product."""
+    products = (await db.execute(select(Product))).scalars().all()
+    supplier_stats = {}  # supplier_name -> {products, total_ptr, total_lcost, count}
+
+    for p in products:
+        for supplier in [p.primary_supplier, p.secondary_supplier, p.least_price_supplier, p.most_qty_supplier]:
+            if not supplier or supplier.strip() == "":
+                continue
+            s = supplier.strip()
+            if s not in supplier_stats:
+                supplier_stats[s] = {"products": 0, "total_ptr": 0, "total_lcost": 0, "product_list": []}
+            supplier_stats[s]["products"] += 1
+            supplier_stats[s]["total_ptr"] += float(p.ptr or 0)
+            supplier_stats[s]["total_lcost"] += float(p.landing_cost or 0)
+            supplier_stats[s]["product_list"].append(p.product_name)
+
+    suppliers = []
+    for name, data in supplier_stats.items():
+        n = data["products"]
+        suppliers.append({
+            "supplier": name, "product_count": n,
+            "avg_ptr": round(data["total_ptr"] / n, 2) if n > 0 else 0,
+            "avg_landing_cost": round(data["total_lcost"] / n, 2) if n > 0 else 0,
+            "sample_products": data["product_list"][:5],
+        })
+    suppliers.sort(key=lambda x: -x["product_count"])
+
+    # Best supplier per product (lowest PTR)
+    best_per_product = []
+    for p in products:
+        candidates = []
+        if p.primary_supplier:
+            candidates.append({"supplier": p.primary_supplier, "ptr": p.ptr or 0, "lcost": p.landing_cost or 0})
+        if p.least_price_supplier and p.least_price_supplier != p.primary_supplier:
+            candidates.append({"supplier": p.least_price_supplier, "ptr": p.ptr or 0, "lcost": p.landing_cost or 0})
+        if candidates:
+            best = min(candidates, key=lambda x: x["ptr"]) if candidates else None
+            if best:
+                best_per_product.append({
+                    "product_id": p.product_id, "product_name": p.product_name,
+                    "best_supplier": best["supplier"], "ptr": best["ptr"], "landing_cost": best["lcost"],
+                    "mrp": p.mrp or 0, "margin_pct": round((1 - best["ptr"] / p.mrp) * 100, 1) if p.mrp and p.mrp > 0 else 0,
+                })
+
+    return {
+        "suppliers": suppliers[:50],
+        "total_suppliers": len(suppliers),
+        "best_per_product": best_per_product[:100],
+    }
+
+
+# ─── Smart Purchase Recommendation ─────────────────────────
+
+@router.get("/intel/purchase-recommendation/{product_id}")
+async def purchase_recommendation(
+    product_id: str,
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Smart recommendation: check network stock first, then suggest best supplier."""
+    product = (await db.execute(select(Product).where(Product.product_id == product_id))).scalar_one_or_none()
+    if not product:
+        return {"recommendation": "product_not_found", "details": {}}
+
+    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    # 1. Check HO stock
+    ho_stock = float((await db.execute(
+        select(func.sum(HOStockBatch.closing_stock)).where(HOStockBatch.product_id == product_id)
+    )).scalar() or 0)
+
+    # 2. Check store stock (all stores)
+    store_stocks = []
+    ss_q = (await db.execute(
+        select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
+        .where(StoreStockBatch.ho_product_id == product_id)
+        .group_by(StoreStockBatch.store_id)
+    )).all()
+    for r in ss_q:
+        qty = float(r[1] or 0)
+        if qty > 0 and (not store_id or r[0] != store_id):
+            store_stocks.append({"store_id": r[0], "store_name": stores_map.get(r[0], ""), "stock": round(qty, 1)})
+
+    # 3. Supplier data
+    supplier_options = []
+    if product.primary_supplier:
+        supplier_options.append({"supplier": product.primary_supplier, "type": "primary", "ptr": product.ptr or 0, "landing_cost": product.landing_cost or 0})
+    if product.secondary_supplier:
+        supplier_options.append({"supplier": product.secondary_supplier, "type": "secondary", "ptr": product.ptr or 0, "landing_cost": product.landing_cost or 0})
+    if product.least_price_supplier and product.least_price_supplier not in [product.primary_supplier, product.secondary_supplier]:
+        supplier_options.append({"supplier": product.least_price_supplier, "type": "least_price", "ptr": product.ptr or 0, "landing_cost": product.landing_cost or 0})
+
+    # Decision
+    total_network = ho_stock + sum(s["stock"] for s in store_stocks)
+    if total_network > 0:
+        recommendation = "transfer"
+        reason = f"Stock available in network ({total_network:.0f} units). Recommend inter-store transfer."
+    else:
+        recommendation = "purchase"
+        best_supplier = min(supplier_options, key=lambda x: x["ptr"]) if supplier_options else None
+        reason = f"No network stock. Purchase from {best_supplier['supplier']} (PTR: {best_supplier['ptr']})" if best_supplier else "No network stock. No supplier data."
+
+    return {
+        "product_id": product_id, "product_name": product.product_name,
+        "recommendation": recommendation, "reason": reason,
+        "ho_stock": ho_stock, "store_stocks": store_stocks,
+        "total_network": total_network,
+        "supplier_options": supplier_options,
+        "best_supplier": min(supplier_options, key=lambda x: x["ptr"])["supplier"] if supplier_options else None,
+    }
+
+
+# ─── Enhanced Store Performance with CLV ────────────────────
+
+@router.get("/intel/store-performance")
+async def enhanced_store_performance(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """Enhanced store scorecard with CLV-per-store and CRM metrics."""
+    now = datetime.now(timezone.utc)
+    stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
+
+    results = []
+    for store in stores:
+        sid = store.id
+
+        # Inventory metrics
+        stock_value = float((await db.execute(
+            select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == sid)
+        )).scalar() or 0)
+        total_stock = float((await db.execute(
+            select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == sid)
+        )).scalar() or 0)
+        total_sales_units = float((await db.execute(
+            select(func.sum(StoreStockBatch.sales)).where(StoreStockBatch.store_id == sid)
+        )).scalar() or 0)
+        turnover = round(total_sales_units / total_stock, 2) if total_stock > 0 else 0
+
+        # CLV metrics
+        customer_count = (await db.execute(
+            select(func.count(CRMCustomer.id)).where(
+                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid)
+            )
+        )).scalar() or 0
+        rc_count = (await db.execute(
+            select(func.count(CRMCustomer.id)).where(and_(
+                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid),
+                CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]),
+            ))
+        )).scalar() or 0
+        total_clv = float((await db.execute(
+            select(func.sum(CRMCustomer.clv_value)).where(
+                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid)
+            )
+        )).scalar() or 0)
+        high_value_count = (await db.execute(
+            select(func.count(CRMCustomer.id)).where(and_(
+                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid),
+                CRMCustomer.clv_tier == "high",
+            ))
+        )).scalar() or 0
+
+        # CRM metrics
+        sales_revenue = float((await db.execute(
+            select(func.sum(SalesRecord.total_amount)).where(SalesRecord.store_id == sid)
+        )).scalar() or 0)
+        overdue_meds = (await db.execute(
+            select(func.count(MedicinePurchase.id)).where(and_(
+                MedicinePurchase.store_id == sid,
+                MedicinePurchase.status == "active",
+                MedicinePurchase.next_due_date < now,
+            ))
+        )).scalar() or 0
+
+        retention_pct = round(rc_count / customer_count * 100, 1) if customer_count > 0 else 0
+
+        results.append({
+            "store_id": sid, "store_name": store.store_name, "store_code": store.store_code,
+            "stock_value": round(stock_value, 2), "total_stock": round(total_stock, 1),
+            "turnover": turnover, "sales_revenue": round(sales_revenue, 2),
+            "customer_count": customer_count, "rc_count": rc_count,
+            "retention_pct": retention_pct, "high_value_customers": high_value_count,
+            "total_clv": round(total_clv, 2), "avg_clv": round(total_clv / customer_count, 2) if customer_count > 0 else 0,
+            "overdue_meds": overdue_meds,
+        })
+
+    results.sort(key=lambda x: -x["total_clv"])
+    return {"stores": results}

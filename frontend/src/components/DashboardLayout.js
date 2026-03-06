@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Package, Building2, Warehouse, Archive,
   BarChart3, ArrowLeftRight, ShoppingCart, Users, FileUp,
   ChevronLeft, ChevronRight, LogOut, Pill, Clock, UserCheck, ClipboardList, Trophy,
-  Heart, CalendarClock, Brain, TrendingUp, ShieldAlert, Zap,
+  Heart, CalendarClock, Brain, TrendingUp, ShieldAlert, Zap, Truck,
 } from 'lucide-react';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Separator } from '../components/ui/separator';
@@ -19,6 +19,7 @@ const navItems = [
   { label: 'Intelligence', path: '/intel', icon: Brain, roles: ['ADMIN', 'HO_STAFF'] },
   { label: 'Forecast', path: '/intel/forecast', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF'] },
   { label: 'Expiry Risk', path: '/intel/expiry', icon: ShieldAlert, roles: ['ADMIN', 'HO_STAFF'] },
+  { label: 'Suppliers', path: '/intel/suppliers', icon: Truck, roles: ['ADMIN', 'HO_STAFF'] },
   { label: 'Products', path: '/products', icon: Package, roles: ['ADMIN'] },
   { label: 'Stores', path: '/stores', icon: Building2, roles: ['ADMIN'] },
   { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['ADMIN', 'HO_STAFF'] },
