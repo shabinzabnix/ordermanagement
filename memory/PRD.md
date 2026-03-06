@@ -37,23 +37,32 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 10. Upload History tracking
 11. Admin Dashboard with KPI cards and recent activity
 
-## P0 - Remaining (Phase 2)
-- Inventory Aging Report (0-30, 30-60, 60-90, 90+ days)
-- RC Customer Management (recurring customers, refill reminders)
-- Staff Audit Log (all actions with staff name, timestamp)
-- Intelligent Inventory Engine (dead stock detection, transfer suggestions)
+## What's Been Implemented (Phase 2 - March 2026)
+12. Inventory Aging Report with bucket summary (0-30, 30-60, 60-90, 90+)
+13. Intelligent Inventory Engine - dead stock (60+ days no sales), slow moving (30+ days), excess detection
+14. Enhanced Dashboard with 8 KPIs, Dead Stock Alerts, Transfer Recommendations
+15. Excel Export for all 8 tables (Products, HO Stock, Store Stock, Consolidated, Transfers, Purchases, Uploads, Aging)
+16. RC Customer Management with refill reminders (in-app dashboard)
+17. Staff Audit Log tracking all user actions
+18. Batch-level detail views per product
+
+## P0 - Remaining (Phase 3)
+- Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
+- SMS notifications via Twilio for RC customers
+- Weekly dead stock report emails to store managers
+- Advanced reporting with date range filters
 
 ## P1 - Enhancements
-- Pagination on all list views
-- Export to Excel from all tables
-- Batch-level detail views
-- Advanced search and filtering
-- Email notifications for transfers/purchases
+- Mobile-responsive optimization
+- Product edit/delete from UI
+- Transfer quantity validation against actual stock
+- Role-based data filtering (store staff sees only their store)
+- Dashboard charts with Recharts
 
 ## P2 - Future
 - Demand prediction / AI forecasting
 - Auto reorder suggestions
-- Dead stock alerts automation
-- Mobile-responsive optimization
+- WhatsApp integration for customer reminders
 - Redis caching for high-traffic endpoints
-- Celery background workers for large uploads
+- Celery background workers for large uploads (10K+ rows)
+- Barcode/QR scanning integration
