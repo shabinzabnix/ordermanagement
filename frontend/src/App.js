@@ -17,6 +17,9 @@ import InventoryAgingPage from '@/pages/InventoryAgingPage';
 import RCCustomerPage from '@/pages/RCCustomerPage';
 import AuditLogPage from '@/pages/AuditLogPage';
 import StoreScorecardPage from '@/pages/StoreScorecardPage';
+import CRMDashboardPage from '@/pages/CRMDashboardPage';
+import CustomerProfilePage from '@/pages/CustomerProfilePage';
+import RefillDuePage from '@/pages/RefillDuePage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -59,7 +62,10 @@ function AppRoutes() {
       <Route path="/users" element={<ProtectedRoute><UserManagementPage /></ProtectedRoute>} />
       <Route path="/uploads" element={<ProtectedRoute><UploadHistoryPage /></ProtectedRoute>} />
       <Route path="/aging" element={<ProtectedRoute><InventoryAgingPage /></ProtectedRoute>} />
-      <Route path="/customers" element={<ProtectedRoute><RCCustomerPage /></ProtectedRoute>} />
+      <Route path="/customers" element={<ProtectedRoute><CRMDashboardPage /></ProtectedRoute>} />
+      <Route path="/crm" element={<ProtectedRoute><CRMDashboardPage /></ProtectedRoute>} />
+      <Route path="/crm/customer/:id" element={<ProtectedRoute><CustomerProfilePage /></ProtectedRoute>} />
+      <Route path="/crm/refill-due" element={<ProtectedRoute><RefillDuePage /></ProtectedRoute>} />
       <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

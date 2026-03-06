@@ -177,3 +177,73 @@ class AuditLog(Base):
     entity_id = Column(String(100))
     details = Column(Text)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CustomerType(str, enum.Enum):
+    WALKIN = "walkin"
+    RC = "rc"
+    CHRONIC = "chronic"
+    HIGH_VALUE = "high_value"
+
+
+class CallResult(str, enum.Enum):
+    REACHED = "reached"
+    NOT_REACHABLE = "not_reachable"
+    CALLBACK = "callback"
+    CONFIRMED = "confirmed"
+    DISCONTINUED = "discontinued"
+
+
+class CRMCustomer(Base):
+    __tablename__ = "crm_customers"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    mobile_number = Column(String(50), unique=True, nullable=False, index=True)
+    customer_name = Column(String(255), nullable=False)
+    gender = Column(String(20))
+    age = Column(Integer)
+    address = Column(Text)
+    first_store_id = Column(Integer, ForeignKey("stores.id"))
+    customer_type = Column(SQLEnum(CustomerType), default=CustomerType.WALKIN)
+    registration_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class MedicinePurchase(Base):
+    __tablename__ = "medicine_purchases"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey("crm_customers.id"), nullable=False, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    medicine_name = Column(String(500), nullable=False, index=True)
+    quantity = Column(Float, default=0)
+    days_of_medication = Column(Integer, default=0)
+    purchase_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    next_due_date = Column(DateTime(timezone=True), index=True)
+    status = Column(String(20), default="active")
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CRMCallLog(Base):
+    __tablename__ = "crm_call_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey("crm_customers.id"), nullable=False, index=True)
+    purchase_id = Column(Integer, ForeignKey("medicine_purchases.id"), nullable=True)
+    caller_name = Column(String(255))
+    call_result = Column(SQLEnum(CallResult), nullable=False)
+    remarks = Column(Text)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CRMTask(Base):
+    __tablename__ = "crm_tasks"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey("crm_customers.id"), nullable=False, index=True)
+    assigned_to = Column(Integer, ForeignKey("users.id"))
+    assigned_name = Column(String(255))
+    due_date = Column(DateTime(timezone=True))
+    status = Column(String(20), default="pending")
+    notes = Column(Text)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

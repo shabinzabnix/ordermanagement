@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Package, Building2, Warehouse, Archive,
   BarChart3, ArrowLeftRight, ShoppingCart, Users, FileUp,
   ChevronLeft, ChevronRight, LogOut, Pill, Clock, UserCheck, ClipboardList, Trophy,
+  Heart, CalendarClock,
 } from 'lucide-react';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Separator } from '../components/ui/separator';
@@ -24,7 +25,8 @@ const navItems = [
   { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['admin', 'ho_staff'] },
   { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['admin', 'ho_staff', 'store_staff'] },
   { label: 'Purchases', path: '/purchases', icon: ShoppingCart, roles: ['admin', 'ho_staff', 'store_staff'] },
-  { label: 'RC Customers', path: '/customers', icon: UserCheck, roles: ['admin', 'ho_staff', 'store_staff'] },
+  { label: 'CRM', path: '/crm', icon: Heart, roles: ['admin', 'ho_staff', 'store_staff'] },
+  { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['admin', 'ho_staff', 'store_staff'] },
   { label: 'Users', path: '/users', icon: Users, roles: ['admin'] },
   { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['admin'] },
   { label: 'Uploads', path: '/uploads', icon: FileUp, roles: ['admin', 'ho_staff'] },
