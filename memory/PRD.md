@@ -86,6 +86,10 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 47. Dead Stock Auto Redistribution Engine - Detects dead stock with demand at other stores, generates transfer recommendations with recoverable value
 48. CRM Task Automation - Auto-generates daily CRM call lists from due/overdue medicines. One-click task generation from Intelligence Dashboard
 
+## What's Been Implemented (Phase 7 - Intelligence Layer Batch B - March 2026)
+49. Customer Lifetime Value (CLV) - Calculates annual purchase value from SalesRecords. Tiers: High (>=10K), Medium (5-10K), Low (<5K). Auto-upgrades high-value customers
+50. Chronic Patient Identification Engine - Auto-detects diabetes/BP/thyroid/cardiac/respiratory/mental_health from medicine patterns (3+ purchases of same chronic medicine in 90 days). Tags visible on customer profiles and CRM dashboard
+
 ## P0 - Remaining (Phase 3)
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
