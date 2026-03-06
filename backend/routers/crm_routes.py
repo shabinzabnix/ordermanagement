@@ -515,6 +515,12 @@ SALES_COLUMNS = {
     "product id": "product_id", "item code": "product_id", "ho id": "product_id",
     "product name": "product_name", "item name": "product_name", "medicine": "product_name", "product": "product_name",
     "total amount": "total_amount", "amount": "total_amount", "total": "total_amount", "net amount": "total_amount",
+    "qty": "qty", "quantity": "qty",
+    "batch": "batch", "batch no": "batch",
+    "mrp": "mrp",
+    "net": "net_amount",
+    "category": "category",
+    "expiary": "expiry_date", "expiry": "expiry_date", "expiry date": "expiry_date",
 }
 SALES_REQUIRED = ["patient_name", "mobile_number", "product_name"]
 
@@ -529,10 +535,31 @@ async def upload_sales_report(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()
-    try:
-        df = pd.read_excel(BytesIO(content))
-    except Exception as e:
-        raise HTTPException(400, f"Failed to read Excel: {str(e)}")
+
+    # Try reading with different header rows (some pharmacy software adds title rows)
+    df = None
+    header_row_used = 0
+    for skip in [0, 1, 2, 3]:
+        try:
+            test_df = pd.read_excel(BytesIO(content), header=skip)
+            if test_df.empty:
+                continue
+            # Check if actual column names exist (not "Unnamed:")
+            cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
+            matched = sum(1 for c in cols_lower if c in SALES_COLUMNS)
+            if matched >= 3:  # At least 3 required columns found
+                df = test_df
+                header_row_used = skip
+                break
+        except Exception:
+            continue
+
+    if df is None:
+        try:
+            df = pd.read_excel(BytesIO(content))
+        except Exception as e:
+            raise HTTPException(400, f"Failed to read Excel: {str(e)}")
+
     if df.empty:
         raise HTTPException(400, "Excel file is empty")
 
@@ -546,8 +573,13 @@ async def upload_sales_report(
     mapped_fields = set(mapped.values())
     missing = [f for f in SALES_REQUIRED if f not in mapped_fields]
     if missing:
-        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your Excel columns: {original_cols}")
+        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your Excel columns (row {header_row_used+1}): {original_cols}")
     df = df.rename(columns=mapped)
+
+    # Validate store exists
+    store_check = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
+    if not store_check:
+        raise HTTPException(400, f"Store ID {store_id} does not exist. Please create the store first.")
 
     batch_id = str(uuid.uuid4())[:12]
     success, failed, new_customers, updated_customers = 0, 0, 0, 0
@@ -558,7 +590,7 @@ async def upload_sales_report(
             mobile = str(row.get("mobile_number", "")).strip().replace(" ", "").replace("-", "")
             name = str(row.get("patient_name", "")).strip()
             product = str(row.get("product_name", "")).strip()
-            if not mobile or not name or not product or mobile == "nan" or name == "nan":
+            if not mobile or not name or not product or mobile == "nan" or name == "nan" or product == "nan":
                 failed += 1
                 continue
 
@@ -568,7 +600,6 @@ async def upload_sales_report(
                 mobile_clean = mobile_clean[-10:]
             if len(mobile_clean) < 10:
                 failed += 1
-                errors.append(f"Row {idx+2}: Invalid mobile '{mobile}'")
                 continue
 
             # Find or create customer
@@ -616,11 +647,22 @@ async def upload_sales_report(
             ))
             success += 1
         except Exception as e:
-            errors.append(f"Row {idx+2}: {str(e)}")
+            await db.rollback()
+            errors.append(f"Row {idx+2}: {str(e)[:80]}")
             failed += 1
 
-    await _log(db, user, f"Uploaded sales report: {file.filename} for store {store_id}", "sales_upload", store_id)
-    await db.commit()
+        # Batch commit every 500 rows for performance
+        if success > 0 and success % 500 == 0:
+            try:
+                await db.commit()
+            except Exception:
+                await db.rollback()
+
+    try:
+        await _log(db, user, f"Uploaded sales report: {file.filename} for store {store_id}", "sales_upload", store_id)
+        await db.commit()
+    except Exception:
+        await db.rollback()
     return {
         "message": "Sales report uploaded",
         "total": len(df), "success": success, "failed": failed,
