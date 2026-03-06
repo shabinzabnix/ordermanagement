@@ -1,0 +1,155 @@
+{
+  "project_name": "Sahakar Hyper Pharmacy Network",
+  "identity": {
+    "designer_persona": "E1: The Anti-AI Designer",
+    "archetype": "Medical Precision & Authority",
+    "core_philosophy": "Functionality is Beauty. Data is the Hero.",
+    "emotional_tone": "Trust, Efficiency, Clinical Cleanliness, Precision",
+    "forbidden_elements": [
+      "Teal Green/Blue (#1B93A4)",
+      "Space Grotesk Font",
+      "Generic 'SaaS Blue' Gradients",
+      "Soft/Rounded 'Bubbly' UI",
+      "Center-aligned everything",
+      "Inter font for Headings"
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, sans-serif",
+      "body": "Public Sans, sans-serif",
+      "code": "JetBrains Mono, monospace"
+    },
+    "installation_method": "Import from Google Fonts in index.css",
+    "google_fonts_url": "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Public+Sans:wght@300;400;500;600;700&display=swap",
+    "usage_rules": {
+      "headings": "Use Manrope. Tight tracking (-0.02em). Weights: 600/700/800. No Inter.",
+      "body": "Use Public Sans. Excellent for numbers and tables. Weights: 400/500.",
+      "data_tables": "Use Public Sans with Tabular Nums (font-variant-numeric: tabular-nums) for alignment."
+    }
+  },
+  "colors": {
+    "palette_name": "Clinical Authority",
+    "mode_strategy": "Light Mode Primary (Clinical), Dark Mode Secondary (Power User)",
+    "primary": {
+      "DEFAULT": "#0F172A",
+      "foreground": "#F8FAFC",
+      "description": "Deep Royal Blue / Slate 900. Used for Sidebar, Header, Primary Text."
+    },
+    "secondary": {
+      "DEFAULT": "#F1F5F9",
+      "foreground": "#0F172A",
+      "description": "Slate 100. Used for secondary buttons, backgrounds."
+    },
+    "accent": {
+      "DEFAULT": "#0EA5E9",
+      "foreground": "#FFFFFF",
+      "description": "Sky 500. Used for active states, primary actions, highlights."
+    },
+    "functional": {
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "destructive": "#E11D48",
+      "info": "#3B82F6"
+    },
+    "background": {
+      "DEFAULT": "#F8FAFC",
+      "paper": "#FFFFFF",
+      "subtle": "#F1F5F9"
+    },
+    "borders": {
+      "DEFAULT": "#E2E8F0",
+      "focus": "#0EA5E9"
+    }
+  },
+  "layout": {
+    "grid_system": "Bento Grid Mode B (High Density)",
+    "container_style": "Fluid width with max-w-[1920px] center constraint for ultra-wide screens.",
+    "spacing_scale": "Tailwind Scale. Use generous padding (p-6, p-8) for containers, tight padding (p-2, p-3) for data cells.",
+    "radius": "rounded-sm (2px-4px) or rounded-md (6px). Avoid rounded-xl or full pills except for status badges.",
+    "structure": {
+      "sidebar": "Fixed left, collapsible (w-64 -> w-16). Dark theme sidebar for contrast.",
+      "header": "Sticky top, white background, shadow-sm. Contains Global Search & User Profile.",
+      "main_content": "bg-slate-50 (light gray) to differentiate from white cards."
+    }
+  },
+  "components": {
+    "library": "Shadcn/UI + Tailwind",
+    "customization_rules": {
+      "buttons": "Sharp edges (rounded-sm). Font-medium. Uppercase text for 'add' actions is allowed but not mandatory.",
+      "cards": "White bg, shadow-sm, border-slate-200. Optional: Top border colored by status (e.g., border-t-4 border-red-500 for critical alerts).",
+      "inputs": "bg-white, border-slate-300. Focus: ring-2 ring-sky-100 border-sky-500.",
+      "tables": "THE HERO COMPONENT. Dense. Sticky header. Row hover: bg-slate-50. Border-b only. Cell padding: py-2 px-4. Header: uppercase text-xs text-slate-500 font-bold tracking-wider."
+    },
+    "specific_components": {
+      "data_table": {
+        "features": ["Virtualization (react-window) for 50k+ rows", "Resizable Columns", "Column Visibility Toggle", "Density Toggle (Compact/Comfortable)"],
+        "style": "Clean, tabular-nums, striped rows (optional via prop)."
+      },
+      "stats_card": {
+        "style": "Simple metric, sparkline (optional), icon in top-right with subtle bg color.",
+        "example": "Total SKUs | 54,230 | [Icon]"
+      },
+      "modal": {
+        "style": "Backdrop blur-sm. Sharp corners. Clearly defined header/footer."
+      }
+    }
+  },
+  "visual_enhancers": {
+    "shadows": "Layered shadows. shadow-sm for cards, shadow-md for dropdowns/modals.",
+    "glassmorphism": "Use sparingly. Only for sticky headers or toasts. backdrop-blur-md bg-white/80.",
+    "motion": {
+      "hover": "transform -translate-y-[1px] transition-all duration-200",
+      "enter": "fade-in slide-in-from-bottom-2 duration-300",
+      "interaction": "Micro-interactions on buttons. Active state scale-95."
+    },
+    "icons": {
+      "library": "Lucide React (Default) or Phosphor Icons (for more technical feel)",
+      "style": "Stroke width 1.5px or 2px. Consistent sizing (w-4 h-4 or w-5 h-5)."
+    }
+  },
+  "images": {
+    "strategy": "Minimal use of photos. Focus on data. Use photos only for Login Page background and User Avatars.",
+    "login_background": {
+      "url": "https://images.unsplash.com/photo-1552234458-9a63237d6d93?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "alt": "Abstract Blue and White Pharmaceutical Blister Pack",
+      "style": "Cover, overlay with black/50 or blue/90 for text readability."
+    },
+    "empty_states": "Use Lucide Icons in a large circular container with muted bg. No cartoony illustrations."
+  },
+  "dashboard_pages": {
+    "login": {
+      "layout": "Split screen. Left: Branding/Image. Right: Login Form.",
+      "visuals": "Clean, authoritative. Logo prominent."
+    },
+    "admin_dashboard": {
+      "layout": "Bento Grid. Top: 4-5 KPI Cards. Middle: Transfer Suggestions (Table) + Low Stock Alerts (List). Bottom: Recent Activity.",
+      "key_elements": "Quick Actions (Add Product, Stock Upload)."
+    },
+    "inventory_master": {
+      "layout": "Full-width Data Table. Filter bar on top (Category, Supplier, Stock Status).",
+      "features": "Excel Import/Export buttons prominently displayed."
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure text-slate-500 is readable on white. Use text-slate-600 if needed.",
+    "focus_states": "Visible ring-2 ring-offset-2 ring-sky-500 on keyboard focus.",
+    "aria_labels": "Mandatory for all icon-only buttons."
+  },
+  "instructions_to_main_agent": [
+    "INSTALL FONTS FIRST: Add the Google Fonts link to public/index.html or import in index.css.",
+    "CONFIGURE TAILWIND: Update tailwind.config.js to use the 'Manrope' and 'Public Sans' font families.",
+    "BUILD LAYOUT WRAPPER: Create a DashboardLayout component with Sidebar and Navbar.",
+    "TABLE COMPONENT: Do not just use the default Shadcn table. Wrap it in a container with 'overflow-auto' and 'max-h-[calc(100vh-200px)]' for sticky headers.",
+    "FORMS: Use Shadcn Form + React Hook Form + Zod. Validate strictly.",
+    "MOCK DATA: When backend is not ready, generate realistic pharmacy data (e.g., 'Amoxicillin 500mg', 'Cipla', 'Batch #B123').",
+    "TESTING: Add data-testid to all inputs, buttons, and table rows."
+  ],
+  "universal_guidelines": [
+    "Do not use gradients for backgrounds, stick to solid colors or subtle patterns.",
+    "Avoid centering text in data tables; align numbers to the right, text to the left.",
+    "Use 'sonner' for all toast notifications.",
+    "Ensure all interactive elements have hover and active states.",
+    "Don't ask the user for clarification; assume the persona of an expert consultant."
+  ]
+}
