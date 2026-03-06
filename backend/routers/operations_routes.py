@@ -291,7 +291,7 @@ async def get_consolidated_stock(
         select(HOStockBatch.product_id, func.sum(HOStockBatch.closing_stock).label("t"))
         .where(HOStockBatch.product_id.in_(pids)).group_by(HOStockBatch.product_id)
     )
-    ho_stock = {r.product_id: r.t or 0 for r in ho_result.all()}
+    ho_stock = {r[0]: float(r[1] or 0) for r in ho_result.all()}
 
     store_result = await db.execute(
         select(StoreStockBatch.ho_product_id, StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
@@ -300,17 +300,15 @@ async def get_consolidated_stock(
     )
     store_stock = {}
     for r in store_result.all():
-        store_stock.setdefault(r.ho_product_id, {})[r.store_id] = r.t or 0
+        store_stock.setdefault(r[0], {})[r[1]] = float(r[2] or 0)
 
     consolidated = []
     for p in products:
         ho = ho_stock.get(p.product_id, 0)
-        ho = ho if isinstance(ho, (int, float)) else 0
         sd = {}
         total_stock = ho
         for s in stores:
             qty = store_stock.get(p.product_id, {}).get(s.id, 0)
-            qty = qty if isinstance(qty, (int, float)) else 0
             sd[str(s.id)] = qty
             total_stock += qty
         consolidated.append({
