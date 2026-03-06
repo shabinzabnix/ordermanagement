@@ -85,6 +85,7 @@ export default function UserManagementPage() {
                       <SelectItem value="ADMIN">Admin</SelectItem>
                       <SelectItem value="HO_STAFF">HO Staff</SelectItem>
                       <SelectItem value="STORE_STAFF">Store Staff</SelectItem>
+                      <SelectItem value="CRM_STAFF">CRM Staff</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
