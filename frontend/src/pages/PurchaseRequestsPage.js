@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { ShoppingCart, Plus, AlertTriangle, Download } from 'lucide-react';
+import { ShoppingCart, Plus, AlertTriangle, Download, Search } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
 
 export default function PurchaseRequestsPage() {
@@ -28,19 +28,39 @@ export default function PurchaseRequestsPage() {
   });
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
+  const [productSearch, setProductSearch] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestRef = useRef(null);
 
   const loadPurchases = () => { api.get('/purchases').then(r => setPurchases(r.data.purchases)).catch(() => {}); };
   useEffect(() => { loadPurchases(); }, []);
   useEffect(() => {
     api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {});
-    api.get('/products', { params: { limit: 500 } }).then(r => setProducts(r.data.products)).catch(() => {});
   }, []);
-  // Auto-set store for store_staff
   useEffect(() => {
     if (user?.role === 'STORE_STAFF' && user?.store_id && !form.store_id) {
       setForm(f => ({ ...f, store_id: String(user.store_id) }));
     }
   }, [user]);
+
+  // Product search with debounce
+  useEffect(() => {
+    if (productSearch.length < 2) { setSuggestions([]); return; }
+    const timer = setTimeout(() => {
+      api.get('/products', { params: { search: productSearch, limit: 15 } })
+        .then(r => { setSuggestions(r.data.products); setShowSuggestions(true); })
+        .catch(() => {});
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [productSearch]);
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e) => { if (suggestRef.current && !suggestRef.current.contains(e.target)) setShowSuggestions(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -111,15 +131,43 @@ export default function PurchaseRequestsPage() {
                   </Select>
                 </div>
                 <TabsContent value="registered" className="mt-0 space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="font-body text-xs">Product *</Label>
-                    <Select value={form.product_id} onValueChange={v => {
-                      const p = products.find(p => p.product_id === v);
-                      setForm({...form, product_id: v, product_name: p?.product_name || ''});
-                    }}>
-                      <SelectTrigger className="rounded-sm" data-testid="purchase-product"><SelectValue placeholder="Select product" /></SelectTrigger>
-                      <SelectContent>{products.map(p => <SelectItem key={p.product_id} value={p.product_id}>{p.product_name}</SelectItem>)}</SelectContent>
-                    </Select>
+                  <div className="space-y-1.5" ref={suggestRef}>
+                    <Label className="font-body text-xs">Product * <span className="text-slate-400 font-normal">(type to search)</span></Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <Input
+                        data-testid="purchase-product-search"
+                        placeholder="Search by product name or ID..."
+                        value={productSearch}
+                        onChange={e => { setProductSearch(e.target.value); if (!e.target.value) setForm({...form, product_id: '', product_name: ''}); }}
+                        onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                        className="rounded-sm pl-9 font-body"
+                        autoComplete="off"
+                      />
+                      {showSuggestions && suggestions.length > 0 && (
+                        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[200px] overflow-auto">
+                          {suggestions.map(p => (
+                            <button
+                              key={p.product_id}
+                              type="button"
+                              data-testid={`suggest-${p.product_id}`}
+                              className="w-full text-left px-3 py-2 hover:bg-sky-50 transition-colors border-b border-slate-50 last:border-0"
+                              onClick={() => {
+                                setForm({...form, product_id: p.product_id, product_name: p.product_name});
+                                setProductSearch(p.product_name);
+                                setShowSuggestions(false);
+                              }}
+                            >
+                              <p className="text-[13px] font-body font-medium text-slate-800">{p.product_name}</p>
+                              <p className="text-[10px] font-mono text-slate-400">{p.product_id} | MRP: {p.mrp} | {p.category || 'No category'}</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {form.product_id && (
+                      <p className="text-[10px] font-body text-emerald-600">Selected: {form.product_name} ({form.product_id})</p>
+                    )}
                   </div>
                 </TabsContent>
                 <TabsContent value="non-registered" className="mt-0 space-y-3">
