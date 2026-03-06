@@ -138,6 +138,22 @@ class PurchaseRequest(Base):
     status = Column(SQLEnum(PurchaseStatus), default=PurchaseStatus.PENDING)
     network_stock_info = Column(Text, nullable=True)
     requested_by = Column(Integer, ForeignKey("users.id"))
+    # CRM verification stage
+    crm_status = Column(String(20), default="pending")
+    crm_verified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    crm_remarks = Column(Text, nullable=True)
+    crm_verified_at = Column(DateTime(timezone=True), nullable=True)
+    # HO approval stage
+    ho_status = Column(String(20), default="pending")
+    assigned_supplier = Column(String(255), nullable=True)
+    ho_remarks = Column(Text, nullable=True)
+    ho_approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    ho_approved_at = Column(DateTime(timezone=True), nullable=True)
+    tat_days = Column(Integer, nullable=True)
+    expected_delivery = Column(DateTime(timezone=True), nullable=True)
+    # Fulfillment tracking
+    fulfillment_status = Column(String(20), default="not_started")
+    fulfillment_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

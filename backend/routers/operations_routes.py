@@ -10,7 +10,7 @@ from models import (
 from auth import get_current_user, require_roles
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 from io import BytesIO
 import json
@@ -570,6 +570,14 @@ async def get_purchase_requests(
              "is_registered_product": p.is_registered_product,
              "purchase_reason": p.purchase_reason or "customer_enquiry",
              "status": p.status.value if isinstance(p.status, PurchaseStatus) else p.status,
+             "crm_status": p.crm_status or "pending",
+             "crm_remarks": p.crm_remarks,
+             "ho_status": p.ho_status or "pending",
+             "assigned_supplier": p.assigned_supplier,
+             "ho_remarks": p.ho_remarks,
+             "tat_days": p.tat_days,
+             "expected_delivery": p.expected_delivery.isoformat() if p.expected_delivery else None,
+             "fulfillment_status": p.fulfillment_status or "not_started",
              "network_stock_info": json.loads(p.network_stock_info) if p.network_stock_info else None,
              "created_at": p.created_at.isoformat() if p.created_at else None}
             for p in purchases
@@ -577,19 +585,113 @@ async def get_purchase_requests(
     }
 
 
-@router.put("/purchases/{purchase_id}/approve")
-async def approve_purchase(
+@router.put("/purchases/{purchase_id}/crm-verify")
+async def crm_verify_purchase(
     purchase_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "CRM_STAFF")),
+):
+    """CRM team verifies customer enquiry before forwarding to HO."""
+    purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()
+    if not purchase:
+        raise HTTPException(404, "Purchase request not found")
+    purchase.crm_status = "verified"
+    purchase.crm_verified_by = user["user_id"]
+    purchase.crm_verified_at = datetime.now(timezone.utc)
+    purchase.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": "Purchase verified by CRM"}
+
+
+@router.put("/purchases/{purchase_id}/crm-reject")
+async def crm_reject_purchase(
+    purchase_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "CRM_STAFF")),
 ):
     purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()
     if not purchase:
         raise HTTPException(404, "Purchase request not found")
-    purchase.status = PurchaseStatus.APPROVED
+    purchase.crm_status = "rejected"
+    purchase.crm_verified_by = user["user_id"]
+    purchase.crm_verified_at = datetime.now(timezone.utc)
+    purchase.status = PurchaseStatus.REJECTED
     purchase.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"message": "Purchase request approved"}
+    return {"message": "Purchase rejected by CRM"}
+
+
+class CRMRemarkReq(BaseModel):
+    remarks: str
+
+
+@router.put("/purchases/{purchase_id}/crm-remarks")
+async def add_crm_remarks(
+    purchase_id: int, data: CRMRemarkReq,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "CRM_STAFF")),
+):
+    purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()
+    if not purchase:
+        raise HTTPException(404, "Purchase request not found")
+    purchase.crm_remarks = data.remarks
+    purchase.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": "CRM remarks updated"}
+
+
+class HOApproveReq(BaseModel):
+    supplier: str
+    tat_days: int = 0
+    ho_remarks: str = ""
+
+
+@router.put("/purchases/{purchase_id}/ho-approve")
+async def ho_approve_purchase(
+    purchase_id: int, data: HOApproveReq,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """HO approves with supplier assignment and TAT."""
+    purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()
+    if not purchase:
+        raise HTTPException(404, "Purchase request not found")
+    purchase.ho_status = "approved"
+    purchase.assigned_supplier = data.supplier
+    purchase.tat_days = data.tat_days
+    purchase.ho_remarks = data.ho_remarks
+    purchase.ho_approved_by = user["user_id"]
+    purchase.ho_approved_at = datetime.now(timezone.utc)
+    purchase.expected_delivery = datetime.now(timezone.utc) + timedelta(days=data.tat_days) if data.tat_days > 0 else None
+    purchase.status = PurchaseStatus.APPROVED
+    purchase.fulfillment_status = "ordered"
+    purchase.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": "Purchase approved by HO", "expected_delivery": purchase.expected_delivery.isoformat() if purchase.expected_delivery else None}
+
+
+class FulfillmentReq(BaseModel):
+    fulfillment_status: str
+    ho_remarks: str = ""
+
+
+@router.put("/purchases/{purchase_id}/fulfillment")
+async def update_fulfillment(
+    purchase_id: int, data: FulfillmentReq,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """Update fulfillment status: ordered → dispatched → delivered."""
+    purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()
+    if not purchase:
+        raise HTTPException(404, "Purchase request not found")
+    purchase.fulfillment_status = data.fulfillment_status
+    if data.ho_remarks:
+        purchase.ho_remarks = data.ho_remarks
+    purchase.fulfillment_updated_at = datetime.now(timezone.utc)
+    purchase.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": f"Fulfillment updated to {data.fulfillment_status}"}
 
 
 # --- Stock Availability ---
