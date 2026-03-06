@@ -38,7 +38,7 @@ export default function TransfersPage() {
 
   // Auto-set requesting store for store_staff
   useEffect(() => {
-    if (user?.role === 'store_staff' && user?.store_id && !form.requesting_store_id) {
+    if (user?.role === 'STORE_STAFF' && user?.store_id && !form.requesting_store_id) {
       setForm(f => ({ ...f, requesting_store_id: String(user.store_id) }));
     }
   }, [user]);
@@ -72,7 +72,7 @@ export default function TransfersPage() {
       });
       toast.success('Transfer request created');
       setOpen(false);
-      setForm({ requesting_store_id: user?.role === 'store_staff' ? String(user?.store_id || '') : '', source_store_id: '', product_id: '', product_name: '', batch: '', quantity: '' });
+      setForm({ requesting_store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', source_store_id: '', product_id: '', product_name: '', batch: '', quantity: '' });
       setAvailability(null);
       loadTransfers();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
@@ -117,7 +117,7 @@ export default function TransfersPage() {
                   <div className="space-y-1.5">
                     <Label className="font-body text-xs">Requesting Store *</Label>
                     <Select value={form.requesting_store_id} onValueChange={v => setForm({...form, requesting_store_id: v})}
-                      disabled={user?.role === 'store_staff'}>
+                      disabled={user?.role === 'STORE_STAFF'}>
                       <SelectTrigger className="rounded-sm" data-testid="transfer-req-store"><SelectValue placeholder="Select" /></SelectTrigger>
                       <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
                     </Select>

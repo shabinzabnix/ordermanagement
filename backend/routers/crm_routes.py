@@ -1,15 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 from database import get_db
 from models import (
-    CRMCustomer, MedicinePurchase, CRMCallLog, CRMTask,
+    CRMCustomer, MedicinePurchase, CRMCallLog, CRMTask, SalesRecord,
     Store, CustomerType, CallResult, AuditLog,
 )
 from auth import get_current_user, require_roles
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+import pandas as pd
+from io import BytesIO
+import uuid
 
 router = APIRouter()
 
@@ -21,7 +24,7 @@ async def _log(db, user, action, etype=None, eid=None):
 
 def _store_filter(user):
     """Returns store_id if user is store_staff, else None."""
-    if user.get("role") == "store_staff" and user.get("store_id"):
+    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
         return user["store_id"]
     return None
 
@@ -494,3 +497,388 @@ async def search_customers_by_medicine(
                              "type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type}
                             for c in customers]}
     return {"results": []}
+
+
+# ─── Sales Report Upload ────────────────────────────────────
+
+SALES_COLUMNS = {
+    "date of invoice": "invoice_date", "invoice date": "invoice_date", "date": "invoice_date",
+    "entry number": "entry_number", "entry no": "entry_number", "invoice no": "entry_number",
+    "patient name": "patient_name", "customer name": "patient_name", "name": "patient_name",
+    "mobile number": "mobile_number", "mobile": "mobile_number", "phone": "mobile_number", "contact": "mobile_number",
+    "product id": "product_id", "item code": "product_id",
+    "product name": "product_name", "item name": "product_name", "medicine": "product_name",
+    "total amount": "total_amount", "amount": "total_amount", "total": "total_amount", "net amount": "total_amount",
+}
+SALES_REQUIRED = ["patient_name", "mobile_number", "product_name"]
+
+
+@router.post("/crm/sales-upload")
+async def upload_sales_report(
+    store_id: int = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "Only Excel files accepted")
+    content = await file.read()
+    try:
+        df = pd.read_excel(BytesIO(content))
+    except Exception as e:
+        raise HTTPException(400, f"Failed to read Excel: {str(e)}")
+    if df.empty:
+        raise HTTPException(400, "Excel file is empty")
+
+    # Map columns
+    df.columns = [str(col).strip().lower().replace('_', ' ') for col in df.columns]
+    mapped = {}
+    for col in df.columns:
+        if col in SALES_COLUMNS:
+            mapped[col] = SALES_COLUMNS[col]
+    mapped_fields = set(mapped.values())
+    missing = [f for f in SALES_REQUIRED if f not in mapped_fields]
+    if missing:
+        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}")
+    df = df.rename(columns=mapped)
+
+    batch_id = str(uuid.uuid4())[:12]
+    success, failed, new_customers, updated_customers = 0, 0, 0, 0
+    errors = []
+
+    for idx, row in df.iterrows():
+        try:
+            mobile = str(row.get("mobile_number", "")).strip().replace(" ", "").replace("-", "")
+            name = str(row.get("patient_name", "")).strip()
+            product = str(row.get("product_name", "")).strip()
+            if not mobile or not name or not product or mobile == "nan" or name == "nan":
+                failed += 1
+                continue
+
+            # Clean mobile: keep last 10 digits
+            mobile_clean = ''.join(filter(str.isdigit, mobile))
+            if len(mobile_clean) > 10:
+                mobile_clean = mobile_clean[-10:]
+            if len(mobile_clean) < 10:
+                failed += 1
+                errors.append(f"Row {idx+2}: Invalid mobile '{mobile}'")
+                continue
+
+            # Find or create customer
+            cust = (await db.execute(select(CRMCustomer).where(CRMCustomer.mobile_number == mobile_clean))).scalar_one_or_none()
+            if not cust:
+                cust = CRMCustomer(
+                    mobile_number=mobile_clean, customer_name=name,
+                    first_store_id=store_id, assigned_store_id=store_id,
+                    customer_type=CustomerType.WALKIN, created_by=user["user_id"],
+                )
+                db.add(cust)
+                await db.flush()
+                new_customers += 1
+            else:
+                if cust.customer_name != name and name != "nan":
+                    cust.customer_name = name
+                updated_customers += 1
+
+            # Parse invoice date
+            inv_date = None
+            raw_date = row.get("invoice_date")
+            if pd.notna(raw_date):
+                try:
+                    if isinstance(raw_date, str):
+                        for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"]:
+                            try:
+                                inv_date = datetime.strptime(raw_date.strip(), fmt).replace(tzinfo=timezone.utc)
+                                break
+                            except ValueError:
+                                continue
+                    else:
+                        inv_date = pd.Timestamp(raw_date).to_pydatetime().replace(tzinfo=timezone.utc)
+                except Exception:
+                    inv_date = datetime.now(timezone.utc)
+
+            db.add(SalesRecord(
+                store_id=store_id, customer_id=cust.id,
+                invoice_date=inv_date or datetime.now(timezone.utc),
+                entry_number=str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None,
+                patient_name=name, mobile_number=mobile_clean,
+                product_id=str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
+                product_name=product,
+                total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
+                upload_batch_id=batch_id,
+            ))
+            success += 1
+        except Exception as e:
+            errors.append(f"Row {idx+2}: {str(e)}")
+            failed += 1
+
+    await _log(db, user, f"Uploaded sales report: {file.filename} for store {store_id}", "sales_upload", store_id)
+    await db.commit()
+    return {
+        "message": "Sales report uploaded",
+        "total": len(df), "success": success, "failed": failed,
+        "new_customers": new_customers, "updated_customers": updated_customers,
+        "batch_id": batch_id, "errors": errors[:20],
+    }
+
+
+# ─── Sales Records (for medication duration update) ────────
+
+@router.get("/crm/sales")
+async def list_sales(
+    store_id: int = Query(None), customer_id: int = Query(None),
+    pending_only: bool = Query(False),
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    query = select(SalesRecord)
+    if sf:
+        query = query.where(SalesRecord.store_id == sf)
+    elif store_id:
+        query = query.where(SalesRecord.store_id == store_id)
+    if customer_id:
+        query = query.where(SalesRecord.customer_id == customer_id)
+    if pending_only:
+        query = query.where(SalesRecord.medication_updated == False)
+
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar()
+    records = (await db.execute(query.order_by(SalesRecord.invoice_date.desc()).offset((page - 1) * limit).limit(limit))).scalars().all()
+
+    sids = set(r.store_id for r in records)
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    return {
+        "records": [{
+            "id": r.id, "store_id": r.store_id, "store_name": smap.get(r.store_id, ""),
+            "customer_id": r.customer_id, "patient_name": r.patient_name, "mobile_number": r.mobile_number,
+            "invoice_date": r.invoice_date.isoformat() if r.invoice_date else None,
+            "entry_number": r.entry_number, "product_name": r.product_name,
+            "total_amount": r.total_amount or 0, "days_of_medication": r.days_of_medication,
+            "next_due_date": r.next_due_date.isoformat() if r.next_due_date else None,
+            "medication_updated": r.medication_updated,
+        } for r in records],
+        "total": total, "page": page, "limit": limit,
+    }
+
+
+class UpdateMedicationReq(BaseModel):
+    days_of_medication: int
+
+
+@router.put("/crm/sales/{record_id}/medication")
+async def update_medication_days(
+    record_id: int, data: UpdateMedicationReq,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    r = (await db.execute(select(SalesRecord).where(SalesRecord.id == record_id))).scalar_one_or_none()
+    if not r:
+        raise HTTPException(404, "Record not found")
+
+    r.days_of_medication = data.days_of_medication
+    r.next_due_date = (r.invoice_date or datetime.now(timezone.utc)) + timedelta(days=data.days_of_medication)
+    r.medication_updated = True
+
+    # Also create/update MedicinePurchase for refill tracking
+    if r.customer_id and r.product_name:
+        prev = (await db.execute(select(MedicinePurchase).where(and_(
+            MedicinePurchase.customer_id == r.customer_id,
+            MedicinePurchase.medicine_name == r.product_name,
+            MedicinePurchase.status == "active",
+        )))).scalars().all()
+        for p in prev:
+            p.status = "completed"
+
+        db.add(MedicinePurchase(
+            customer_id=r.customer_id, store_id=r.store_id,
+            medicine_name=r.product_name, quantity=0,
+            days_of_medication=data.days_of_medication,
+            purchase_date=r.invoice_date or datetime.now(timezone.utc),
+            next_due_date=r.next_due_date, status="active",
+            created_by=user["user_id"],
+        ))
+
+        # Auto RC classification
+        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+        count = (await db.execute(select(func.count(SalesRecord.id)).where(and_(
+            SalesRecord.customer_id == r.customer_id,
+            SalesRecord.product_name == r.product_name,
+            SalesRecord.invoice_date >= cutoff,
+        )))).scalar() or 0
+        if count >= 3:
+            cust = (await db.execute(select(CRMCustomer).where(CRMCustomer.id == r.customer_id))).scalar_one_or_none()
+            if cust and cust.customer_type == CustomerType.WALKIN:
+                cust.customer_type = CustomerType.RC
+
+    await db.commit()
+    return {"message": "Medication updated", "next_due_date": r.next_due_date.isoformat() if r.next_due_date else None}
+
+
+# ─── Customer Allocation ────────────────────────────────────
+
+class AllocationReq(BaseModel):
+    customer_id: int
+    store_id: int
+
+
+@router.put("/crm/customers/{customer_id}/allocate")
+async def allocate_customer(
+    customer_id: int, data: AllocationReq,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "CRM_STAFF")),
+):
+    c = (await db.execute(select(CRMCustomer).where(CRMCustomer.id == customer_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "Customer not found")
+    c.assigned_store_id = data.store_id
+    await _log(db, user, f"Allocated customer {c.customer_name} to store {data.store_id}", "crm_allocation", customer_id)
+    await db.commit()
+    return {"message": "Customer allocated"}
+
+
+# ─── Adherence Scoring ──────────────────────────────────────
+
+@router.get("/crm/adherence")
+async def adherence_scores(
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Rule-based adherence scoring for all customers with active medicines."""
+    now = datetime.now(timezone.utc)
+    sf = _store_filter(user)
+
+    mp_q = select(MedicinePurchase).where(MedicinePurchase.status == "active")
+    if sf:
+        mp_q = mp_q.where(MedicinePurchase.store_id == sf)
+    elif store_id:
+        mp_q = mp_q.where(MedicinePurchase.store_id == store_id)
+
+    purchases = (await db.execute(mp_q)).scalars().all()
+    cids = set(p.customer_id for p in purchases)
+    if not cids:
+        return {"scores": [], "summary": {"high": 0, "medium": 0, "low": 0, "unknown": 0}}
+
+    cmap = {c.id: c for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(cids)))).scalars().all()}
+    sids = set(p.store_id for p in purchases)
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    customer_scores = {}
+    for p in purchases:
+        cid = p.customer_id
+        if cid not in customer_scores:
+            customer_scores[cid] = {"delays": [], "medicines": []}
+        if p.next_due_date:
+            delay = (now - p.next_due_date).days
+            customer_scores[cid]["delays"].append(delay)
+        customer_scores[cid]["medicines"].append(p.medicine_name)
+
+    results = []
+    summary = {"high": 0, "medium": 0, "low": 0}
+    for cid, data in customer_scores.items():
+        c = cmap.get(cid)
+        if not c:
+            continue
+        max_delay = max(data["delays"]) if data["delays"] else 0
+        if max_delay <= 3:
+            score = "high"
+        elif max_delay <= 10:
+            score = "medium"
+        else:
+            score = "low"
+        summary[score] += 1
+        # Update on customer record
+        c.adherence_score = score
+        results.append({
+            "customer_id": cid, "customer_name": c.customer_name, "mobile": c.mobile_number,
+            "store_name": smap.get(c.assigned_store_id or c.first_store_id, ""),
+            "adherence": score, "max_delay_days": max_delay,
+            "active_medicines": len(set(data["medicines"])),
+        })
+
+    await db.commit()
+    results.sort(key=lambda x: -x["max_delay_days"])
+    return {"scores": results, "summary": summary}
+
+
+# ─── CRM Performance Reports ────────────────────────────────
+
+@router.get("/crm/reports/performance")
+async def crm_performance(
+    days: int = Query(30),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "CRM_STAFF")),
+):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    now = datetime.now(timezone.utc)
+
+    # Calls in period
+    total_calls = (await db.execute(
+        select(func.count(CRMCallLog.id)).where(CRMCallLog.created_at >= cutoff)
+    )).scalar() or 0
+
+    # Call results breakdown
+    call_results = (await db.execute(
+        select(CRMCallLog.call_result, func.count(CRMCallLog.id).label("cnt"))
+        .where(CRMCallLog.created_at >= cutoff)
+        .group_by(CRMCallLog.call_result)
+    )).all()
+    result_breakdown = {r[0].value if hasattr(r[0], 'value') else r[0]: r[1] for r in call_results}
+
+    confirmed = result_breakdown.get("confirmed", 0)
+    conversion_rate = round(confirmed / total_calls * 100, 1) if total_calls > 0 else 0
+
+    # Store-wise customer counts
+    store_customers = (await db.execute(
+        select(CRMCustomer.assigned_store_id, func.count(CRMCustomer.id).label("cnt"))
+        .where(CRMCustomer.assigned_store_id.isnot(None))
+        .group_by(CRMCustomer.assigned_store_id)
+    )).all()
+    sids = set(r[0] for r in store_customers if r[0])
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    store_report = []
+    for r in store_customers:
+        sid = r[0]
+        if not sid:
+            continue
+        cust_count = r[1]
+        # RC customers in this store
+        rc_count = (await db.execute(
+            select(func.count(CRMCustomer.id)).where(and_(
+                CRMCustomer.assigned_store_id == sid,
+                CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]),
+            ))
+        )).scalar() or 0
+        # Overdue in this store
+        overdue = (await db.execute(
+            select(func.count(MedicinePurchase.id)).where(and_(
+                MedicinePurchase.store_id == sid,
+                MedicinePurchase.status == "active",
+                MedicinePurchase.next_due_date < now,
+            ))
+        )).scalar() or 0
+        retention_pct = round(rc_count / cust_count * 100, 1) if cust_count > 0 else 0
+        store_report.append({
+            "store_id": sid, "store_name": smap.get(sid, ""),
+            "total_customers": cust_count, "rc_customers": rc_count,
+            "retention_pct": retention_pct, "overdue": overdue,
+        })
+    store_report.sort(key=lambda x: -x["retention_pct"])
+
+    # Sales upload stats
+    total_sales_records = (await db.execute(
+        select(func.count(SalesRecord.id)).where(SalesRecord.created_at >= cutoff)
+    )).scalar() or 0
+    pending_medication = (await db.execute(
+        select(func.count(SalesRecord.id)).where(SalesRecord.medication_updated == False)
+    )).scalar() or 0
+
+    return {
+        "period_days": days,
+        "total_calls": total_calls,
+        "call_results": result_breakdown,
+        "conversion_rate": conversion_rate,
+        "store_report": store_report,
+        "total_sales_imported": total_sales_records,
+        "pending_medication_updates": pending_medication,
+    }

@@ -69,7 +69,7 @@ async def aging_report(
     category: str = Query(None),
     location: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
     now = datetime.now(timezone.utc)
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
@@ -128,7 +128,7 @@ async def intelligence_summary(
 ):
     now = datetime.now(timezone.utc)
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
-    is_store_staff = user.get("role") == "store_staff" and user.get("store_id")
+    is_store_staff = user.get("role") == "STORE_STAFF" and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
 
     dead_items, slow_items, recommendations = [], [], []
@@ -310,7 +310,7 @@ async def export_store_stock(store_id: int, db: AsyncSession = Depends(get_db), 
 
 
 @router.get("/export/consolidated")
-async def export_consolidated(db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("admin", "ho_staff"))):
+async def export_consolidated(db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
     stores_list = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
     products = (await db.execute(select(Product).order_by(Product.product_name))).scalars().all()
     pids = [p.product_id for p in products]
@@ -401,7 +401,7 @@ async def export_uploads(db: AsyncSession = Depends(get_db), user: dict = Depend
 
 
 @router.get("/export/aging")
-async def export_aging(db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("admin", "ho_staff"))):
+async def export_aging(db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
     report = await aging_report(db=db, user=user)
     rows = [{"location": i["location"], "product_id": i["product_id"], "product_name": i["product_name"],
              "batch": i["batch"], "stock": i["stock"], "mrp": i["mrp"], "days": i["days"],
@@ -551,7 +551,7 @@ async def refill_reminders(
 @router.get("/scorecard")
 async def store_scorecard(
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
     """Store Performance Scorecard: ranks stores by turnover, dead stock %, transfer compliance."""
     now = datetime.now(timezone.utc)
@@ -651,7 +651,7 @@ async def store_scorecard(
 
 
 @router.get("/export/scorecard")
-async def export_scorecard(db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("admin", "ho_staff"))):
+async def export_scorecard(db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
     data = await store_scorecard(db=db, user=user)
     rows = [{
         "rank": s["rank"], "store": s["store_name"], "code": s["store_code"],
@@ -745,7 +745,7 @@ async def get_audit_logs(
     limit: int = Query(50, ge=1, le=200),
     entity_type: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin")),
+    user: dict = Depends(require_roles("ADMIN")),
 ):
     query = select(AuditLog)
     if entity_type:

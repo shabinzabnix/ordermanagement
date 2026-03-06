@@ -41,8 +41,8 @@ export default function UserManagementPage() {
   };
 
   const roleColor = (r) => {
-    if (r === 'admin') return 'bg-violet-50 text-violet-700';
-    if (r === 'ho_staff') return 'bg-sky-50 text-sky-700';
+    if (r === 'ADMIN') return 'bg-violet-50 text-violet-700';
+    if (r === 'HO_STAFF') return 'bg-sky-50 text-sky-700';
     return 'bg-emerald-50 text-emerald-700';
   };
 
@@ -82,14 +82,14 @@ export default function UserManagementPage() {
                   <Select value={form.role} onValueChange={v => setForm({...form, role: v})}>
                     <SelectTrigger data-testid="user-role-select" className="rounded-sm"><SelectValue placeholder="Select role" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="ho_staff">HO Staff</SelectItem>
-                      <SelectItem value="store_staff">Store Staff</SelectItem>
+                      <SelectItem value="ADMIN">Admin</SelectItem>
+                      <SelectItem value="HO_STAFF">HO Staff</SelectItem>
+                      <SelectItem value="STORE_STAFF">Store Staff</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
-              {form.role === 'store_staff' && (
+              {form.role === 'STORE_STAFF' && (
                 <div className="space-y-1.5">
                   <Label className="font-body text-xs">Assigned Store</Label>
                   <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})}>

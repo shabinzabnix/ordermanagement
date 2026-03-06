@@ -114,7 +114,7 @@ async def get_categories(
 async def upload_products(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin")),
+    user: dict = Depends(require_roles("ADMIN")),
 ):
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted")
@@ -231,7 +231,7 @@ async def get_stores(db: AsyncSession = Depends(get_db), user: dict = Depends(ge
 async def create_store(
     data: StoreCreate,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin")),
+    user: dict = Depends(require_roles("ADMIN")),
 ):
     result = await db.execute(select(Store).where(Store.store_code == data.store_code))
     if result.scalar_one_or_none():
@@ -255,7 +255,7 @@ async def update_store(
     store_id: int,
     data: StoreUpdate,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin")),
+    user: dict = Depends(require_roles("ADMIN")),
 ):
     result = await db.execute(select(Store).where(Store.id == store_id))
     store = result.scalar_one_or_none()
@@ -272,7 +272,7 @@ async def update_store(
 async def delete_store(
     store_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin")),
+    user: dict = Depends(require_roles("ADMIN")),
 ):
     result = await db.execute(select(Store).where(Store.id == store_id))
     store = result.scalar_one_or_none()
@@ -296,7 +296,7 @@ class UserCreate(BaseModel):
 @router.get("/users")
 async def get_users(
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin")),
+    user: dict = Depends(require_roles("ADMIN")),
 ):
     result = await db.execute(select(User).order_by(User.full_name))
     users = result.scalars().all()
@@ -319,7 +319,7 @@ async def get_users(
 async def create_user(
     data: UserCreate,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin")),
+    user: dict = Depends(require_roles("ADMIN")),
 ):
     result = await db.execute(select(User).where(User.email == data.email))
     if result.scalar_one_or_none():

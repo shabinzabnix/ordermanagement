@@ -13,6 +13,8 @@ class PharmacyAPITester:
         self.tests_passed = 0
         self.user_id = None
         self.store_id = None
+        self.crm_token = None
+        self.crm_customer_id = None
 
     def run_test(self, name, method, endpoint, expected_status, data=None, files=None, params=None):
         """Run a single API test"""
@@ -613,6 +615,192 @@ class PharmacyAPITester:
             print(f"   ✅ Scorecard Excel export successful")
         return success
 
+    # ===== PHASE 5 CRM ENHANCEMENT TESTING =====
+    
+    def test_crm_login(self):
+        """Test CRM staff login"""
+        success, response = self.run_test(
+            "CRM Staff Login",
+            "POST",
+            "api/auth/login",
+            200,
+            data={"email": "crm@sahakar.com", "password": "crm123"}
+        )
+        if success and 'token' in response:
+            crm_token = response['token']
+            user_role = response['user']['role']
+            print(f"   Token obtained for CRM user: {response['user']['email']} (Role: {user_role})")
+            if user_role != 'CRM_STAFF':
+                print(f"   ❌ Expected CRM_STAFF role, got {user_role}")
+                return False
+            # Store CRM token for later use but keep admin token as primary
+            self.crm_token = crm_token
+            return True
+        return False
+
+    def test_crm_dashboard(self):
+        """Test CRM dashboard stats"""
+        return self.run_test("CRM Dashboard Stats", "GET", "api/crm/dashboard", 200)
+
+    def test_crm_customers_crud(self):
+        """Test CRM customer CRUD operations"""
+        if not self.store_id:
+            print("❌ No store_id available for CRM customers test")
+            return False
+
+        # Get CRM customers
+        success, response = self.run_test("Get CRM Customers", "GET", "api/crm/customers", 200)
+        if not success:
+            return False
+
+        # Create CRM customer
+        customer_data = {
+            "mobile_number": f"98765{datetime.now().strftime('%H%M%S')}",
+            "customer_name": f"CRM Test Customer {datetime.now().strftime('%H%M%S')}",
+            "gender": "male",
+            "age": 35,
+            "address": "Test Address",
+            "store_id": self.store_id,
+            "customer_type": "walkin"
+        }
+        success, response = self.run_test("Create CRM Customer", "POST", "api/crm/customers", 200, data=customer_data)
+        if success:
+            self.crm_customer_id = response.get('id')
+            print(f"   Created CRM customer with ID: {self.crm_customer_id}")
+            
+            # Test get customer profile
+            success2, response2 = self.run_test("Get CRM Customer Profile", "GET", f"api/crm/customers/{self.crm_customer_id}", 200)
+            if success2:
+                print(f"   Customer profile retrieved successfully")
+            return success2
+        return False
+
+    def test_sales_upload(self):
+        """Test sales report upload with Excel"""
+        if not self.store_id:
+            print("❌ No store_id available for sales upload test")
+            return False
+
+        # Create sample sales Excel
+        data = {
+            'Date of Invoice': ['2024-01-15', '2024-01-15'],
+            'Entry Number': ['INV001', 'INV002'],
+            'Patient Name': ['Test Patient 1', 'Test Patient 2'],
+            'Mobile Number': ['9876543210', '9876543211'],
+            'Product ID': ['P001', 'P002'],
+            'Product Name': ['Paracetamol 500mg', 'Amoxicillin 250mg'],
+            'Total Amount': [105.50, 250.00]
+        }
+        df = pd.DataFrame(data)
+        
+        excel_buffer = BytesIO()
+        df.to_excel(excel_buffer, index=False)
+        excel_buffer.seek(0)
+        
+        files = {'file': ('test_sales.xlsx', excel_buffer.getvalue(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+        success, response = self.run_test(
+            "Upload Sales Report Excel", 
+            "POST", 
+            f"api/crm/sales-upload?store_id={self.store_id}", 
+            200, 
+            files=files
+        )
+        if success:
+            print(f"   Upload result: {response.get('success', 0)}/{response.get('total', 0)} records")
+            print(f"   New customers: {response.get('new_customers', 0)}")
+            return True
+        return False
+
+    def test_sales_records(self):
+        """Test sales records retrieval"""
+        if not self.store_id:
+            print("❌ No store_id available for sales records test")
+            return False
+
+        # Get all sales records
+        success1, response1 = self.run_test("Get All Sales Records", "GET", "api/crm/sales", 200, 
+                                           params={"store_id": self.store_id, "page": 1, "limit": 10})
+        
+        # Get pending sales records only
+        success2, response2 = self.run_test("Get Pending Sales Records", "GET", "api/crm/sales", 200, 
+                                           params={"store_id": self.store_id, "pending_only": True, "page": 1, "limit": 10})
+        
+        if success1 and success2:
+            print(f"   Total sales records: {response1.get('total', 0)}")
+            print(f"   Pending records: {response2.get('total', 0)}")
+            return True
+        return False
+
+    def test_medication_duration_update(self):
+        """Test medication duration update on sales records"""
+        if not self.store_id:
+            print("❌ No store_id available for medication update test")
+            return False
+
+        # Get pending sales records
+        success, response = self.run_test("Get Pending Records for Update", "GET", "api/crm/sales", 200, 
+                                         params={"store_id": self.store_id, "pending_only": True, "limit": 1})
+        
+        if success and response.get('records'):
+            record_id = response['records'][0]['id']
+            
+            # Update medication duration
+            update_data = {"days_of_medication": 30}
+            success2, response2 = self.run_test("Update Medication Duration", "PUT", f"api/crm/sales/{record_id}/medication", 200, data=update_data)
+            
+            if success2:
+                print(f"   Medication updated, next due date: {response2.get('next_due_date', 'N/A')}")
+                return True
+        else:
+            print("   ⚠️ No pending sales records found for medication update test")
+            return True  # Not a failure if no records exist
+        return False
+
+    def test_customer_allocation(self):
+        """Test customer allocation to stores"""
+        if not self.store_id or not hasattr(self, 'crm_customer_id'):
+            print("❌ No store_id or customer_id available for allocation test")
+            return False
+
+        # Allocate customer to store
+        allocation_data = {
+            "customer_id": self.crm_customer_id,
+            "store_id": self.store_id
+        }
+        success, response = self.run_test("Allocate Customer to Store", "PUT", f"api/crm/customers/{self.crm_customer_id}/allocate", 200, data=allocation_data)
+        
+        if success:
+            print(f"   Customer {self.crm_customer_id} allocated to store {self.store_id}")
+            return True
+        return False
+
+    def test_adherence_scores(self):
+        """Test adherence scoring"""
+        success, response = self.run_test("Get Adherence Scores", "GET", "api/crm/adherence", 200)
+        
+        if success:
+            summary = response.get('summary', {})
+            print(f"   Adherence summary - High: {summary.get('high', 0)}, Medium: {summary.get('medium', 0)}, Low: {summary.get('low', 0)}")
+            scores = response.get('scores', [])
+            print(f"   Total patients scored: {len(scores)}")
+            return True
+        return False
+
+    def test_crm_performance_reports(self):
+        """Test CRM performance reports"""
+        # Test 30-day performance report
+        success1, response1 = self.run_test("CRM Performance Report (30 days)", "GET", "api/crm/reports/performance", 200, params={"days": 30})
+        
+        # Test 7-day performance report
+        success2, response2 = self.run_test("CRM Performance Report (7 days)", "GET", "api/crm/reports/performance", 200, params={"days": 7})
+        
+        if success1 and success2:
+            print(f"   30-day stats - Calls: {response1.get('total_calls', 0)}, Conversion: {response1.get('conversion_rate', 0)}%")
+            print(f"   Store report entries: {len(response1.get('store_report', []))}")
+            print(f"   Sales imported: {response1.get('total_sales_imported', 0)}")
+            return True
+        return False
+
 def main():
     print("🏥 Starting Sahakar Pharmacy API Testing...")
     print("=" * 60)
@@ -684,6 +872,18 @@ def main():
     print("\n🏆 PHASE 4 STORE SCORECARD TESTS")
     tester.test_store_scorecard()
     tester.test_scorecard_export()
+
+    # Phase 5 CRM Enhancement tests
+    print("\n💼 PHASE 5 CRM ENHANCEMENT TESTS")
+    tester.test_crm_login()
+    tester.test_crm_dashboard()
+    tester.test_crm_customers_crud()
+    tester.test_sales_upload()
+    tester.test_sales_records()
+    tester.test_medication_duration_update()
+    tester.test_customer_allocation()
+    tester.test_adherence_scores()
+    tester.test_crm_performance_reports()
 
     # Print final results
     print("\n" + "=" * 60)

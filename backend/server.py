@@ -37,6 +37,25 @@ app.include_router(crm_router, prefix="/api", tags=["CRM"])
 @app.on_event("startup")
 async def startup():
     await init_db()
+    # Migrate: add crm_staff enum value (requires autocommit)
+    from database import engine
+    from sqlalchemy import text
+    async with engine.connect() as conn:
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+        try:
+            await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'crm_staff'"))
+        except Exception:
+            pass
+    async with engine.connect() as conn:
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+        try:
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS assigned_store_id INTEGER REFERENCES stores(id)"))
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS adherence_score VARCHAR(20) DEFAULT 'unknown'"))
+        except Exception:
+            pass
+    # Ensure new tables exist
+    await init_db()
+
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.email == "admin@sahakar.com"))
         admin = result.scalar_one_or_none()
@@ -50,6 +69,18 @@ async def startup():
             ))
             await session.commit()
             logging.info("Default admin user created: admin@sahakar.com / admin123")
+        # Create default CRM user
+        crm_result = await session.execute(select(User).where(User.email == "crm@sahakar.com"))
+        if not crm_result.scalar_one_or_none():
+            session.add(User(
+                email="crm@sahakar.com",
+                password_hash=hash_password("crm123"),
+                full_name="CRM Manager",
+                role=UserRole.CRM_STAFF,
+                is_active=True,
+            ))
+            await session.commit()
+            logging.info("Default CRM user created: crm@sahakar.com / crm123")
 
 
 @app.get("/api/health")

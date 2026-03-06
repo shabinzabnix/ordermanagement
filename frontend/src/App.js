@@ -20,6 +20,9 @@ import StoreScorecardPage from '@/pages/StoreScorecardPage';
 import CRMDashboardPage from '@/pages/CRMDashboardPage';
 import CustomerProfilePage from '@/pages/CustomerProfilePage';
 import RefillDuePage from '@/pages/RefillDuePage';
+import SalesUploadPage from '@/pages/SalesUploadPage';
+import CRMReportsPage from '@/pages/CRMReportsPage';
+import CRMLoginPage from '@/pages/CRMLoginPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -50,6 +53,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+      <Route path="/crm-login" element={user ? <Navigate to="/crm" replace /> : <CRMLoginPage />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/products" element={<ProtectedRoute><ProductMasterPage /></ProtectedRoute>} />
       <Route path="/stores" element={<ProtectedRoute><StoreMasterPage /></ProtectedRoute>} />
@@ -66,6 +70,8 @@ function AppRoutes() {
       <Route path="/crm" element={<ProtectedRoute><CRMDashboardPage /></ProtectedRoute>} />
       <Route path="/crm/customer/:id" element={<ProtectedRoute><CustomerProfilePage /></ProtectedRoute>} />
       <Route path="/crm/refill-due" element={<ProtectedRoute><RefillDuePage /></ProtectedRoute>} />
+      <Route path="/crm/sales-upload" element={<ProtectedRoute><SalesUploadPage /></ProtectedRoute>} />
+      <Route path="/crm/reports" element={<ProtectedRoute><CRMReportsPage /></ProtectedRoute>} />
       <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

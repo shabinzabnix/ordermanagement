@@ -64,7 +64,7 @@ def map_columns(df, column_map, required_fields):
 async def upload_ho_stock(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
@@ -152,7 +152,7 @@ async def upload_store_stock(
     store_id: int = Query(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff", "store_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF")),
 ):
     result = await db.execute(select(Store).where(Store.id == store_id))
     if not result.scalar_one_or_none():
@@ -258,7 +258,7 @@ async def get_consolidated_stock(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
     stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
 
@@ -390,7 +390,7 @@ async def get_transfers(
         query = query.where(InterStoreTransfer.status == TransferStatus(status))
     # Role-based filtering: store_staff sees only their store
     effective_store = store_id
-    if user.get("role") == "store_staff" and user.get("store_id"):
+    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
         effective_store = user["store_id"]
     if effective_store:
         query = query.where(
@@ -426,7 +426,7 @@ async def get_transfers(
 async def approve_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff", "store_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF")),
 ):
     transfer = (await db.execute(select(InterStoreTransfer).where(InterStoreTransfer.id == transfer_id))).scalar_one_or_none()
     if not transfer:
@@ -445,7 +445,7 @@ async def reject_transfer(
     transfer_id: int,
     data: TransferAction,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff", "store_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF")),
 ):
     transfer = (await db.execute(select(InterStoreTransfer).where(InterStoreTransfer.id == transfer_id))).scalar_one_or_none()
     if not transfer:
@@ -540,7 +540,7 @@ async def get_purchase_requests(
         query = query.where(PurchaseRequest.status == PurchaseStatus(status))
     # Role-based filtering: store_staff sees only their store
     effective_store = store_id
-    if user.get("role") == "store_staff" and user.get("store_id"):
+    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
         effective_store = user["store_id"]
     if effective_store:
         query = query.where(PurchaseRequest.store_id == effective_store)
@@ -571,7 +571,7 @@ async def get_purchase_requests(
 async def approve_purchase(
     purchase_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("admin", "ho_staff")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
     purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()
     if not purchase:
@@ -621,7 +621,7 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    is_store_staff = user.get("role") == "store_staff" and user.get("store_id")
+    is_store_staff = user.get("role") == "STORE_STAFF" and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
 
     total_products = (await db.execute(select(func.count(Product.id)))).scalar() or 0

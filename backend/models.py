@@ -5,9 +5,10 @@ import enum
 
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    HO_STAFF = "ho_staff"
-    STORE_STAFF = "store_staff"
+    ADMIN = "ADMIN"
+    HO_STAFF = "HO_STAFF"
+    STORE_STAFF = "STORE_STAFF"
+    CRM_STAFF = "CRM_STAFF"
 
 
 class TransferStatus(str, enum.Enum):
@@ -203,7 +204,9 @@ class CRMCustomer(Base):
     age = Column(Integer)
     address = Column(Text)
     first_store_id = Column(Integer, ForeignKey("stores.id"))
+    assigned_store_id = Column(Integer, ForeignKey("stores.id"))
     customer_type = Column(SQLEnum(CustomerType), default=CustomerType.WALKIN)
+    adherence_score = Column(String(20), default="unknown")
     registration_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -246,4 +249,23 @@ class CRMTask(Base):
     status = Column(String(20), default="pending")
     notes = Column(Text)
     created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class SalesRecord(Base):
+    __tablename__ = "sales_records"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    customer_id = Column(Integer, ForeignKey("crm_customers.id"), nullable=True, index=True)
+    invoice_date = Column(DateTime(timezone=True))
+    entry_number = Column(String(100))
+    patient_name = Column(String(255))
+    mobile_number = Column(String(50), index=True)
+    product_id = Column(String(100))
+    product_name = Column(String(500))
+    total_amount = Column(Float, default=0)
+    days_of_medication = Column(Integer, nullable=True)
+    next_due_date = Column(DateTime(timezone=True), nullable=True)
+    medication_updated = Column(Boolean, default=False)
+    upload_batch_id = Column(String(100))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

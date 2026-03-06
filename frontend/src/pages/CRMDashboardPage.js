@@ -53,7 +53,7 @@ export default function CRMDashboardPage() {
   }, [page, search, typeFilter]);
 
   useEffect(() => {
-    if (user?.role === 'store_staff' && user?.store_id && !form.store_id) {
+    if (user?.role === 'STORE_STAFF' && user?.store_id && !form.store_id) {
       setForm(f => ({ ...f, store_id: String(user.store_id) }));
     }
   }, [user]);
@@ -65,7 +65,7 @@ export default function CRMDashboardPage() {
       const res = await api.post('/crm/customers', { ...form, store_id: parseInt(form.store_id), age: form.age ? parseInt(form.age) : null });
       toast.success('Customer created');
       setAddOpen(false);
-      setForm({ mobile_number: '', customer_name: '', gender: '', age: '', address: '', store_id: user?.role === 'store_staff' ? String(user?.store_id || '') : '', customer_type: 'walkin' });
+      setForm({ mobile_number: '', customer_name: '', gender: '', age: '', address: '', store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', customer_type: 'walkin' });
       setPage(1);
       navigate(`/crm/customer/${res.data.id}`);
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
@@ -137,7 +137,7 @@ export default function CRMDashboardPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
-                    <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})} disabled={user?.role === 'store_staff'}>
+                    <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})} disabled={user?.role === 'STORE_STAFF'}>
                       <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
                       <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
                     </Select></div>

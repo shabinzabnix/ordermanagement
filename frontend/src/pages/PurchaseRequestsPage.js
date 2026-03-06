@@ -36,7 +36,7 @@ export default function PurchaseRequestsPage() {
   }, []);
   // Auto-set store for store_staff
   useEffect(() => {
-    if (user?.role === 'store_staff' && user?.store_id && !form.store_id) {
+    if (user?.role === 'STORE_STAFF' && user?.store_id && !form.store_id) {
       setForm(f => ({ ...f, store_id: String(user.store_id) }));
     }
   }, [user]);
@@ -103,7 +103,7 @@ export default function PurchaseRequestsPage() {
               <form onSubmit={handleSubmit} className="mt-4 space-y-3">
                 <div className="space-y-1.5">
                   <Label className="font-body text-xs">Store *</Label>
-                  <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})} disabled={user?.role === 'store_staff'}>
+                  <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})} disabled={user?.role === 'STORE_STAFF'}>
                     <SelectTrigger className="rounded-sm" data-testid="purchase-store"><SelectValue placeholder="Select store" /></SelectTrigger>
                     <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
                   </Select>

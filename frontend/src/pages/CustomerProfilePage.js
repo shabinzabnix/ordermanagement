@@ -35,7 +35,7 @@ export default function CustomerProfilePage() {
   };
   useEffect(() => { loadProfile(); api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, [id]);
   useEffect(() => {
-    if (user?.role === 'store_staff' && user?.store_id && !pForm.store_id) setPForm(f => ({ ...f, store_id: String(user.store_id) }));
+    if (user?.role === 'STORE_STAFF' && user?.store_id && !pForm.store_id) setPForm(f => ({ ...f, store_id: String(user.store_id) }));
   }, [user]);
 
   const handlePurchase = async (e) => {
@@ -44,7 +44,7 @@ export default function CustomerProfilePage() {
       await api.post('/crm/purchases', { customer_id: parseInt(id), store_id: parseInt(pForm.store_id), medicine_name: pForm.medicine_name,
         quantity: parseFloat(pForm.quantity) || 0, days_of_medication: parseInt(pForm.days_of_medication) || 0, purchase_date: pForm.purchase_date || undefined });
       toast.success('Purchase recorded'); setPurchaseOpen(false);
-      setPForm({ store_id: user?.role === 'store_staff' ? String(user?.store_id || '') : '', medicine_name: '', quantity: '', days_of_medication: '', purchase_date: '' });
+      setPForm({ store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', medicine_name: '', quantity: '', days_of_medication: '', purchase_date: '' });
       loadProfile();
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); } finally { setSaving(false); }
   };
@@ -107,7 +107,7 @@ export default function CustomerProfilePage() {
                   <Input data-testid="purchase-date" type="date" value={pForm.purchase_date} onChange={e => setPForm({...pForm, purchase_date: e.target.value})} className="rounded-sm" /></div>
               </div>
               <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
-                <Select value={pForm.store_id} onValueChange={v => setPForm({...pForm, store_id: v})} disabled={user?.role === 'store_staff'}>
+                <Select value={pForm.store_id} onValueChange={v => setPForm({...pForm, store_id: v})} disabled={user?.role === 'STORE_STAFF'}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select store" /></SelectTrigger>
                   <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
                 </Select></div>

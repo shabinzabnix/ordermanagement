@@ -15,21 +15,23 @@ import {
 } from '../components/ui/dropdown-menu';
 
 const navItems = [
-  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['admin', 'ho_staff', 'store_staff'] },
-  { label: 'Products', path: '/products', icon: Package, roles: ['admin'] },
-  { label: 'Stores', path: '/stores', icon: Building2, roles: ['admin'] },
-  { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['admin', 'ho_staff'] },
-  { label: 'Store Stock', path: '/store-stock', icon: Archive, roles: ['admin', 'ho_staff', 'store_staff'] },
-  { label: 'Consolidated', path: '/consolidated', icon: BarChart3, roles: ['admin', 'ho_staff'] },
-  { label: 'Scorecard', path: '/scorecard', icon: Trophy, roles: ['admin', 'ho_staff'] },
-  { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['admin', 'ho_staff'] },
-  { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['admin', 'ho_staff', 'store_staff'] },
-  { label: 'Purchases', path: '/purchases', icon: ShoppingCart, roles: ['admin', 'ho_staff', 'store_staff'] },
-  { label: 'CRM', path: '/crm', icon: Heart, roles: ['admin', 'ho_staff', 'store_staff'] },
-  { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['admin', 'ho_staff', 'store_staff'] },
-  { label: 'Users', path: '/users', icon: Users, roles: ['admin'] },
-  { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['admin'] },
-  { label: 'Uploads', path: '/uploads', icon: FileUp, roles: ['admin', 'ho_staff'] },
+  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
+  { label: 'Products', path: '/products', icon: Package, roles: ['ADMIN'] },
+  { label: 'Stores', path: '/stores', icon: Building2, roles: ['ADMIN'] },
+  { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['ADMIN', 'HO_STAFF'] },
+  { label: 'Store Stock', path: '/store-stock', icon: Archive, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
+  { label: 'Consolidated', path: '/consolidated', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF'] },
+  { label: 'Scorecard', path: '/scorecard', icon: Trophy, roles: ['ADMIN', 'HO_STAFF'] },
+  { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['ADMIN', 'HO_STAFF'] },
+  { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
+  { label: 'Purchases', path: '/purchases', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
+  { label: 'CRM', path: '/crm', icon: Heart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
+  { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'] },
+  { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
+  { label: 'CRM Reports', path: '/crm/reports', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'] },
+  { label: 'Users', path: '/users', icon: Users, roles: ['ADMIN'] },
+  { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['ADMIN'] },
+  { label: 'Uploads', path: '/uploads', icon: FileUp, roles: ['ADMIN', 'HO_STAFF'] },
 ];
 
 export default function DashboardLayout({ children }) {
