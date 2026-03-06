@@ -15,7 +15,11 @@ router = APIRouter()
 
 PRODUCT_COLUMNS = {
     "product id": "product_id",
+    "id": "product_id",
+    "ho id": "product_id",
+    "ho_id": "product_id",
     "product name": "product_name",
+    "name": "product_name",
     "primary supplier": "primary_supplier",
     "secondary supplier": "secondary_supplier",
     "least price supplier": "least_price_supplier",
