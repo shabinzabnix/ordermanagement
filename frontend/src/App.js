@@ -16,6 +16,7 @@ import UploadHistoryPage from '@/pages/UploadHistoryPage';
 import InventoryAgingPage from '@/pages/InventoryAgingPage';
 import RCCustomerPage from '@/pages/RCCustomerPage';
 import AuditLogPage from '@/pages/AuditLogPage';
+import StoreScorecardPage from '@/pages/StoreScorecardPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -52,6 +53,7 @@ function AppRoutes() {
       <Route path="/ho-stock" element={<ProtectedRoute><HOStockUploadPage /></ProtectedRoute>} />
       <Route path="/store-stock" element={<ProtectedRoute><StoreStockUploadPage /></ProtectedRoute>} />
       <Route path="/consolidated" element={<ProtectedRoute><ConsolidatedStockPage /></ProtectedRoute>} />
+      <Route path="/scorecard" element={<ProtectedRoute><StoreScorecardPage /></ProtectedRoute>} />
       <Route path="/transfers" element={<ProtectedRoute><TransfersPage /></ProtectedRoute>} />
       <Route path="/purchases" element={<ProtectedRoute><PurchaseRequestsPage /></ProtectedRoute>} />
       <Route path="/users" element={<ProtectedRoute><UserManagementPage /></ProtectedRoute>} />

@@ -548,6 +548,132 @@ async def refill_reminders(
 
 # ─── Audit Logs ───────────────────────────────────────────
 
+@router.get("/scorecard")
+async def store_scorecard(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("admin", "ho_staff")),
+):
+    """Store Performance Scorecard: ranks stores by turnover, dead stock %, transfer compliance."""
+    now = datetime.now(timezone.utc)
+    stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
+    if not stores:
+        return {"stores": [], "network_avg": {}}
+
+    scorecards = []
+    for store in stores:
+        sid = store.id
+        stock_rows = (await db.execute(select(StoreStockBatch).where(StoreStockBatch.store_id == sid))).scalars().all()
+
+        total_stock = sum(float(r.closing_stock_strips or 0) for r in stock_rows)
+        total_sales = sum(float(r.sales or 0) for r in stock_rows)
+        total_value = sum(float(r.cost_value or 0) for r in stock_rows)
+        total_items = len([r for r in stock_rows if r.closing_stock_strips and r.closing_stock_strips > 0])
+        dead_items = 0
+        slow_items = 0
+        total_aging_days = 0
+        for r in stock_rows:
+            if r.closing_stock_strips and r.closing_stock_strips > 0:
+                days = (now - r.created_at).days if r.created_at else 0
+                total_aging_days += days
+                if (r.sales or 0) == 0 and days > 60:
+                    dead_items += 1
+                elif (r.sales or 0) == 0 and days > 30:
+                    slow_items += 1
+
+        sku_count = len(set((r.ho_product_id or r.store_product_id or r.product_name) for r in stock_rows if r.closing_stock_strips and r.closing_stock_strips > 0))
+        turnover = round(total_sales / total_stock, 2) if total_stock > 0 else 0
+        dead_pct = round(dead_items / total_items * 100, 1) if total_items > 0 else 0
+        slow_pct = round(slow_items / total_items * 100, 1) if total_items > 0 else 0
+        avg_aging = round(total_aging_days / total_items, 0) if total_items > 0 else 0
+
+        # Transfer compliance
+        t_all = (await db.execute(
+            select(func.count(InterStoreTransfer.id)).where(
+                (InterStoreTransfer.source_store_id == sid) | (InterStoreTransfer.requesting_store_id == sid)
+            )
+        )).scalar() or 0
+        t_approved = (await db.execute(
+            select(func.count(InterStoreTransfer.id)).where(
+                and_(
+                    (InterStoreTransfer.source_store_id == sid) | (InterStoreTransfer.requesting_store_id == sid),
+                    InterStoreTransfer.status == TransferStatus.APPROVED,
+                )
+            )
+        )).scalar() or 0
+        compliance = round(t_approved / t_all * 100, 1) if t_all > 0 else 100.0
+
+        # Purchase request count
+        pr_count = (await db.execute(
+            select(func.count(PurchaseRequest.id)).where(PurchaseRequest.store_id == sid)
+        )).scalar() or 0
+
+        # Composite score: Turnover 40% (cap at 1.0 = 100), Dead Stock 30% (invert), Compliance 30%
+        norm_turnover = min(turnover * 100, 100)
+        score = round(norm_turnover * 0.4 + (100 - dead_pct) * 0.3 + compliance * 0.3, 1)
+
+        scorecards.append({
+            "store_id": sid,
+            "store_name": store.store_name,
+            "store_code": store.store_code,
+            "location": store.location or "",
+            "sku_count": sku_count,
+            "total_stock": round(total_stock, 1),
+            "total_sales": round(total_sales, 1),
+            "stock_value": round(total_value, 2),
+            "turnover_ratio": turnover,
+            "dead_stock_pct": dead_pct,
+            "slow_moving_pct": slow_pct,
+            "dead_items": dead_items,
+            "slow_items": slow_items,
+            "avg_aging_days": avg_aging,
+            "transfer_compliance": compliance,
+            "transfers_total": t_all,
+            "transfers_approved": t_approved,
+            "purchase_requests": pr_count,
+            "score": score,
+        })
+
+    scorecards.sort(key=lambda x: -x["score"])
+    for i, sc in enumerate(scorecards):
+        sc["rank"] = i + 1
+
+    # Network averages
+    n = len(scorecards) or 1
+    network_avg = {
+        "avg_turnover": round(sum(s["turnover_ratio"] for s in scorecards) / n, 2),
+        "avg_dead_pct": round(sum(s["dead_stock_pct"] for s in scorecards) / n, 1),
+        "avg_compliance": round(sum(s["transfer_compliance"] for s in scorecards) / n, 1),
+        "avg_score": round(sum(s["score"] for s in scorecards) / n, 1),
+        "total_network_value": round(sum(s["stock_value"] for s in scorecards), 2),
+    }
+
+    return {"stores": scorecards, "network_avg": network_avg}
+
+
+@router.get("/export/scorecard")
+async def export_scorecard(db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("admin", "ho_staff"))):
+    data = await store_scorecard(db=db, user=user)
+    rows = [{
+        "rank": s["rank"], "store": s["store_name"], "code": s["store_code"],
+        "skus": s["sku_count"], "stock": s["total_stock"], "sales": s["total_sales"],
+        "value": s["stock_value"], "turnover": s["turnover_ratio"],
+        "dead_pct": s["dead_stock_pct"], "slow_pct": s["slow_moving_pct"],
+        "avg_aging": s["avg_aging_days"], "compliance": s["transfer_compliance"],
+        "score": s["score"],
+    } for s in data["stores"]]
+    headers = [
+        {"label": "Rank", "key": "rank"}, {"label": "Store", "key": "store"}, {"label": "Code", "key": "code"},
+        {"label": "SKUs", "key": "skus"}, {"label": "Stock (Units)", "key": "stock"},
+        {"label": "Sales", "key": "sales"}, {"label": "Stock Value", "key": "value"},
+        {"label": "Turnover Ratio", "key": "turnover"}, {"label": "Dead Stock %", "key": "dead_pct"},
+        {"label": "Slow Moving %", "key": "slow_pct"}, {"label": "Avg Aging (Days)", "key": "avg_aging"},
+        {"label": "Transfer Compliance %", "key": "compliance"}, {"label": "Performance Score", "key": "score"},
+    ]
+    await _log(db, user, "Exported store scorecard", "scorecard")
+    await db.commit()
+    return _excel(rows, headers, "store_scorecard.xlsx")
+
+
 @router.get("/dashboard/chart-data")
 async def get_chart_data(
     db: AsyncSession = Depends(get_db),

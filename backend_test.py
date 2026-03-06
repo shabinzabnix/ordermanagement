@@ -563,6 +563,56 @@ class PharmacyAPITester:
         
         return success1 and success2 and success3
 
+    # ===== PHASE 4 STORE SCORECARD TESTING =====
+    
+    def test_store_scorecard(self):
+        """Test store scorecard endpoint"""
+        success, response = self.run_test("Get Store Scorecard", "GET", "api/scorecard", 200)
+        if success:
+            # Verify required keys are present
+            required_keys = ['stores', 'network_avg']
+            for key in required_keys:
+                if key not in response:
+                    print(f"   ❌ Missing key '{key}' in scorecard response")
+                    return False
+                else:
+                    print(f"   ✅ Found '{key}' in response")
+            
+            # Verify stores structure
+            stores = response.get('stores', [])
+            if stores:
+                store = stores[0]
+                required_store_fields = [
+                    'store_id', 'store_name', 'rank', 'score', 
+                    'turnover_ratio', 'dead_stock_pct', 'transfer_compliance'
+                ]
+                for field in required_store_fields:
+                    if field not in store:
+                        print(f"   ❌ Store missing field '{field}'")
+                        return False
+                print(f"   ✅ Store structure correct with {len(stores)} stores")
+                print(f"   ✅ Top store: {store['store_name']} (Score: {store['score']})")
+            else:
+                print(f"   ⚠️ No stores with data found")
+            
+            # Verify network averages structure
+            network_avg = response.get('network_avg', {})
+            required_avg_fields = ['avg_turnover', 'avg_dead_pct', 'avg_compliance', 'avg_score']
+            for field in required_avg_fields:
+                if field not in network_avg:
+                    print(f"   ❌ Network avg missing field '{field}'")
+                    return False
+            print(f"   ✅ Network averages: Score={network_avg.get('avg_score', 0):.1f}, Turnover={network_avg.get('avg_turnover', 0):.2f}")
+                    
+        return success
+
+    def test_scorecard_export(self):
+        """Test scorecard Excel export"""
+        success, response = self.run_test("Export Store Scorecard", "GET", "api/export/scorecard", 200)
+        if success:
+            print(f"   ✅ Scorecard Excel export successful")
+        return success
+
 def main():
     print("🏥 Starting Sahakar Pharmacy API Testing...")
     print("=" * 60)
@@ -629,6 +679,11 @@ def main():
     tester.test_stock_check_availability()
     tester.test_transfer_quantity_validation()
     tester.test_role_based_filtering()
+
+    # Phase 4 Store Scorecard tests
+    print("\n🏆 PHASE 4 STORE SCORECARD TESTS")
+    tester.test_store_scorecard()
+    tester.test_scorecard_export()
 
     # Print final results
     print("\n" + "=" * 60)
