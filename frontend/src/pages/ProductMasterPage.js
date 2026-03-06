@@ -51,6 +51,15 @@ export default function ProductMasterPage() {
       const res = await api.post('/products/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(`Upload: ${res.data.success}/${res.data.total} records processed`);
       if (res.data.failed > 0) toast.warning(`${res.data.failed} records failed`);
+      const matched = res.data.columns_matched || {};
+      const unmatched = res.data.columns_unmatched || [];
+      if (Object.keys(matched).length > 0) {
+        const mappedList = Object.entries(matched).map(([k, v]) => `${k} → ${v}`).join(', ');
+        toast.info(`Columns mapped: ${mappedList}`, { duration: 8000 });
+      }
+      if (unmatched.length > 0) {
+        toast.warning(`Unmapped columns (ignored): ${unmatched.slice(0, 10).join(', ')}`, { duration: 8000 });
+      }
       setUploadOpen(false);
       loadProducts();
       api.get('/products/categories').then(r => setCategories(r.data.categories)).catch(() => {});

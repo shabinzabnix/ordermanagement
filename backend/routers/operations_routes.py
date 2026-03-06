@@ -84,7 +84,7 @@ async def upload_ho_stock(
     if df.empty:
         raise HTTPException(400, "Excel file is empty")
 
-    df_mapped, missing = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
+    df_mapped, missing, _col_info = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
     if missing:
         raise HTTPException(400, f"Missing required columns: {', '.join(missing)}")
 
@@ -176,7 +176,7 @@ async def upload_store_stock(
     if df.empty:
         raise HTTPException(400, "Excel file is empty")
 
-    df_mapped, missing = map_columns(df, STORE_STOCK_COLUMNS, STORE_STOCK_REQUIRED)
+    df_mapped, missing, _col_info = map_columns(df, STORE_STOCK_COLUMNS, STORE_STOCK_REQUIRED)
     if missing:
         raise HTTPException(400, f"Missing required columns: {', '.join(missing)}")
 

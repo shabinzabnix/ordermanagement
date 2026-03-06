@@ -18,24 +18,55 @@ PRODUCT_COLUMNS = {
     "id": "product_id",
     "ho id": "product_id",
     "ho_id": "product_id",
+    "item code": "product_id",
+    "code": "product_id",
     "product name": "product_name",
     "name": "product_name",
+    "item name": "product_name",
+    "description": "product_name",
     "primary supplier": "primary_supplier",
+    "supplier": "primary_supplier",
+    "supplier name": "primary_supplier",
+    "company": "primary_supplier",
+    "company name": "primary_supplier",
+    "manufacturer": "primary_supplier",
+    "mfr": "primary_supplier",
+    "mfr name": "primary_supplier",
+    "brand": "primary_supplier",
     "secondary supplier": "secondary_supplier",
+    "supplier 2": "secondary_supplier",
+    "alt supplier": "secondary_supplier",
     "least price supplier": "least_price_supplier",
+    "cheapest supplier": "least_price_supplier",
+    "lps": "least_price_supplier",
     "most qty supplier": "most_qty_supplier",
+    "highest qty supplier": "most_qty_supplier",
+    "mqs": "most_qty_supplier",
     "category": "category",
+    "group": "category",
+    "product group": "category",
+    "type": "category",
     "sub category": "sub_category",
+    "sub group": "sub_category",
     "rep": "rep",
+    "representative": "rep",
+    "mr": "rep",
     "mrp": "mrp",
+    "m.r.p": "mrp",
+    "maximum retail price": "mrp",
     "ptr": "ptr",
+    "price to retailer": "ptr",
     "landing cost": "landing_cost",
     "l cost": "landing_cost",
+    "cost": "landing_cost",
+    "purchase rate": "landing_cost",
+    "rate": "landing_cost",
 }
 PRODUCT_REQUIRED = ["product_id", "product_name"]
 
 
 def map_columns(df, column_map, required_fields):
+    original_cols = list(df.columns)
     df.columns = [str(col).strip().lower().replace('_', ' ') for col in df.columns]
     mapped = {}
     for col in df.columns:
@@ -44,11 +75,11 @@ def map_columns(df, column_map, required_fields):
     mapped_fields = set(mapped.values())
     missing = [f for f in required_fields if f not in mapped_fields]
     if missing:
-        return None, missing
+        return None, missing, {"original_columns": original_cols, "matched": mapped, "unmatched": [c for c in df.columns if c not in mapped]}
     df = df.rename(columns=mapped)
     keep_cols = list(dict.fromkeys([v for v in mapped.values() if v in df.columns]))
     df = df[keep_cols]
-    return df, []
+    return df, [], {"original_columns": original_cols, "matched": mapped, "unmatched": [c for c in original_cols if str(c).strip().lower().replace('_', ' ') not in mapped]}
 
 
 # --- Products ---
@@ -132,9 +163,9 @@ async def upload_products(
     if df.empty:
         raise HTTPException(400, "Excel file is empty")
 
-    df_mapped, missing = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
+    df_mapped, missing, col_info = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
     if missing:
-        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}")
+        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your Excel columns: {col_info.get('original_columns', [])}")
 
     success = 0
     failed = 0
@@ -192,7 +223,8 @@ async def upload_products(
     db.add(upload)
     await db.commit()
 
-    return {"message": "Upload complete", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20]}
+    return {"message": "Upload complete", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20],
+            "columns_matched": col_info.get("matched", {}), "columns_unmatched": col_info.get("unmatched", [])[:20]}
 
 
 # --- Stores ---
