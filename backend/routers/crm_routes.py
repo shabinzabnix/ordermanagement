@@ -537,6 +537,7 @@ async def upload_sales_report(
         raise HTTPException(400, "Excel file is empty")
 
     # Map columns
+    original_cols = list(df.columns)
     df.columns = [str(col).strip().lower().replace('_', ' ') for col in df.columns]
     mapped = {}
     for col in df.columns:
@@ -545,7 +546,7 @@ async def upload_sales_report(
     mapped_fields = set(mapped.values())
     missing = [f for f in SALES_REQUIRED if f not in mapped_fields]
     if missing:
-        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}")
+        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your Excel columns: {original_cols}")
     df = df.rename(columns=mapped)
 
     batch_id = str(uuid.uuid4())[:12]
