@@ -59,6 +59,17 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 26. Network average KPIs (Avg Score, Avg Turnover, Avg Dead Stock, Avg Compliance)
 27. Scorecard Excel export with all metrics
 
+## What's Been Implemented (Phase 4 - CRM System - March 2026)
+28. Central CRM Customer Master - unified profiles by mobile number, customer classification (RC/walkin/chronic/high_value)
+29. Medicine Purchase Tracking - auto next_due_date calculation, auto RC classification (3 purchases in 90 days)
+30. Patient Medicine Calendar - per-customer view of active medicines, due dates, overdue alerts
+31. Refill Due Management Dashboard - filterable by category (overdue/today/3d/7d), store, search
+32. CRM Calling System - call logging with results (reached/not_reachable/callback/confirmed/discontinued) + remarks
+33. Customer Timeline - unified view of purchases + calls + interactions
+34. CRM Dashboard - 8 KPIs (customers, RC, due counts, calls, tasks)
+35. CRM Task Management - assign follow-ups to staff
+36. Store-level access control for CRM data
+
 ## P0 - Remaining (Phase 3)
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
