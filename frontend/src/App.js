@@ -1,53 +1,71 @@
-import { useEffect } from "react";
-import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { Toaster } from '@/components/ui/sonner';
+import DashboardLayout from '@/components/DashboardLayout';
+import LoginPage from '@/pages/LoginPage';
+import DashboardPage from '@/pages/DashboardPage';
+import ProductMasterPage from '@/pages/ProductMasterPage';
+import StoreMasterPage from '@/pages/StoreMasterPage';
+import HOStockUploadPage from '@/pages/HOStockUploadPage';
+import StoreStockUploadPage from '@/pages/StoreStockUploadPage';
+import ConsolidatedStockPage from '@/pages/ConsolidatedStockPage';
+import TransfersPage from '@/pages/TransfersPage';
+import PurchaseRequestsPage from '@/pages/PurchaseRequestsPage';
+import UserManagementPage from '@/pages/UserManagementPage';
+import UploadHistoryPage from '@/pages/UploadHistoryPage';
+import '@/App.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+function ProtectedRoute({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+          <p className="text-sm font-body text-slate-500">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/login" replace />;
+  return <DashboardLayout>{children}</DashboardLayout>;
+}
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
-
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
+function AppRoutes() {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+      </div>
+    );
+  }
   return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
+    <Routes>
+      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+      <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+      <Route path="/products" element={<ProtectedRoute><ProductMasterPage /></ProtectedRoute>} />
+      <Route path="/stores" element={<ProtectedRoute><StoreMasterPage /></ProtectedRoute>} />
+      <Route path="/ho-stock" element={<ProtectedRoute><HOStockUploadPage /></ProtectedRoute>} />
+      <Route path="/store-stock" element={<ProtectedRoute><StoreStockUploadPage /></ProtectedRoute>} />
+      <Route path="/consolidated" element={<ProtectedRoute><ConsolidatedStockPage /></ProtectedRoute>} />
+      <Route path="/transfers" element={<ProtectedRoute><TransfersPage /></ProtectedRoute>} />
+      <Route path="/purchases" element={<ProtectedRoute><PurchaseRequestsPage /></ProtectedRoute>} />
+      <Route path="/users" element={<ProtectedRoute><UserManagementPage /></ProtectedRoute>} />
+      <Route path="/uploads" element={<ProtectedRoute><UploadHistoryPage /></ProtectedRoute>} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
   );
-};
+}
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+        <Toaster position="top-right" richColors />
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

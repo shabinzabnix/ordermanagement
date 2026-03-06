@@ -1,34 +1,15 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* Pharmacy Platform Styles */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
-}
-
-.App-link {
-    color: #61dafb;
-}
-
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
-}
+.animate-fade-in-delay-1 { animation: fadeIn 0.3s ease-out 0.05s both; }
+.animate-fade-in-delay-2 { animation: fadeIn 0.3s ease-out 0.1s both; }
+.animate-fade-in-delay-3 { animation: fadeIn 0.3s ease-out 0.15s both; }
+.animate-fade-in-delay-4 { animation: fadeIn 0.3s ease-out 0.2s both; }
+.animate-fade-in-delay-5 { animation: fadeIn 0.3s ease-out 0.25s both; }
