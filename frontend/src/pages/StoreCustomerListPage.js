@@ -22,6 +22,7 @@ export default function StoreCustomerListPage() {
   const [customers, setCustomers] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState('name');
   const [loading, setLoading] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -36,12 +37,12 @@ export default function StoreCustomerListPage() {
   useEffect(() => {
     if (!selectedStore && !search) { setCustomers([]); setTotal(0); return; }
     setLoading(true);
-    const params = { page, limit };
+    const params = { page, limit, sort_by: sortBy };
     if (selectedStore) params.store_id = selectedStore;
     if (search) params.search = search;
     api.get('/crm/customers', { params }).then(r => { setCustomers(r.data.customers); setTotal(r.data.total); })
       .catch(() => {}).finally(() => setLoading(false));
-  }, [selectedStore, search, page]);
+  }, [selectedStore, search, page, sortBy]);
 
   const loadProfile = async (mobile) => {
     setProfileLoading(true);
@@ -75,6 +76,14 @@ export default function StoreCustomerListPage() {
           <div className="relative flex-1 min-w-[250px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <Input data-testid="customer-search" placeholder="Search name, mobile, or product..." value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }} className="pl-9 font-body text-sm rounded-sm" /></div>
+          <Select value={sortBy} onValueChange={v => { setSortBy(v); setPage(1); }}>
+            <SelectTrigger className="w-[160px] font-body text-sm rounded-sm" data-testid="customer-sort"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Sort: Name</SelectItem>
+              <SelectItem value="invoices">Sort: Invoices</SelectItem>
+              <SelectItem value="spent">Sort: Amount Spent</SelectItem>
+            </SelectContent>
+          </Select>
         </CardContent>
       </Card>
 
@@ -83,8 +92,8 @@ export default function StoreCustomerListPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Name', 'Mobile', 'Store', 'Type', 'Medicines', 'CLV', 'Tags', ''].map(h => (
-                  <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3">{h}</TableHead>
+                {['Name', 'Mobile', 'Store', 'Type', 'Invoices', 'Total Spent', 'Medicines', 'Tags', ''].map(h => (
+                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['Invoices', 'Total Spent', 'Medicines'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -92,7 +101,7 @@ export default function StoreCustomerListPage() {
               {loading ? [...Array(8)].map((_, i) => (
                 <TableRow key={i}>{[...Array(8)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-50 rounded animate-pulse" /></TableCell>)}</TableRow>
               )) : customers.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-16">
+                <TableRow><TableCell colSpan={9} className="text-center py-16">
                   <Users className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">{selectedStore || search ? 'No customers found' : 'Select a store or search'}</p>
                 </TableCell></TableRow>
@@ -102,8 +111,9 @@ export default function StoreCustomerListPage() {
                   <TableCell className="font-mono text-[11px] text-slate-500">{c.mobile_number}</TableCell>
                   <TableCell className="text-[12px] text-slate-500">{c.store_name}</TableCell>
                   <TableCell><Badge className={`text-[9px] rounded-sm ${typeBadge(c.customer_type)}`}>{(c.customer_type || 'walkin').replace('_', ' ')}</Badge></TableCell>
-                  <TableCell className="text-[12px] tabular-nums">{c.active_medicines}</TableCell>
-                  <TableCell className="text-[11px] tabular-nums">{c.clv_value > 0 ? `INR ${c.clv_value.toLocaleString('en-IN')}` : '-'}</TableCell>
+                  <TableCell className="text-right text-[12px] tabular-nums font-medium">{c.invoice_count || 0}</TableCell>
+                  <TableCell className="text-right text-[12px] tabular-nums font-medium text-emerald-700">{c.total_spent > 0 ? `INR ${c.total_spent.toLocaleString('en-IN')}` : '-'}</TableCell>
+                  <TableCell className="text-right text-[12px] tabular-nums">{c.active_medicines}</TableCell>
                   <TableCell><div className="flex gap-0.5 flex-wrap">{c.chronic_tags?.map(t => <Badge key={t} className="text-[8px] rounded-sm bg-violet-50 text-violet-700 px-1">{t.replace('_',' ')}</Badge>)}</div></TableCell>
                   <TableCell>
                     <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] font-body"

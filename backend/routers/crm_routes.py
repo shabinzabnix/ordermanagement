@@ -91,6 +91,7 @@ async def list_customers(
     search: str = Query(None), store_id: int = Query(None),
     customer_type: str = Query(None), page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
+    sort_by: str = Query("name"),
     db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
 ):
     sf = _store_filter(user)
@@ -117,9 +118,10 @@ async def list_customers(
     if sids:
         smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
 
-    # Get active medicine count per customer
     cids = [c.id for c in customers]
     med_counts = {}
+    invoice_counts = {}
+    total_spent = {}
     if cids:
         mc_q = (await db.execute(
             select(MedicinePurchase.customer_id, func.count(MedicinePurchase.id).label("cnt"))
@@ -128,19 +130,40 @@ async def list_customers(
         )).all()
         med_counts = {r[0]: r[1] for r in mc_q}
 
-    return {
-        "customers": [{
-            "id": c.id, "mobile_number": c.mobile_number, "customer_name": c.customer_name,
-            "gender": c.gender, "age": c.age, "address": c.address,
-            "first_store_id": c.first_store_id, "store_name": smap.get(c.first_store_id, ""),
-            "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
-            "active_medicines": med_counts.get(c.id, 0),
-            "clv_value": round(float(c.clv_value or 0), 2), "clv_tier": c.clv_tier or "unknown",
-            "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
-            "registration_date": c.registration_date.isoformat() if c.registration_date else None,
-        } for c in customers],
-        "total": total, "page": page, "limit": limit,
-    }
+        # Invoice count and total spent from SalesRecord
+        inv_q = (await db.execute(
+            select(
+                SalesRecord.customer_id,
+                func.count(func.distinct(SalesRecord.entry_number)).label("inv_cnt"),
+                func.sum(SalesRecord.total_amount).label("total_amt"),
+            )
+            .where(SalesRecord.customer_id.in_(cids))
+            .group_by(SalesRecord.customer_id)
+        )).all()
+        for r in inv_q:
+            invoice_counts[r[0]] = int(r[1] or 0)
+            total_spent[r[0]] = round(float(r[2] or 0), 2)
+
+    result = [{
+        "id": c.id, "mobile_number": c.mobile_number, "customer_name": c.customer_name,
+        "gender": c.gender, "age": c.age, "address": c.address,
+        "first_store_id": c.first_store_id, "store_name": smap.get(c.first_store_id, ""),
+        "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+        "active_medicines": med_counts.get(c.id, 0),
+        "invoice_count": invoice_counts.get(c.id, 0),
+        "total_spent": total_spent.get(c.id, 0),
+        "clv_value": round(float(c.clv_value or 0), 2), "clv_tier": c.clv_tier or "unknown",
+        "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
+        "registration_date": c.registration_date.isoformat() if c.registration_date else None,
+    } for c in customers]
+
+    # Sort
+    if sort_by == "invoices":
+        result.sort(key=lambda x: -x["invoice_count"])
+    elif sort_by == "spent":
+        result.sort(key=lambda x: -x["total_spent"])
+
+    return {"customers": result, "total": total, "page": page, "limit": limit}
 
 
 @router.post("/crm/customers")
