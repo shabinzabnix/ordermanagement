@@ -29,6 +29,7 @@ import ExpiryRiskPage from '@/pages/ExpiryRiskPage';
 import SupplierIntelPage from '@/pages/SupplierIntelPage';
 import StoreDashboardPage from '@/pages/StoreDashboardPage';
 import PurchaseHistoryPage from '@/pages/PurchaseHistoryPage';
+import StoreCustomerListPage from '@/pages/StoreCustomerListPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -85,6 +86,7 @@ function AppRoutes() {
       <Route path="/crm/sales-upload" element={<ProtectedRoute><SalesUploadPage /></ProtectedRoute>} />
       <Route path="/crm/reports" element={<ProtectedRoute><CRMReportsPage /></ProtectedRoute>} />
       <Route path="/crm/history" element={<ProtectedRoute><PurchaseHistoryPage /></ProtectedRoute>} />
+      <Route path="/crm/customers" element={<ProtectedRoute><StoreCustomerListPage /></ProtectedRoute>} />
       <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
