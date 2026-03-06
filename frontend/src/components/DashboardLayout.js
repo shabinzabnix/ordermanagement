@@ -34,6 +34,7 @@ const navItems = [
   { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'] },
   { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
   { label: 'CRM Reports', path: '/crm/reports', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'] },
+  { label: 'History', path: '/crm/history', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
   { label: 'Users', path: '/users', icon: Users, roles: ['ADMIN'] },
   { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['ADMIN'] },
   { label: 'Uploads', path: '/uploads', icon: FileUp, roles: ['ADMIN', 'HO_STAFF'] },

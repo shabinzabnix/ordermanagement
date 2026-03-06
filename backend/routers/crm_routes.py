@@ -509,11 +509,11 @@ async def search_customers_by_medicine(
 
 SALES_COLUMNS = {
     "date of invoice": "invoice_date", "invoice date": "invoice_date", "date": "invoice_date",
-    "entry number": "entry_number", "entry no": "entry_number", "invoice no": "entry_number",
-    "patient name": "patient_name", "customer name": "patient_name", "name": "patient_name",
+    "entry number": "entry_number", "entry no": "entry_number", "invoice no": "entry_number", "invoice number": "entry_number",
+    "patient name": "patient_name", "customer name": "patient_name", "patient": "patient_name", "customer": "patient_name",
     "mobile number": "mobile_number", "mobile": "mobile_number", "phone": "mobile_number", "contact": "mobile_number",
-    "product id": "product_id", "item code": "product_id",
-    "product name": "product_name", "item name": "product_name", "medicine": "product_name",
+    "product id": "product_id", "item code": "product_id", "ho id": "product_id",
+    "product name": "product_name", "item name": "product_name", "medicine": "product_name", "product": "product_name",
     "total amount": "total_amount", "amount": "total_amount", "total": "total_amount", "net amount": "total_amount",
 }
 SALES_REQUIRED = ["patient_name", "mobile_number", "product_name"]
@@ -1078,3 +1078,96 @@ async def chronic_report(
         })
 
     return {"patients": result, "total": len(result), "condition_breakdown": condition_counts}
+
+
+# ─── Customer Purchase History by Mobile ─────────────────────
+
+@router.get("/crm/purchase-history/{mobile}")
+async def customer_purchase_history(
+    mobile: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Complete purchase history for a customer by mobile number, grouped by invoice."""
+    from sqlalchemy import cast, Date
+
+    # Clean mobile
+    mobile_clean = ''.join(filter(str.isdigit, mobile))
+    if len(mobile_clean) > 10:
+        mobile_clean = mobile_clean[-10:]
+
+    # Find customer
+    customer = (await db.execute(
+        select(CRMCustomer).where(CRMCustomer.mobile_number == mobile_clean)
+    )).scalar_one_or_none()
+    if not customer:
+        # Try partial match
+        customer = (await db.execute(
+            select(CRMCustomer).where(CRMCustomer.mobile_number.ilike(f"%{mobile_clean}%"))
+        )).scalar_one_or_none()
+    if not customer:
+        return {"customer": None, "invoices": [], "total_spent": 0, "total_invoices": 0, "total_items": 0}
+
+    smap = {}
+    if customer.first_store_id:
+        s = (await db.execute(select(Store).where(Store.id == customer.first_store_id))).scalar_one_or_none()
+        if s: smap[s.id] = s.store_name
+
+    # Get all sales records for this customer
+    records = (await db.execute(
+        select(SalesRecord).where(SalesRecord.customer_id == customer.id)
+        .order_by(SalesRecord.invoice_date.desc())
+    )).scalars().all()
+
+    # Get store names for all records
+    for r in records:
+        if r.store_id and r.store_id not in smap:
+            s = (await db.execute(select(Store).where(Store.id == r.store_id))).scalar_one_or_none()
+            if s: smap[s.id] = s.store_name
+
+    # Group by entry_number (invoice)
+    invoices = {}
+    for r in records:
+        inv_key = r.entry_number or f"no_inv_{r.id}"
+        if inv_key not in invoices:
+            invoices[inv_key] = {
+                "entry_number": r.entry_number,
+                "invoice_date": r.invoice_date.isoformat() if r.invoice_date else None,
+                "store_name": smap.get(r.store_id, ""),
+                "store_id": r.store_id,
+                "items": [],
+                "total_amount": 0,
+            }
+        item_amount = float(r.total_amount or 0)
+        invoices[inv_key]["items"].append({
+            "product_id": r.product_id,
+            "product_name": r.product_name,
+            "amount": round(item_amount, 2),
+            "days_of_medication": r.days_of_medication,
+            "next_due_date": r.next_due_date.isoformat() if r.next_due_date else None,
+        })
+        invoices[inv_key]["total_amount"] += item_amount
+
+    # Round totals
+    invoice_list = []
+    for inv in invoices.values():
+        inv["total_amount"] = round(inv["total_amount"], 2)
+        inv["item_count"] = len(inv["items"])
+        invoice_list.append(inv)
+
+    total_spent = round(sum(inv["total_amount"] for inv in invoice_list), 2)
+
+    return {
+        "customer": {
+            "id": customer.id, "name": customer.customer_name, "mobile": customer.mobile_number,
+            "type": customer.customer_type.value if hasattr(customer.customer_type, 'value') else customer.customer_type,
+            "store": smap.get(customer.first_store_id or customer.assigned_store_id, ""),
+            "clv_value": round(float(customer.clv_value or 0), 2),
+            "adherence": customer.adherence_score or "unknown",
+            "chronic_tags": customer.chronic_tags.split(",") if customer.chronic_tags else [],
+        },
+        "invoices": invoice_list,
+        "total_spent": total_spent,
+        "total_invoices": len(invoice_list),
+        "total_items": sum(inv["item_count"] for inv in invoice_list),
+    }
