@@ -90,6 +90,12 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 49. Customer Lifetime Value (CLV) - Calculates annual purchase value from SalesRecords. Tiers: High (>=10K), Medium (5-10K), Low (<5K). Auto-upgrades high-value customers
 50. Chronic Patient Identification Engine - Auto-detects diabetes/BP/thyroid/cardiac/respiratory/mental_health from medicine patterns (3+ purchases of same chronic medicine in 90 days). Tags visible on customer profiles and CRM dashboard
 
+## What's Been Implemented (Phase 8 - Intelligence Layer Batch C - March 2026)
+51. Supplier Intelligence Module - Analyzes suppliers from Product Master: product coverage, avg PTR, avg landing cost. Best supplier per product with margin % calculation
+52. Smart Purchase Recommendation Engine - Checks HO stock + all store stock first (recommends transfer if available), then recommends best supplier (lowest PTR) if purchase needed
+53. Enhanced Store Performance Dashboard - CLV-per-store metrics: total CLV, avg CLV, high-value customer count, retention %, overdue medicines, sales revenue
+54. Database Indexing Optimization - 9 composite indexes added for: sales_records, medicine_purchases, store_stock_batches, crm_customers, inter_store_transfers, ho_stock_batches. Supports 50K+ products, 30+ stores, 100K+ customers
+
 ## P0 - Remaining (Phase 3)
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
