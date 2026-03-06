@@ -426,6 +426,9 @@ async def get_task_queue(
 
 @router.get("/intel/supplier-intelligence")
 async def supplier_intelligence(
+    search: str = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
@@ -473,10 +476,23 @@ async def supplier_intelligence(
                     "mrp": p.mrp or 0, "margin_pct": round((1 - best["ptr"] / p.mrp) * 100, 1) if p.mrp and p.mrp > 0 else 0,
                 })
 
+    # Apply search filter
+    if search:
+        sl = search.lower()
+        suppliers = [s for s in suppliers if sl in s["supplier"].lower()]
+        best_per_product = [b for b in best_per_product if sl in b["product_name"].lower() or sl in b["best_supplier"].lower() or sl in (b.get("product_id") or "").lower()]
+
+    # Paginate
+    total_suppliers = len(suppliers)
+    total_best = len(best_per_product)
+    start = (page - 1) * limit
+
     return {
-        "suppliers": suppliers[:50],
-        "total_suppliers": len(suppliers),
-        "best_per_product": best_per_product[:100],
+        "suppliers": suppliers[start:start + limit],
+        "total_suppliers": total_suppliers,
+        "best_per_product": best_per_product[start:start + limit],
+        "total_best_per_product": total_best,
+        "page": page, "limit": limit,
     }
 
 
