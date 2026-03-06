@@ -173,15 +173,26 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
         if s:
             smap[s.id] = s.store_name
 
+    # Get SalesRecord data (primary source - from sales uploads)
+    sales = (await db.execute(
+        select(SalesRecord).where(SalesRecord.customer_id == customer_id)
+        .order_by(SalesRecord.invoice_date.desc())
+    )).scalars().all()
+
+    # Get MedicinePurchase data (for refill tracking)
     purchases = (await db.execute(
         select(MedicinePurchase).where(MedicinePurchase.customer_id == customer_id)
         .order_by(MedicinePurchase.purchase_date.desc())
     )).scalars().all()
 
-    # Get store names for purchases
-    psids = set(p.store_id for p in purchases)
-    if psids:
-        for s in (await db.execute(select(Store).where(Store.id.in_(psids)))).scalars().all():
+    # Get store names
+    all_sids = set()
+    for s in sales:
+        if s.store_id: all_sids.add(s.store_id)
+    for p in purchases:
+        if p.store_id: all_sids.add(p.store_id)
+    if all_sids:
+        for s in (await db.execute(select(Store).where(Store.id.in_(all_sids)))).scalars().all():
             smap[s.id] = s.store_name
 
     calls = (await db.execute(
@@ -194,14 +205,59 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
         .order_by(CRMTask.created_at.desc()).limit(10)
     )).scalars().all()
 
-    # Build timeline
-    timeline = []
-    for p in purchases:
-        timeline.append({
-            "type": "purchase", "date": p.purchase_date.isoformat() if p.purchase_date else None,
-            "title": f"Purchased {p.medicine_name}", "subtitle": f"Qty: {p.quantity}, {p.days_of_medication} days at {smap.get(p.store_id, '')}",
-            "status": p.status,
+    # --- Purchase History grouped by invoice ---
+    invoices = {}
+    total_spent = 0
+    for s in sales:
+        inv_key = s.entry_number or f"inv_{s.id}"
+        if inv_key not in invoices:
+            invoices[inv_key] = {
+                "entry_number": s.entry_number, "invoice_date": s.invoice_date.isoformat() if s.invoice_date else None,
+                "store_name": smap.get(s.store_id, ""), "items": [], "total_amount": 0,
+            }
+        amt = float(s.total_amount or 0)
+        invoices[inv_key]["items"].append({
+            "product_id": s.product_id, "product_name": s.product_name,
+            "amount": round(amt, 2), "days_of_medication": s.days_of_medication,
         })
+        invoices[inv_key]["total_amount"] += amt
+        total_spent += amt
+    invoice_list = sorted(invoices.values(), key=lambda x: x.get("invoice_date") or "", reverse=True)
+    for inv in invoice_list:
+        inv["total_amount"] = round(inv["total_amount"], 2)
+        inv["item_count"] = len(inv["items"])
+
+    # --- Medicine-wise repeat analysis ---
+    medicine_stats = {}
+    for s in sales:
+        med = s.product_name
+        if med not in medicine_stats:
+            medicine_stats[med] = {"count": 0, "total_amount": 0, "dates": [], "product_id": s.product_id}
+        medicine_stats[med]["count"] += 1
+        medicine_stats[med]["total_amount"] += float(s.total_amount or 0)
+        if s.invoice_date:
+            medicine_stats[med]["dates"].append(s.invoice_date.isoformat())
+    repeat_medicines = [
+        {"medicine": med, "purchase_count": d["count"], "total_amount": round(d["total_amount"], 2),
+         "product_id": d["product_id"], "is_repeat": d["count"] > 1,
+         "first_purchase": min(d["dates"]) if d["dates"] else None, "last_purchase": max(d["dates"]) if d["dates"] else None}
+        for med, d in medicine_stats.items()
+    ]
+    repeat_medicines.sort(key=lambda x: -x["purchase_count"])
+
+    # Build timeline from sales + calls
+    timeline = []
+    for s in sales[:50]:
+        timeline.append({
+            "type": "purchase", "date": s.invoice_date.isoformat() if s.invoice_date else None,
+            "title": f"Purchased {s.product_name}", "subtitle": f"INR {float(s.total_amount or 0):.0f} at {smap.get(s.store_id, '')}",
+        })
+    for p in purchases:
+        if p.next_due_date:
+            timeline.append({
+                "type": "refill", "date": p.purchase_date.isoformat() if p.purchase_date else None,
+                "title": f"Refill tracked: {p.medicine_name}", "subtitle": f"{p.days_of_medication}d, due {p.next_due_date.strftime('%d %b %Y') if p.next_due_date else ''}",
+            })
     for cl in calls:
         timeline.append({
             "type": "call", "date": cl.created_at.isoformat() if cl.created_at else None,
@@ -238,12 +294,18 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
             "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
         },
         "medicine_calendar": medicine_calendar,
-        "timeline": timeline[:30],
+        "invoices": invoice_list[:50],
+        "repeat_medicines": repeat_medicines[:50],
+        "timeline": timeline[:50],
         "tasks": [{
             "id": t.id, "assigned_name": t.assigned_name, "due_date": t.due_date.isoformat() if t.due_date else None,
             "status": t.status, "notes": t.notes,
         } for t in tasks],
-        "total_purchases": len(purchases),
+        "total_purchases": len(sales),
+        "total_spent": round(total_spent, 2),
+        "total_invoices": len(invoice_list),
+        "unique_medicines": len(medicine_stats),
+        "repeat_count": sum(1 for m in repeat_medicines if m["is_repeat"]),
         "total_calls": len(calls),
     }
 
