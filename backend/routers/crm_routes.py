@@ -584,8 +584,17 @@ async def upload_sales_report(
     batch_id = str(uuid.uuid4())[:12]
     success, failed, new_customers, updated_customers = 0, 0, 0, 0
     errors = []
-
     non_registered = 0
+
+    # Pre-load existing customers by mobile for fast lookup
+    existing_customers = {}
+    for c in (await db.execute(select(CRMCustomer))).scalars().all():
+        existing_customers[c.mobile_number] = c
+
+    # Process all rows - collect data first, then bulk insert
+    new_custs_to_add = {}  # mobile -> CRMCustomer
+    sales_to_add = []
+
     for idx, row in df.iterrows():
         try:
             mobile = str(row.get("mobile_number", "")).strip().replace(" ", "").replace("-", "")
@@ -597,7 +606,7 @@ async def upload_sales_report(
             if not name or name == "nan":
                 name = "Unknown Customer"
 
-            # Clean mobile - allow missing
+            # Clean mobile
             mobile_clean = None
             if mobile and mobile != "nan" and mobile != "None" and mobile != "":
                 digits = ''.join(filter(str.isdigit, mobile))
@@ -605,24 +614,6 @@ async def upload_sales_report(
                     digits = digits[-10:]
                 if len(digits) >= 10:
                     mobile_clean = digits
-
-            # Find or create customer
-            cust = None
-            if mobile_clean:
-                cust = (await db.execute(select(CRMCustomer).where(CRMCustomer.mobile_number == mobile_clean))).scalar_one_or_none()
-                if not cust:
-                    cust = CRMCustomer(
-                        mobile_number=mobile_clean, customer_name=name,
-                        first_store_id=store_id, assigned_store_id=store_id,
-                        customer_type=CustomerType.WALKIN, created_by=user["user_id"],
-                    )
-                    db.add(cust)
-                    await db.flush()
-                    new_customers += 1
-                else:
-                    if name != "Unknown Customer" and cust.customer_name != name:
-                        cust.customer_name = name
-                    updated_customers += 1
 
             # Parse invoice date
             inv_date = None
@@ -641,36 +632,63 @@ async def upload_sales_report(
                 except Exception:
                     inv_date = datetime.now(timezone.utc)
 
-            db.add(SalesRecord(
-                store_id=store_id, customer_id=cust.id if cust else None,
-                invoice_date=inv_date or datetime.now(timezone.utc),
-                entry_number=str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None,
-                patient_name=name, mobile_number=mobile_clean or "",
-                product_id=str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
-                product_name=product,
-                total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
-                upload_batch_id=batch_id,
-            ))
+            # Track new customer
+            if mobile_clean and mobile_clean not in existing_customers and mobile_clean not in new_custs_to_add:
+                new_custs_to_add[mobile_clean] = name
+                new_customers += 1
+            elif mobile_clean and mobile_clean in existing_customers:
+                updated_customers += 1
+
             if not mobile_clean:
                 non_registered += 1
+
+            sales_to_add.append({
+                "store_id": store_id, "mobile": mobile_clean, "name": name,
+                "inv_date": inv_date or datetime.now(timezone.utc),
+                "entry_number": str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None,
+                "product_id": str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
+                "product_name": product,
+                "total_amount": float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
+            })
             success += 1
         except Exception as e:
-            await db.rollback()
             errors.append(f"Row {idx+2}: {str(e)[:80]}")
             failed += 1
 
-        # Batch commit every 500 rows for performance
-        if success > 0 and success % 500 == 0:
-            try:
-                await db.commit()
-            except Exception:
-                await db.rollback()
+    # Bulk insert new customers
+    for mobile, cname in new_custs_to_add.items():
+        db.add(CRMCustomer(
+            mobile_number=mobile, customer_name=cname,
+            first_store_id=store_id, assigned_store_id=store_id,
+            customer_type=CustomerType.WALKIN, created_by=user["user_id"],
+        ))
+    try:
+        await db.flush()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(500, f"Failed to create customers: {str(e)[:200]}")
+
+    # Reload customer map with new IDs
+    all_customers = {}
+    for c in (await db.execute(select(CRMCustomer))).scalars().all():
+        all_customers[c.mobile_number] = c.id
+
+    # Bulk insert sales records
+    for s in sales_to_add:
+        cust_id = all_customers.get(s["mobile"]) if s["mobile"] else None
+        db.add(SalesRecord(
+            store_id=s["store_id"], customer_id=cust_id,
+            invoice_date=s["inv_date"], entry_number=s["entry_number"],
+            patient_name=s["name"], mobile_number=s["mobile"] or "",
+            product_id=s["product_id"], product_name=s["product_name"],
+            total_amount=s["total_amount"], upload_batch_id=batch_id,
+        ))
 
     try:
-        await _log(db, user, f"Uploaded sales report: {file.filename} for store {store_id}", "sales_upload", store_id)
         await db.commit()
-    except Exception:
+    except Exception as e:
         await db.rollback()
+        raise HTTPException(500, f"Failed to save sales records: {str(e)[:200]}")
     return {
         "message": "Sales report uploaded",
         "total": len(df), "success": success, "failed": failed,
