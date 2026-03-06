@@ -801,6 +801,226 @@ class PharmacyAPITester:
             return True
         return False
 
+    # ===== PHASE 6 INTELLIGENCE LAYER BATCH A TESTING =====
+    
+    def test_intel_dashboard(self):
+        """Test intelligence dashboard endpoint"""
+        success, response = self.run_test("Intelligence Dashboard", "GET", "api/intel/dashboard", 200)
+        if success:
+            # Verify required sections are present
+            required_sections = ['inventory', 'customer', 'operations']
+            for section in required_sections:
+                if section not in response:
+                    print(f"   ❌ Missing section '{section}' in dashboard response")
+                    return False
+                else:
+                    print(f"   ✅ Found '{section}' section in response")
+            
+            # Verify inventory section structure
+            inventory = response.get('inventory', {})
+            inv_fields = ['total_value', 'dead_stock_value', 'expiring_value', 'expiring_30d', 'expiring_60d', 'expiring_90d']
+            for field in inv_fields:
+                if field not in inventory:
+                    print(f"   ❌ Inventory missing field '{field}'")
+                    return False
+            print(f"   ✅ Inventory: Total={inventory['total_value']}, Dead={inventory['dead_stock_value']}, Expiring={inventory['expiring_value']}")
+            
+            # Verify customer section structure  
+            customer = response.get('customer', {})
+            cust_fields = ['total_customers', 'rc_customers', 'due_today', 'overdue']
+            for field in cust_fields:
+                if field not in customer:
+                    print(f"   ❌ Customer missing field '{field}'")
+                    return False
+            print(f"   ✅ Customer: Total={customer['total_customers']}, RC={customer['rc_customers']}, Due={customer['due_today']}, Overdue={customer['overdue']}")
+            
+            # Verify operations section structure
+            operations = response.get('operations', {})
+            ops_fields = ['pending_transfers', 'pending_purchases', 'redistribution_suggestions']
+            for field in ops_fields:
+                if field not in operations:
+                    print(f"   ❌ Operations missing field '{field}'")
+                    return False
+            print(f"   ✅ Operations: Transfers={operations['pending_transfers']}, Purchases={operations['pending_purchases']}, Redistribution={operations['redistribution_suggestions']}")
+                    
+        return success
+
+    def test_intel_demand_forecast(self):
+        """Test demand forecasting endpoint"""
+        # Test with default parameters
+        success1, response1 = self.run_test("Demand Forecast (Default)", "GET", "api/intel/demand-forecast", 200)
+        
+        # Test with 60-day forecast
+        success2, response2 = self.run_test("Demand Forecast (60 days)", "GET", "api/intel/demand-forecast", 200, 
+                                          params={"days": 60})
+        
+        if success1:
+            # Verify structure
+            if 'forecasts' not in response1:
+                print(f"   ❌ Missing 'forecasts' field in response")
+                return False
+            
+            forecasts = response1['forecasts']
+            total = response1.get('total', 0)
+            forecast_days = response1.get('forecast_days', 30)
+            
+            print(f"   ✅ Forecast data: {len(forecasts)} items out of {total} total products")
+            print(f"   ✅ Forecast period: {forecast_days} days")
+            
+            # Verify forecast item structure if any items exist
+            if forecasts:
+                forecast_item = forecasts[0]
+                required_fields = [
+                    'product_name', 'store_id', 'store_name', 'sales_30d', 'sales_60d', 'sales_90d',
+                    'avg_daily', 'reorder_qty', 'current_stock', 'days_of_stock', 'urgency'
+                ]
+                for field in required_fields:
+                    if field not in forecast_item:
+                        print(f"   ❌ Forecast item missing field '{field}'")
+                        return False
+                print(f"   ✅ Sample forecast: {forecast_item['product_name']} - Reorder {forecast_item['reorder_qty']} units ({forecast_item['urgency']} urgency)")
+            else:
+                print(f"   ⚠️ No forecast items (expected if no sales data)")
+                
+        return success1 and success2
+
+    def test_intel_expiry_risk(self):
+        """Test expiry risk detection endpoint"""
+        # Test with default parameters
+        success1, response1 = self.run_test("Expiry Risk (All)", "GET", "api/intel/expiry-risk", 200)
+        
+        # Test with risk level filter
+        success2, response2 = self.run_test("Expiry Risk (30d only)", "GET", "api/intel/expiry-risk", 200, 
+                                          params={"risk_level": "30d"})
+        
+        if success1:
+            # Verify structure
+            required_fields = ['items', 'summary']
+            for field in required_fields:
+                if field not in response1:
+                    print(f"   ❌ Missing field '{field}' in expiry risk response")
+                    return False
+            
+            items = response1['items']
+            summary = response1['summary']
+            
+            print(f"   ✅ Expiry risk items: {len(items)} items detected")
+            
+            # Verify summary structure
+            summary_fields = ['30d', '60d', '90d', 'total_value']
+            for field in summary_fields:
+                if field not in summary:
+                    print(f"   ❌ Summary missing field '{field}'")
+                    return False
+            print(f"   ✅ Expiry summary: 30d={summary['30d']}, 60d={summary['60d']}, 90d={summary['90d']}, Value={summary['total_value']}")
+            
+            # Verify item structure if items exist
+            if items:
+                item = items[0]
+                item_fields = [
+                    'location', 'product_name', 'batch', 'stock', 'mrp', 'expiry_date', 
+                    'days_to_expiry', 'risk_level', 'value'
+                ]
+                for field in item_fields:
+                    if field not in item:
+                        print(f"   ❌ Expiry item missing field '{field}'")
+                        return False
+                print(f"   ✅ Sample expiry item: {item['product_name']} expires in {item['days_to_expiry']} days ({item['risk_level']})")
+            else:
+                print(f"   ⚠️ No expiry risk items (expected if no expiry dates set)")
+                
+        return success1 and success2
+
+    def test_intel_redistribution(self):
+        """Test dead stock redistribution suggestions"""
+        success, response = self.run_test("Redistribution Suggestions", "GET", "api/intel/redistribution", 200)
+        
+        if success:
+            # Verify structure
+            required_fields = ['suggestions', 'total_suggestions', 'total_recoverable_value']
+            for field in required_fields:
+                if field not in response:
+                    print(f"   ❌ Missing field '{field}' in redistribution response")
+                    return False
+            
+            suggestions = response['suggestions']
+            total_suggestions = response['total_suggestions']
+            total_value = response['total_recoverable_value']
+            
+            print(f"   ✅ Redistribution: {len(suggestions)} shown out of {total_suggestions} total")
+            print(f"   ✅ Total recoverable value: {total_value}")
+            
+            # Verify suggestion structure if suggestions exist
+            if suggestions:
+                suggestion = suggestions[0]
+                suggestion_fields = [
+                    'product_name', 'from_store', 'to_store', 'quantity', 'days_dead', 
+                    'value', 'reason'
+                ]
+                for field in suggestion_fields:
+                    if field not in suggestion:
+                        print(f"   ❌ Suggestion missing field '{field}'")
+                        return False
+                print(f"   ✅ Sample suggestion: Move {suggestion['product_name']} from {suggestion['from_store']} to {suggestion['to_store']} ({suggestion['quantity']} units, {suggestion['days_dead']} days dead)")
+            else:
+                print(f"   ⚠️ No redistribution suggestions (expected if no dead stock with demand)")
+                
+        return success
+
+    def test_intel_auto_tasks(self):
+        """Test CRM auto task generation"""
+        success, response = self.run_test("Generate Auto CRM Tasks", "POST", "api/intel/auto-tasks", 200)
+        
+        if success:
+            # Verify structure
+            required_fields = ['message', 'tasks_created']
+            for field in required_fields:
+                if field not in response:
+                    print(f"   ❌ Missing field '{field}' in auto-tasks response")
+                    return False
+            
+            tasks_created = response['tasks_created']
+            message = response['message']
+            
+            print(f"   ✅ {message}")
+            print(f"   ✅ Tasks created: {tasks_created}")
+                
+        return success
+
+    def test_intel_auto_task_queue(self):
+        """Test today's auto-generated task queue"""
+        success, response = self.run_test("Auto Task Queue", "GET", "api/intel/auto-task-queue", 200)
+        
+        if success:
+            # Verify structure
+            required_fields = ['queue', 'total']
+            for field in required_fields:
+                if field not in response:
+                    print(f"   ❌ Missing field '{field}' in task queue response")
+                    return False
+            
+            queue = response['queue']
+            total = response['total']
+            
+            print(f"   ✅ Task queue: {len(queue)} tasks shown out of {total} total")
+            
+            # Verify task structure if tasks exist
+            if queue:
+                task = queue[0]
+                task_fields = [
+                    'task_id', 'customer_id', 'customer_name', 'mobile', 'store', 
+                    'customer_type', 'adherence', 'notes', 'status'
+                ]
+                for field in task_fields:
+                    if field not in task:
+                        print(f"   ❌ Task missing field '{field}'")
+                        return False
+                print(f"   ✅ Sample task: {task['customer_name']} ({task['mobile']}) - {task['notes']}")
+            else:
+                print(f"   ⚠️ No tasks in queue (expected if no auto-tasks generated)")
+                
+        return success
+
 def main():
     print("🏥 Starting Sahakar Pharmacy API Testing...")
     print("=" * 60)
@@ -884,6 +1104,15 @@ def main():
     tester.test_customer_allocation()
     tester.test_adherence_scores()
     tester.test_crm_performance_reports()
+
+    # Phase 6 Intelligence Layer tests
+    print("\n🧠 PHASE 6 INTELLIGENCE LAYER BATCH A TESTS")
+    tester.test_intel_dashboard()
+    tester.test_intel_demand_forecast()
+    tester.test_intel_expiry_risk()
+    tester.test_intel_redistribution()
+    tester.test_intel_auto_tasks()
+    tester.test_intel_auto_task_queue()
 
     # Print final results
     print("\n" + "=" * 60)

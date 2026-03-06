@@ -82,6 +82,7 @@ class HOStockBatch(Base):
     mrp = Column(Float, default=0)
     closing_stock = Column(Float, default=0)
     landing_cost_value = Column(Float, default=0)
+    expiry_date = Column(DateTime(timezone=True), nullable=True)
     upload_id = Column(Integer, ForeignKey("upload_history.id"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -100,6 +101,7 @@ class StoreStockBatch(Base):
     closing_stock = Column(Float, default=0)
     closing_stock_strips = Column(Float, default=0)
     cost_value = Column(Float, default=0)
+    expiry_date = Column(DateTime(timezone=True), nullable=True)
     upload_id = Column(Integer, ForeignKey("upload_history.id"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

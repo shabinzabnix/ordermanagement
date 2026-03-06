@@ -23,6 +23,9 @@ import RefillDuePage from '@/pages/RefillDuePage';
 import SalesUploadPage from '@/pages/SalesUploadPage';
 import CRMReportsPage from '@/pages/CRMReportsPage';
 import CRMLoginPage from '@/pages/CRMLoginPage';
+import IntelligenceDashboardPage from '@/pages/IntelligenceDashboardPage';
+import DemandForecastPage from '@/pages/DemandForecastPage';
+import ExpiryRiskPage from '@/pages/ExpiryRiskPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -55,6 +58,10 @@ function AppRoutes() {
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
       <Route path="/crm-login" element={user ? <Navigate to="/crm" replace /> : <CRMLoginPage />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+      <Route path="/intel" element={<ProtectedRoute><IntelligenceDashboardPage /></ProtectedRoute>} />
+      <Route path="/intel/forecast" element={<ProtectedRoute><DemandForecastPage /></ProtectedRoute>} />
+      <Route path="/intel/expiry" element={<ProtectedRoute><ExpiryRiskPage /></ProtectedRoute>} />
+      <Route path="/intel/redistribution" element={<ProtectedRoute><IntelligenceDashboardPage /></ProtectedRoute>} />
       <Route path="/products" element={<ProtectedRoute><ProductMasterPage /></ProtectedRoute>} />
       <Route path="/stores" element={<ProtectedRoute><StoreMasterPage /></ProtectedRoute>} />
       <Route path="/ho-stock" element={<ProtectedRoute><HOStockUploadPage /></ProtectedRoute>} />

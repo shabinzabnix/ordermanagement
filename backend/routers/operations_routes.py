@@ -24,6 +24,10 @@ HO_STOCK_COLUMNS = {
     "mrp": "mrp",
     "closing stock": "closing_stock",
     "landing cost value": "landing_cost_value",
+    "expiry date": "expiry_date",
+    "expiry": "expiry_date",
+    "exp date": "expiry_date",
+    "exp": "expiry_date",
 }
 HO_STOCK_REQUIRED = ["product_id", "batch", "closing_stock"]
 
@@ -38,6 +42,10 @@ STORE_STOCK_COLUMNS = {
     "sales": "sales",
     "closing stock": "closing_stock",
     "cost value": "cost_value",
+    "expiry date": "expiry_date",
+    "expiry": "expiry_date",
+    "exp date": "expiry_date",
+    "exp": "expiry_date",
 }
 STORE_STOCK_REQUIRED = ["product_name", "batch", "closing_stock"]
 
@@ -105,6 +113,7 @@ async def upload_ho_stock(
                 mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
                 closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
                 landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
+                expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None,
                 upload_id=upload.id,
             ))
             success += 1
@@ -206,6 +215,7 @@ async def upload_store_stock(
                 sales=float(row.get("sales", 0)) if pd.notna(row.get("sales")) else 0,
                 closing_stock=closing_stock, closing_stock_strips=closing_stock_strips,
                 cost_value=float(row.get("cost_value", 0)) if pd.notna(row.get("cost_value")) else 0,
+                expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None,
                 upload_id=upload.id,
             ))
             success += 1
