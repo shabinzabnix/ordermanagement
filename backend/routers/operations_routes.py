@@ -59,11 +59,11 @@ def map_columns(df, column_map, required_fields):
     mapped_fields = set(mapped.values())
     missing = [f for f in required_fields if f not in mapped_fields]
     if missing:
-        return None, missing
+        return None, missing, {}
     df = df.rename(columns=mapped)
     keep_cols = list(dict.fromkeys([v for v in mapped.values() if v in df.columns]))
     df = df[keep_cols]
-    return df, []
+    return df, [], {}
 
 
 # --- HO Stock ---
