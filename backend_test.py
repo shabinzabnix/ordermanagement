@@ -1021,6 +1021,202 @@ class PharmacyAPITester:
                 
         return success
 
+    # ===== PHASE 7 CLV AND CHRONIC PATIENT FEATURES TESTING =====
+    
+    def test_clv_calculation(self):
+        """Test CLV batch calculation for all customers"""
+        success, response = self.run_test("Calculate CLV for All Customers", "POST", "api/crm/calculate-clv", 200)
+        
+        if success:
+            # Verify structure
+            required_fields = ['message', 'updated']
+            for field in required_fields:
+                if field not in response:
+                    print(f"   ❌ Missing field '{field}' in CLV calculation response")
+                    return False
+            
+            updated = response['updated']
+            message = response['message']
+            
+            print(f"   ✅ {message}")
+            print(f"   ✅ Customers updated: {updated}")
+                
+        return success
+
+    def test_clv_report(self):
+        """Test CLV report with filtering"""
+        # Test all CLV tiers
+        success1, response1 = self.run_test("CLV Report (All Tiers)", "GET", "api/crm/clv-report", 200)
+        
+        # Test high tier filter
+        success2, response2 = self.run_test("CLV Report (High Tier)", "GET", "api/crm/clv-report", 200, 
+                                          params={"tier": "high"})
+        
+        # Test medium tier filter
+        success3, response3 = self.run_test("CLV Report (Medium Tier)", "GET", "api/crm/clv-report", 200, 
+                                          params={"tier": "medium"})
+        
+        # Test low tier filter
+        success4, response4 = self.run_test("CLV Report (Low Tier)", "GET", "api/crm/clv-report", 200, 
+                                          params={"tier": "low"})
+        
+        if success1:
+            # Verify structure
+            required_fields = ['customers', 'summary']
+            for field in required_fields:
+                if field not in response1:
+                    print(f"   ❌ Missing field '{field}' in CLV report response")
+                    return False
+            
+            customers = response1['customers']
+            summary = response1['summary']
+            
+            print(f"   ✅ CLV Report: {len(customers)} customers returned")
+            
+            # Verify summary structure
+            summary_fields = ['high', 'medium', 'low', 'total_value']
+            for field in summary_fields:
+                if field not in summary:
+                    print(f"   ❌ Summary missing field '{field}'")
+                    return False
+            print(f"   ✅ CLV Summary: High={summary['high']}, Medium={summary['medium']}, Low={summary['low']}, Total Value={summary['total_value']}")
+            
+            # Verify customer structure if customers exist
+            if customers:
+                customer = customers[0]
+                customer_fields = [
+                    'id', 'customer_name', 'mobile', 'store_name', 'customer_type',
+                    'clv_value', 'clv_tier', 'adherence', 'chronic_tags'
+                ]
+                for field in customer_fields:
+                    if field not in customer:
+                        print(f"   ❌ Customer missing field '{field}'")
+                        return False
+                print(f"   ✅ Sample customer: {customer['customer_name']} - CLV: {customer['clv_value']} ({customer['clv_tier']} tier)")
+            else:
+                print(f"   ⚠️ No customers in CLV report")
+                
+        return success1 and success2 and success3 and success4
+
+    def test_chronic_detection(self):
+        """Test chronic patient detection from medicine patterns"""
+        success, response = self.run_test("Detect Chronic Patients", "POST", "api/crm/detect-chronic", 200)
+        
+        if success:
+            # Verify structure
+            required_fields = ['message', 'tagged']
+            for field in required_fields:
+                if field not in response:
+                    print(f"   ❌ Missing field '{field}' in chronic detection response")
+                    return False
+            
+            tagged = response['tagged']
+            message = response['message']
+            
+            print(f"   ✅ {message}")
+            print(f"   ✅ Patients tagged: {tagged}")
+                
+        return success
+
+    def test_chronic_report(self):
+        """Test chronic patient report with filtering"""
+        # Test all conditions
+        success1, response1 = self.run_test("Chronic Report (All Conditions)", "GET", "api/crm/chronic-report", 200)
+        
+        # Test diabetes filter
+        success2, response2 = self.run_test("Chronic Report (Diabetes)", "GET", "api/crm/chronic-report", 200, 
+                                          params={"condition": "diabetes"})
+        
+        # Test blood pressure filter
+        success3, response3 = self.run_test("Chronic Report (Blood Pressure)", "GET", "api/crm/chronic-report", 200, 
+                                          params={"condition": "blood_pressure"})
+        
+        if success1:
+            # Verify structure
+            required_fields = ['patients', 'total', 'condition_breakdown']
+            for field in required_fields:
+                if field not in response1:
+                    print(f"   ❌ Missing field '{field}' in chronic report response")
+                    return False
+            
+            patients = response1['patients']
+            total = response1['total']
+            breakdown = response1['condition_breakdown']
+            
+            print(f"   ✅ Chronic Report: {len(patients)} patients shown out of {total} total")
+            
+            # Verify condition breakdown structure
+            if breakdown:
+                print(f"   ✅ Condition breakdown: {breakdown}")
+            else:
+                print(f"   ⚠️ No chronic conditions detected")
+            
+            # Verify patient structure if patients exist
+            if patients:
+                patient = patients[0]
+                patient_fields = [
+                    'id', 'customer_name', 'mobile', 'store_name', 
+                    'chronic_tags', 'adherence', 'clv_tier'
+                ]
+                for field in patient_fields:
+                    if field not in patient:
+                        print(f"   ❌ Patient missing field '{field}'")
+                        return False
+                print(f"   ✅ Sample patient: {patient['customer_name']} - Tags: {patient['chronic_tags']}")
+            else:
+                print(f"   ⚠️ No chronic patients found")
+                
+        return success1 and success2 and success3
+
+    def test_customer_profile_with_clv_chronic(self):
+        """Test customer profile includes CLV and chronic data"""
+        if not hasattr(self, 'crm_customer_id') or not self.crm_customer_id:
+            print("❌ No CRM customer ID available for profile test")
+            return False
+        
+        success, response = self.run_test("Customer Profile with CLV/Chronic", "GET", f"api/crm/customers/{self.crm_customer_id}", 200)
+        
+        if success:
+            # Verify customer object has CLV and chronic fields
+            customer = response.get('customer', {})
+            if not customer:
+                print(f"   ❌ No customer object in profile response")
+                return False
+            
+            # Check for CLV fields
+            clv_fields = ['clv_value', 'clv_tier']
+            for field in clv_fields:
+                if field not in customer:
+                    print(f"   ❌ Customer profile missing CLV field '{field}'")
+                    return False
+            
+            # Check for chronic tags field
+            if 'chronic_tags' not in customer:
+                print(f"   ❌ Customer profile missing 'chronic_tags' field")
+                return False
+            
+            clv_value = customer['clv_value']
+            clv_tier = customer['clv_tier']
+            chronic_tags = customer['chronic_tags']
+            
+            print(f"   ✅ Customer CLV: {clv_value} ({clv_tier} tier)")
+            print(f"   ✅ Chronic tags: {chronic_tags}")
+            
+            # Verify CLV tier logic
+            if clv_value >= 10000 and clv_tier != 'high':
+                print(f"   ❌ CLV tier mismatch: {clv_value} should be 'high', got '{clv_tier}'")
+                return False
+            elif 5000 <= clv_value < 10000 and clv_tier != 'medium':
+                print(f"   ❌ CLV tier mismatch: {clv_value} should be 'medium', got '{clv_tier}'")
+                return False
+            elif clv_value < 5000 and clv_tier != 'low':
+                print(f"   ❌ CLV tier mismatch: {clv_value} should be 'low', got '{clv_tier}'")
+                return False
+            else:
+                print(f"   ✅ CLV tier logic correct")
+                
+        return success
+
 def main():
     print("🏥 Starting Sahakar Pharmacy API Testing...")
     print("=" * 60)
@@ -1113,6 +1309,14 @@ def main():
     tester.test_intel_redistribution()
     tester.test_intel_auto_tasks()
     tester.test_intel_auto_task_queue()
+
+    # Phase 7 CLV and Chronic Patient Features tests
+    print("\n💰 PHASE 7 CLV AND CHRONIC PATIENT FEATURES TESTS")
+    tester.test_clv_calculation()
+    tester.test_clv_report()
+    tester.test_chronic_detection()
+    tester.test_chronic_report()
+    tester.test_customer_profile_with_clv_chronic()
 
     # Print final results
     print("\n" + "=" * 60)

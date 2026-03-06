@@ -53,6 +53,9 @@ async def startup():
         try:
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS assigned_store_id INTEGER REFERENCES stores(id)"))
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS adherence_score VARCHAR(20) DEFAULT 'unknown'"))
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS clv_value FLOAT DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS clv_tier VARCHAR(20) DEFAULT 'unknown'"))
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS chronic_tags TEXT"))
             await conn.execute(text("ALTER TABLE ho_stock_batches ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE"))
             await conn.execute(text("ALTER TABLE store_stock_batches ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE"))
         except Exception:

@@ -106,6 +106,14 @@ export default function CRMDashboardPage() {
           <Button variant="outline" className="rounded-sm font-body text-xs" onClick={() => navigate('/crm/refill-due')} data-testid="go-refill-due-btn">
             <CalendarClock className="w-3.5 h-3.5 mr-1.5" /> Refill Due
           </Button>
+          <Button variant="outline" className="rounded-sm font-body text-xs" data-testid="calc-clv-btn"
+            onClick={() => { api.post('/crm/calculate-clv').then(r => toast.success(r.data.message)).catch(() => toast.error('Failed')); }}>
+            CLV
+          </Button>
+          <Button variant="outline" className="rounded-sm font-body text-xs" data-testid="detect-chronic-btn"
+            onClick={() => { api.post('/crm/detect-chronic').then(r => toast.success(r.data.message)).catch(() => toast.error('Failed')); }}>
+            Chronic
+          </Button>
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger asChild>
               <Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" data-testid="add-crm-customer-btn">
@@ -184,22 +192,29 @@ export default function CRMDashboardPage() {
               <Table>
                 <TableHeader className="sticky top-0 bg-white z-10">
                   <TableRow className="border-b-2 border-slate-100">
-                    {['Name', 'Mobile', 'Store', 'Type', 'Medicines', 'Registered'].map(h => (
+                    {['Name', 'Mobile', 'Store', 'Type', 'CLV', 'Tags', 'Medicines'].map(h => (
                       <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3">{h}</TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {customers.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="text-center py-16"><Users className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No customers</p></TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center py-16"><Users className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No customers</p></TableCell></TableRow>
                   ) : customers.map(c => (
                     <TableRow key={c.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => navigate(`/crm/customer/${c.id}`)} data-testid={`crm-customer-row-${c.id}`}>
                       <TableCell className="font-body text-[13px] font-medium text-slate-800">{c.customer_name}</TableCell>
                       <TableCell className="font-mono text-[11px] text-slate-500">{c.mobile_number}</TableCell>
                       <TableCell className="text-[12px] text-slate-500">{c.store_name}</TableCell>
                       <TableCell><Badge className={`text-[10px] rounded-sm ${typeBadge(c.customer_type)}`}>{c.customer_type?.replace('_', ' ')}</Badge></TableCell>
+                      <TableCell>
+                        {c.clv_tier && c.clv_tier !== 'unknown' && (
+                          <Badge className={`text-[10px] rounded-sm ${c.clv_tier === 'high' ? 'bg-amber-100 text-amber-800' : c.clv_tier === 'medium' ? 'bg-sky-100 text-sky-800' : 'bg-slate-50 text-slate-500'}`}>{c.clv_tier}</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-0.5 flex-wrap">{c.chronic_tags?.map(t => <Badge key={t} className="text-[9px] rounded-sm bg-violet-50 text-violet-700 px-1">{t.replace('_',' ')}</Badge>)}</div>
+                      </TableCell>
                       <TableCell className="text-[12px] tabular-nums">{c.active_medicines}</TableCell>
-                      <TableCell className="text-[11px] text-slate-400">{c.registration_date ? new Date(c.registration_date).toLocaleDateString() : '-'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

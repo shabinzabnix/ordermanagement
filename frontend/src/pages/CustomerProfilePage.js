@@ -77,6 +77,14 @@ export default function CustomerProfilePage() {
           <p className="text-sm font-body text-slate-500 mt-0.5">{c.mobile_number} | {c.store_name}</p>
         </div>
         <Badge className={`text-xs rounded-sm ${typeBadge[c.customer_type] || 'bg-slate-100 text-slate-600'}`}>{c.customer_type?.replace('_', ' ')}</Badge>
+        {c.clv_tier && c.clv_tier !== 'unknown' && (
+          <Badge className={`text-xs rounded-sm ${c.clv_tier === 'high' ? 'bg-amber-100 text-amber-800' : c.clv_tier === 'medium' ? 'bg-sky-100 text-sky-800' : 'bg-slate-100 text-slate-600'}`}>
+            CLV: INR {(c.clv_value || 0).toLocaleString('en-IN')}
+          </Badge>
+        )}
+        {c.chronic_tags?.length > 0 && c.chronic_tags.map(tag => (
+          <Badge key={tag} className="text-[10px] rounded-sm bg-violet-100 text-violet-700">{tag.replace('_', ' ')}</Badge>
+        ))}
         <Dialog open={callOpen} onOpenChange={setCallOpen}>
           <DialogTrigger asChild><Button variant="outline" className="rounded-sm font-body text-xs" data-testid="log-call-btn"><Phone className="w-3.5 h-3.5 mr-1.5" /> Log Call</Button></DialogTrigger>
           <DialogContent className="rounded-sm"><DialogHeader><DialogTitle className="font-heading">Log CRM Call</DialogTitle></DialogHeader>
@@ -117,8 +125,8 @@ export default function CustomerProfilePage() {
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
-        {[{ l: 'Total Purchases', v: data.total_purchases }, { l: 'Active Medicines', v: data.medicine_calendar?.length || 0 }, { l: 'Total Calls', v: data.total_calls }, { l: 'Pending Tasks', v: data.tasks?.filter(t => t.status === 'pending').length || 0 }].map(k => (
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {[{ l: 'Total Purchases', v: data.total_purchases }, { l: 'Active Medicines', v: data.medicine_calendar?.length || 0 }, { l: 'Total Calls', v: data.total_calls }, { l: 'Pending Tasks', v: data.tasks?.filter(t => t.status === 'pending').length || 0 }, { l: 'Lifetime Value', v: `INR ${(c.clv_value || 0).toLocaleString('en-IN')}` }].map(k => (
           <Card key={k.l} className="border-slate-200 shadow-sm rounded-sm"><CardContent className="p-4">
             <p className="text-[10px] font-body text-slate-400 uppercase tracking-wider">{k.l}</p>
             <p className="text-xl font-heading font-bold text-slate-900 mt-0.5 tabular-nums">{k.v}</p>

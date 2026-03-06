@@ -135,6 +135,8 @@ async def list_customers(
             "first_store_id": c.first_store_id, "store_name": smap.get(c.first_store_id, ""),
             "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
             "active_medicines": med_counts.get(c.id, 0),
+            "clv_value": round(float(c.clv_value or 0), 2), "clv_tier": c.clv_tier or "unknown",
+            "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
             "registration_date": c.registration_date.isoformat() if c.registration_date else None,
         } for c in customers],
         "total": total, "page": page, "limit": limit,
@@ -230,6 +232,10 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
             "first_store_id": c.first_store_id, "store_name": smap.get(c.first_store_id, ""),
             "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
             "registration_date": c.registration_date.isoformat() if c.registration_date else None,
+            "clv_value": round(float(c.clv_value or 0), 2),
+            "clv_tier": c.clv_tier or "unknown",
+            "adherence_score": c.adherence_score or "unknown",
+            "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
         },
         "medicine_calendar": medicine_calendar,
         "timeline": timeline[:30],
@@ -882,3 +888,193 @@ async def crm_performance(
         "total_sales_imported": total_sales_records,
         "pending_medication_updates": pending_medication,
     }
+
+
+# ─── Customer Lifetime Value ────────────────────────────────
+
+CHRONIC_MEDICINE_MAP = {
+    "diabetes": ["metformin", "glimepiride", "insulin", "gliclazide", "voglibose", "sitagliptin", "dapagliflozin", "pioglitazone", "glucophage", "januvia", "jardiance", "amaryl", "galvus"],
+    "blood_pressure": ["amlodipine", "telmisartan", "losartan", "ramipril", "enalapril", "olmesartan", "atenolol", "metoprolol", "nifedipine", "valsartan", "clinidipine", "cilnidipine", "arkamin"],
+    "thyroid": ["thyronorm", "levothyroxine", "eltroxin", "thyrox", "thyroid"],
+    "cardiac": ["aspirin", "atorvastatin", "clopidogrel", "rosuvastatin", "ecosprin", "clopilet", "ticagrelor", "prasugrel", "warfarin", "rivaroxaban"],
+    "respiratory": ["montelukast", "salbutamol", "budesonide", "formoterol", "deriphyllin", "asthalin", "seroflo", "budecort"],
+    "mental_health": ["escitalopram", "sertraline", "fluoxetine", "clonazepam", "alprazolam", "olanzapine", "quetiapine", "lithium"],
+}
+
+
+@router.post("/crm/calculate-clv")
+async def calculate_clv(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "CRM_STAFF")),
+):
+    """Batch calculate CLV for all customers."""
+    now = datetime.now(timezone.utc)
+    one_year_ago = now - timedelta(days=365)
+    customers = (await db.execute(select(CRMCustomer))).scalars().all()
+    updated = 0
+
+    for c in customers:
+        # Sum total_amount from SalesRecord in last 365 days
+        total = (await db.execute(
+            select(func.sum(SalesRecord.total_amount)).where(and_(
+                SalesRecord.customer_id == c.id,
+                SalesRecord.invoice_date >= one_year_ago,
+            ))
+        )).scalar() or 0
+        total = float(total)
+
+        # Also count from MedicinePurchase if no SalesRecord
+        if total == 0:
+            purchase_count = (await db.execute(
+                select(func.count(MedicinePurchase.id)).where(and_(
+                    MedicinePurchase.customer_id == c.id,
+                    MedicinePurchase.purchase_date >= one_year_ago,
+                ))
+            )).scalar() or 0
+            total = float(purchase_count) * 500  # Estimated avg per purchase
+
+        tier = "high" if total >= 10000 else "medium" if total >= 5000 else "low"
+        c.clv_value = round(total, 2)
+        c.clv_tier = tier
+
+        # Auto-upgrade high-value customers
+        if tier == "high" and c.customer_type == CustomerType.WALKIN:
+            c.customer_type = CustomerType.HIGH_VALUE
+
+        updated += 1
+
+    await db.commit()
+    return {"message": f"CLV calculated for {updated} customers", "updated": updated}
+
+
+@router.get("/crm/clv-report")
+async def clv_report(
+    tier: str = Query("all"),
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    query = select(CRMCustomer)
+    if sf:
+        query = query.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+    elif store_id:
+        query = query.where(or_(CRMCustomer.first_store_id == store_id, CRMCustomer.assigned_store_id == store_id))
+    if tier and tier != "all":
+        query = query.where(CRMCustomer.clv_tier == tier)
+
+    customers = (await db.execute(query.order_by(CRMCustomer.clv_value.desc()))).scalars().all()
+    sids = set()
+    for c in customers:
+        if c.first_store_id: sids.add(c.first_store_id)
+        if c.assigned_store_id: sids.add(c.assigned_store_id)
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    summary = {"high": 0, "medium": 0, "low": 0, "total_value": 0}
+    result = []
+    for c in customers:
+        t = c.clv_tier or "low"
+        if t in summary:
+            summary[t] += 1
+        summary["total_value"] += float(c.clv_value or 0)
+        result.append({
+            "id": c.id, "customer_name": c.customer_name, "mobile": c.mobile_number,
+            "store_name": smap.get(c.assigned_store_id or c.first_store_id, ""),
+            "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+            "clv_value": round(float(c.clv_value or 0), 2), "clv_tier": t,
+            "adherence": c.adherence_score or "unknown",
+            "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
+        })
+
+    summary["total_value"] = round(summary["total_value"], 2)
+    return {"customers": result[:200], "summary": summary}
+
+
+# ─── Chronic Patient Identification ──────────────────────────
+
+@router.post("/crm/detect-chronic")
+async def detect_chronic_patients(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "CRM_STAFF")),
+):
+    """Auto-detect chronic conditions from medicine purchase patterns."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=90)
+    customers = (await db.execute(select(CRMCustomer))).scalars().all()
+    tagged = 0
+
+    for c in customers:
+        # Get all medicines purchased by this customer
+        medicines_q = await db.execute(
+            select(SalesRecord.product_name, func.count(SalesRecord.id).label("cnt"))
+            .where(and_(SalesRecord.customer_id == c.id, SalesRecord.invoice_date >= cutoff))
+            .group_by(SalesRecord.product_name)
+        )
+        medicines = {str(r[0]).lower(): int(r[1]) for r in medicines_q.all()}
+
+        # Also check MedicinePurchase
+        mp_q = await db.execute(
+            select(MedicinePurchase.medicine_name, func.count(MedicinePurchase.id).label("cnt"))
+            .where(and_(MedicinePurchase.customer_id == c.id, MedicinePurchase.purchase_date >= cutoff))
+            .group_by(MedicinePurchase.medicine_name)
+        )
+        for r in mp_q.all():
+            key = str(r[0]).lower()
+            medicines[key] = medicines.get(key, 0) + int(r[1])
+
+        # Detect chronic conditions
+        detected_tags = set()
+        for condition, keywords in CHRONIC_MEDICINE_MAP.items():
+            for med_name, count in medicines.items():
+                if count >= 3:  # 3+ purchases in 90 days
+                    for kw in keywords:
+                        if kw in med_name:
+                            detected_tags.add(condition)
+                            break
+
+        if detected_tags:
+            c.chronic_tags = ",".join(sorted(detected_tags))
+            if c.customer_type == CustomerType.WALKIN or c.customer_type == CustomerType.RC:
+                c.customer_type = CustomerType.CHRONIC
+            tagged += 1
+        elif not c.chronic_tags:
+            c.chronic_tags = None
+
+    await db.commit()
+    return {"message": f"Chronic detection complete. {tagged} patients tagged.", "tagged": tagged}
+
+
+@router.get("/crm/chronic-report")
+async def chronic_report(
+    condition: str = Query("all"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    query = select(CRMCustomer).where(CRMCustomer.chronic_tags.isnot(None))
+    if sf:
+        query = query.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+    customers = (await db.execute(query.order_by(CRMCustomer.customer_name))).scalars().all()
+
+    sids = set()
+    for c in customers:
+        if c.first_store_id: sids.add(c.first_store_id)
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    # Filter by condition
+    result = []
+    condition_counts = {}
+    for c in customers:
+        tags = c.chronic_tags.split(",") if c.chronic_tags else []
+        for t in tags:
+            condition_counts[t] = condition_counts.get(t, 0) + 1
+        if condition != "all" and condition not in tags:
+            continue
+        result.append({
+            "id": c.id, "customer_name": c.customer_name, "mobile": c.mobile_number,
+            "store_name": smap.get(c.first_store_id, ""),
+            "chronic_tags": tags, "adherence": c.adherence_score or "unknown",
+            "clv_tier": c.clv_tier or "unknown",
+        })
+
+    return {"patients": result, "total": len(result), "condition_breakdown": condition_counts}
