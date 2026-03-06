@@ -585,38 +585,44 @@ async def upload_sales_report(
     success, failed, new_customers, updated_customers = 0, 0, 0, 0
     errors = []
 
+    non_registered = 0
     for idx, row in df.iterrows():
         try:
             mobile = str(row.get("mobile_number", "")).strip().replace(" ", "").replace("-", "")
             name = str(row.get("patient_name", "")).strip()
             product = str(row.get("product_name", "")).strip()
-            if not mobile or not name or not product or mobile == "nan" or name == "nan" or product == "nan":
+            if not product or product == "nan":
                 failed += 1
                 continue
+            if not name or name == "nan":
+                name = "Unknown Customer"
 
-            # Clean mobile: keep last 10 digits
-            mobile_clean = ''.join(filter(str.isdigit, mobile))
-            if len(mobile_clean) > 10:
-                mobile_clean = mobile_clean[-10:]
-            if len(mobile_clean) < 10:
-                failed += 1
-                continue
+            # Clean mobile - allow missing
+            mobile_clean = None
+            if mobile and mobile != "nan" and mobile != "None" and mobile != "":
+                digits = ''.join(filter(str.isdigit, mobile))
+                if len(digits) > 10:
+                    digits = digits[-10:]
+                if len(digits) >= 10:
+                    mobile_clean = digits
 
             # Find or create customer
-            cust = (await db.execute(select(CRMCustomer).where(CRMCustomer.mobile_number == mobile_clean))).scalar_one_or_none()
-            if not cust:
-                cust = CRMCustomer(
-                    mobile_number=mobile_clean, customer_name=name,
-                    first_store_id=store_id, assigned_store_id=store_id,
-                    customer_type=CustomerType.WALKIN, created_by=user["user_id"],
-                )
-                db.add(cust)
-                await db.flush()
-                new_customers += 1
-            else:
-                if cust.customer_name != name and name != "nan":
-                    cust.customer_name = name
-                updated_customers += 1
+            cust = None
+            if mobile_clean:
+                cust = (await db.execute(select(CRMCustomer).where(CRMCustomer.mobile_number == mobile_clean))).scalar_one_or_none()
+                if not cust:
+                    cust = CRMCustomer(
+                        mobile_number=mobile_clean, customer_name=name,
+                        first_store_id=store_id, assigned_store_id=store_id,
+                        customer_type=CustomerType.WALKIN, created_by=user["user_id"],
+                    )
+                    db.add(cust)
+                    await db.flush()
+                    new_customers += 1
+                else:
+                    if name != "Unknown Customer" and cust.customer_name != name:
+                        cust.customer_name = name
+                    updated_customers += 1
 
             # Parse invoice date
             inv_date = None
@@ -636,15 +642,17 @@ async def upload_sales_report(
                     inv_date = datetime.now(timezone.utc)
 
             db.add(SalesRecord(
-                store_id=store_id, customer_id=cust.id,
+                store_id=store_id, customer_id=cust.id if cust else None,
                 invoice_date=inv_date or datetime.now(timezone.utc),
                 entry_number=str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None,
-                patient_name=name, mobile_number=mobile_clean,
+                patient_name=name, mobile_number=mobile_clean or "",
                 product_id=str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
                 product_name=product,
                 total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
                 upload_batch_id=batch_id,
             ))
+            if not mobile_clean:
+                non_registered += 1
             success += 1
         except Exception as e:
             await db.rollback()
@@ -667,6 +675,7 @@ async def upload_sales_report(
         "message": "Sales report uploaded",
         "total": len(df), "success": success, "failed": failed,
         "new_customers": new_customers, "updated_customers": updated_customers,
+        "non_registered": non_registered,
         "batch_id": batch_id, "errors": errors[:20],
     }
 
