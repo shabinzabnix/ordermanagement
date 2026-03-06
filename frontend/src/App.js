@@ -27,6 +27,7 @@ import IntelligenceDashboardPage from '@/pages/IntelligenceDashboardPage';
 import DemandForecastPage from '@/pages/DemandForecastPage';
 import ExpiryRiskPage from '@/pages/ExpiryRiskPage';
 import SupplierIntelPage from '@/pages/SupplierIntelPage';
+import StoreDashboardPage from '@/pages/StoreDashboardPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -59,6 +60,7 @@ function AppRoutes() {
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
       <Route path="/crm-login" element={user ? <Navigate to="/crm" replace /> : <CRMLoginPage />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+      <Route path="/store-dashboard" element={<ProtectedRoute><StoreDashboardPage /></ProtectedRoute>} />
       <Route path="/intel" element={<ProtectedRoute><IntelligenceDashboardPage /></ProtectedRoute>} />
       <Route path="/intel/forecast" element={<ProtectedRoute><DemandForecastPage /></ProtectedRoute>} />
       <Route path="/intel/expiry" element={<ProtectedRoute><ExpiryRiskPage /></ProtectedRoute>} />

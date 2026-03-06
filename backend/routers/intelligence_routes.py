@@ -135,52 +135,44 @@ async def intel_dashboard(
 async def demand_forecast(
     store_id: int = Query(None),
     days: int = Query(30),
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
-    """Rule-based demand forecasting using CRM sales + store stock sales."""
+    """Demand forecasting: Sales from SalesRecord ONLY, Stock from StoreStockBatch ONLY."""
     now = datetime.now(timezone.utc)
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     cutoff_30 = now - timedelta(days=30)
     cutoff_60 = now - timedelta(days=60)
     cutoff_90 = now - timedelta(days=90)
 
-    # Gather sales data from CRM SalesRecords (primary)
+    # Sales data from SalesRecord ONLY (CRM sales uploads)
     sr_query = select(SalesRecord)
     if store_id:
         sr_query = sr_query.where(SalesRecord.store_id == store_id)
     sales_records = (await db.execute(sr_query.where(SalesRecord.invoice_date >= cutoff_90))).scalars().all()
 
-    # Aggregate by product + store
-    product_sales = {}  # key: (product_name, store_id) -> {d30, d60, d90, amount}
+    product_sales = {}
     for sr in sales_records:
         key = (sr.product_name, sr.store_id)
         if key not in product_sales:
-            product_sales[key] = {"d30": 0, "d60": 0, "d90": 0, "amount": 0, "pid": sr.product_id}
+            product_sales[key] = {"d30": 0, "d60": 0, "d90": 0, "amount_30": 0, "amount_60": 0, "amount_90": 0, "pid": sr.product_id}
         product_sales[key]["d90"] += 1
-        product_sales[key]["amount"] += float(sr.total_amount or 0)
+        product_sales[key]["amount_90"] += float(sr.total_amount or 0)
         if sr.invoice_date and sr.invoice_date >= cutoff_60:
             product_sales[key]["d60"] += 1
+            product_sales[key]["amount_60"] += float(sr.total_amount or 0)
         if sr.invoice_date and sr.invoice_date >= cutoff_30:
             product_sales[key]["d30"] += 1
+            product_sales[key]["amount_30"] += float(sr.total_amount or 0)
 
-    # Fallback: use store stock batch sales column
-    ss_query = select(StoreStockBatch).where(StoreStockBatch.sales > 0)
-    if store_id:
-        ss_query = ss_query.where(StoreStockBatch.store_id == store_id)
-    for ss in (await db.execute(ss_query)).scalars().all():
-        key = (ss.product_name, ss.store_id)
-        if key not in product_sales:
-            product_sales[key] = {"d30": float(ss.sales or 0), "d60": float(ss.sales or 0), "d90": float(ss.sales or 0),
-                                  "amount": 0, "pid": ss.ho_product_id or ss.store_product_id}
-
-    # Get current stock levels
+    # Stock levels from StoreStockBatch ONLY (stock ledger)
     stock_levels = {}
     for ss in (await db.execute(select(StoreStockBatch))).scalars().all():
         key = (ss.product_name, ss.store_id)
         stock_levels[key] = stock_levels.get(key, 0) + float(ss.closing_stock_strips or 0)
 
-    # Calculate forecasts
     forecasts = []
     for (product, sid), data in product_sales.items():
         avg_daily_30 = data["d30"] / 30 if data["d30"] > 0 else 0
@@ -196,6 +188,7 @@ async def demand_forecast(
                 "product_name": product, "product_id": data.get("pid", ""),
                 "store_id": sid, "store_name": stores_map.get(sid, ""),
                 "sales_30d": data["d30"], "sales_60d": data["d60"], "sales_90d": data["d90"],
+                "revenue_30d": round(data["amount_30"], 2), "revenue_90d": round(data["amount_90"], 2),
                 "avg_daily": round(best_avg, 2),
                 "reorder_qty": reorder_qty,
                 "current_stock": round(current_stock, 1),
@@ -204,7 +197,9 @@ async def demand_forecast(
             })
 
     forecasts.sort(key=lambda x: x["days_of_stock"])
-    return {"forecasts": forecasts[:200], "total": len(forecasts), "forecast_days": days}
+    total = len(forecasts)
+    start = (page - 1) * limit
+    return {"forecasts": forecasts[start:start + limit], "total": total, "forecast_days": days, "page": page, "limit": limit}
 
 
 # ─── Expiry Risk Detection ────────────────────────────────
@@ -635,3 +630,126 @@ async def enhanced_store_performance(
 
     results.sort(key=lambda x: -x["total_clv"])
     return {"stores": results}
+
+
+# ─── Store-wise Dashboard ──────────────────────────────────
+
+@router.get("/intel/store-dashboard/{store_id}")
+async def store_dashboard(
+    store_id: int,
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Store-wise dashboard: stock value from ledger, sales from sales uploads, date-wise breakdown."""
+    now = datetime.now(timezone.utc)
+    store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
+    if not store:
+        return {"error": "Store not found"}
+
+    # Parse date range
+    d_from = now - timedelta(days=30)
+    d_to = now
+    if date_from:
+        try: d_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+        except: pass
+    if date_to:
+        try: d_to = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
+        except: pass
+
+    # Stock Value from StoreStockBatch (stock ledger)
+    stock_value = float((await db.execute(
+        select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == store_id)
+    )).scalar() or 0)
+    total_stock_units = float((await db.execute(
+        select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == store_id)
+    )).scalar() or 0)
+    total_sku = (await db.execute(
+        select(func.count(StoreStockBatch.id)).where(StoreStockBatch.store_id == store_id)
+    )).scalar() or 0
+
+    # Sales from SalesRecord ONLY (sales uploads)
+    total_sales_count = (await db.execute(
+        select(func.count(SalesRecord.id)).where(and_(
+            SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to,
+        ))
+    )).scalar() or 0
+    total_sales_value = float((await db.execute(
+        select(func.sum(SalesRecord.total_amount)).where(and_(
+            SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to,
+        ))
+    )).scalar() or 0)
+
+    # Date-wise sales breakdown from SalesRecord
+    from sqlalchemy import cast, Date
+    daily_sales_q = (await db.execute(
+        select(
+            cast(SalesRecord.invoice_date, Date).label("sale_date"),
+            func.count(SalesRecord.id).label("count"),
+            func.sum(SalesRecord.total_amount).label("amount"),
+        ).where(and_(
+            SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to,
+        )).group_by(cast(SalesRecord.invoice_date, Date)).order_by(cast(SalesRecord.invoice_date, Date))
+    )).all()
+    daily_sales = [{"date": str(r[0]), "invoices": int(r[1] or 0), "amount": round(float(r[2] or 0), 2)} for r in daily_sales_q]
+
+    # Top selling products from SalesRecord
+    top_products_q = (await db.execute(
+        select(SalesRecord.product_name, func.count(SalesRecord.id).label("cnt"), func.sum(SalesRecord.total_amount).label("amt"))
+        .where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to))
+        .group_by(SalesRecord.product_name).order_by(func.sum(SalesRecord.total_amount).desc()).limit(20)
+    )).all()
+    top_products = [{"product": str(r[0]), "count": int(r[1] or 0), "amount": round(float(r[2] or 0), 2)} for r in top_products_q]
+
+    # Customer count for this store
+    customer_count = (await db.execute(
+        select(func.count(CRMCustomer.id)).where(
+            (CRMCustomer.first_store_id == store_id) | (CRMCustomer.assigned_store_id == store_id)
+        )
+    )).scalar() or 0
+
+    return {
+        "store": {"id": store.id, "name": store.store_name, "code": store.store_code, "location": store.location},
+        "stock": {"value": round(stock_value, 2), "units": round(total_stock_units, 1), "sku_count": total_sku},
+        "sales": {"count": total_sales_count, "value": round(total_sales_value, 2), "period_from": d_from.isoformat(), "period_to": d_to.isoformat()},
+        "daily_sales": daily_sales,
+        "top_products": top_products,
+        "customer_count": customer_count,
+    }
+
+
+@router.get("/intel/store-dashboard-summary")
+async def store_dashboard_summary(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """All stores summary: stock value + sales value."""
+    now = datetime.now(timezone.utc)
+    d30 = now - timedelta(days=30)
+    stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
+
+    result = []
+    for s in stores:
+        stock_value = float((await db.execute(
+            select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == s.id)
+        )).scalar() or 0)
+        sales_value = float((await db.execute(
+            select(func.sum(SalesRecord.total_amount)).where(and_(SalesRecord.store_id == s.id, SalesRecord.invoice_date >= d30))
+        )).scalar() or 0)
+        sales_count = (await db.execute(
+            select(func.count(SalesRecord.id)).where(and_(SalesRecord.store_id == s.id, SalesRecord.invoice_date >= d30))
+        )).scalar() or 0
+        stock_units = float((await db.execute(
+            select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == s.id)
+        )).scalar() or 0)
+
+        if stock_value > 0 or sales_value > 0:
+            result.append({
+                "store_id": s.id, "store_name": s.store_name, "store_code": s.store_code,
+                "stock_value": round(stock_value, 2), "stock_units": round(stock_units, 1),
+                "sales_value": round(sales_value, 2), "sales_count": sales_count,
+            })
+
+    result.sort(key=lambda x: -x["sales_value"])
+    return {"stores": result}
