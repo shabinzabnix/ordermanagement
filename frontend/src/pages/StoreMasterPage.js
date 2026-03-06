@@ -58,7 +58,8 @@ export default function StoreMasterPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label className="font-body text-xs">Store Code *</Label>
-                  <Input data-testid="store-code-input" value={form.store_code} onChange={e => setForm({...form, store_code: e.target.value})} required className="rounded-sm" />
+                  <Input data-testid="store-code-input" value={form.store_code} onChange={e => setForm({...form, store_code: e.target.value.toUpperCase()})} required className="rounded-sm font-mono" placeholder="e.g. STORE001" />
+                  <p className="text-[10px] text-slate-400 font-body">Enter a unique store code manually</p>
                 </div>
               </div>
               <div className="space-y-1.5">
