@@ -43,7 +43,7 @@ export default function SalesUploadPage() {
     setUploading(true); setUploadResult(null);
     const fd = new FormData(); fd.append('file', file);
     try {
-      const res = await api.post(`/crm/sales-upload?store_id=${selectedStore}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.post(`/crm/sales-upload?store_id=${selectedStore}`, fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
       setUploadResult(res.data);
       toast.success(`Imported: ${res.data.success}/${res.data.total} records, ${res.data.new_customers} new customers`);
       loadRecords();
