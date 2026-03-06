@@ -46,6 +46,12 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 17. Staff Audit Log tracking all user actions
 18. Batch-level detail views per product
 
+## What's Been Implemented (Phase 2.5 - March 2026)
+19. Dashboard Charts with Recharts (Aging Distribution BarChart, Stock Distribution PieChart)
+20. Role-based data filtering (store_staff sees only their store's transfers, purchases, dashboard stats)
+21. Transfer quantity validation (checks source store stock, shows availability indicator, blocks excess transfers)
+22. Auto-store selection for store_staff users across all forms
+
 ## P0 - Remaining (Phase 3)
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
