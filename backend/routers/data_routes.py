@@ -190,17 +190,20 @@ async def upload_products(
 
     await db.commit()
 
-    upload = UploadHistory(
-        file_name=file.filename,
-        upload_type=UploadType.PRODUCT_MASTER,
-        uploaded_by=user["user_id"],
-        total_records=len(df_mapped),
-        success_records=success,
-        failed_records=failed,
-        error_details=json.dumps(errors) if errors else None,
-    )
-    db.add(upload)
-    await db.commit()
+    try:
+        upload = UploadHistory(
+            file_name=file.filename,
+            upload_type=UploadType.PRODUCT_MASTER,
+            uploaded_by=user["user_id"],
+            total_records=len(df_mapped),
+            success_records=success,
+            failed_records=failed,
+            error_details=json.dumps(errors) if errors else None,
+        )
+        db.add(upload)
+        await db.commit()
+    except Exception:
+        await db.rollback()
 
     return {"message": "Upload complete", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20],
             "columns_matched": col_info.get("matched", {}), "columns_unmatched": col_info.get("unmatched", [])[:20]}
