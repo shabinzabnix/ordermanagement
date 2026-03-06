@@ -109,9 +109,49 @@ async def list_customers(
         query = query.where(CRMCustomer.customer_type == CustomerType(customer_type))
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar()
-    customers = (await db.execute(
-        query.order_by(CRMCustomer.customer_name).offset((page - 1) * limit).limit(limit)
-    )).scalars().all()
+
+    # For sort by invoices/spent, we need to join with SalesRecord aggregation
+    if sort_by in ("invoices", "spent"):
+        from sqlalchemy import outerjoin, literal_column
+        sales_agg = (
+            select(
+                SalesRecord.customer_id,
+                func.count(func.distinct(SalesRecord.entry_number)).label("inv_cnt"),
+                func.sum(SalesRecord.total_amount).label("total_amt"),
+            ).group_by(SalesRecord.customer_id)
+        ).subquery()
+
+        joined_q = (
+            select(CRMCustomer, sales_agg.c.inv_cnt, sales_agg.c.total_amt)
+            .outerjoin(sales_agg, CRMCustomer.id == sales_agg.c.customer_id)
+        )
+        # Apply same filters
+        if search:
+            joined_q = joined_q.where(or_(CRMCustomer.customer_name.ilike(f"%{search}%"), CRMCustomer.mobile_number.ilike(f"%{search}%")))
+        if sf:
+            joined_q = joined_q.where(CRMCustomer.first_store_id == sf)
+        elif store_id:
+            joined_q = joined_q.where(CRMCustomer.first_store_id == store_id)
+        if customer_type and customer_type != "all":
+            joined_q = joined_q.where(CRMCustomer.customer_type == CustomerType(customer_type))
+
+        if sort_by == "invoices":
+            joined_q = joined_q.order_by(func.coalesce(sales_agg.c.inv_cnt, 0).desc())
+        else:
+            joined_q = joined_q.order_by(func.coalesce(sales_agg.c.total_amt, 0).desc())
+
+        joined_q = joined_q.offset((page - 1) * limit).limit(limit)
+        rows = (await db.execute(joined_q)).all()
+        customers = [r[0] for r in rows]
+        # Pre-fill invoice/spent from joined data
+        invoice_prefill = {r[0].id: int(r[1] or 0) for r in rows}
+        spent_prefill = {r[0].id: round(float(r[2] or 0), 2) for r in rows}
+    else:
+        customers = (await db.execute(
+            query.order_by(CRMCustomer.customer_name).offset((page - 1) * limit).limit(limit)
+        )).scalars().all()
+        invoice_prefill = None
+        spent_prefill = None
 
     sids = set(c.first_store_id for c in customers if c.first_store_id)
     smap = {}
@@ -130,19 +170,23 @@ async def list_customers(
         )).all()
         med_counts = {r[0]: r[1] for r in mc_q}
 
-        # Invoice count and total spent from SalesRecord
-        inv_q = (await db.execute(
-            select(
-                SalesRecord.customer_id,
-                func.count(func.distinct(SalesRecord.entry_number)).label("inv_cnt"),
-                func.sum(SalesRecord.total_amount).label("total_amt"),
-            )
-            .where(SalesRecord.customer_id.in_(cids))
-            .group_by(SalesRecord.customer_id)
-        )).all()
-        for r in inv_q:
-            invoice_counts[r[0]] = int(r[1] or 0)
-            total_spent[r[0]] = round(float(r[2] or 0), 2)
+        # Invoice count and total spent - use prefill if available, otherwise query
+        if invoice_prefill is not None:
+            invoice_counts = invoice_prefill
+            total_spent = spent_prefill
+        else:
+            inv_q = (await db.execute(
+                select(
+                    SalesRecord.customer_id,
+                    func.count(func.distinct(SalesRecord.entry_number)).label("inv_cnt"),
+                    func.sum(SalesRecord.total_amount).label("total_amt"),
+                )
+                .where(SalesRecord.customer_id.in_(cids))
+                .group_by(SalesRecord.customer_id)
+            )).all()
+            for r in inv_q:
+                invoice_counts[r[0]] = int(r[1] or 0)
+                total_spent[r[0]] = round(float(r[2] or 0), 2)
 
     result = [{
         "id": c.id, "mobile_number": c.mobile_number, "customer_name": c.customer_name,
@@ -156,12 +200,6 @@ async def list_customers(
         "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
         "registration_date": c.registration_date.isoformat() if c.registration_date else None,
     } for c in customers]
-
-    # Sort
-    if sort_by == "invoices":
-        result.sort(key=lambda x: -x["invoice_count"])
-    elif sort_by == "spent":
-        result.sort(key=lambda x: -x["total_spent"])
 
     return {"customers": result, "total": total, "page": page, "limit": limit}
 
