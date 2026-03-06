@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
-import { Upload, Search, ChevronLeft, ChevronRight, Package } from 'lucide-react';
+import { Upload, Search, ChevronLeft, ChevronRight, Package, Download } from 'lucide-react';
+import { downloadExcel } from '../lib/api';
 
 export default function ProductMasterPage() {
   const [products, setProducts] = useState([]);
@@ -72,6 +73,10 @@ export default function ProductMasterPage() {
               <Upload className="w-3.5 h-3.5 mr-1.5" /> Upload Excel
             </Button>
           </DialogTrigger>
+          <Button variant="outline" className="rounded-sm font-body text-xs ml-2" data-testid="export-products-btn"
+            onClick={() => downloadExcel('/export/products', 'products.xlsx').catch(() => toast.error('Export failed'))}>
+            <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+          </Button>
           <DialogContent className="rounded-sm">
             <DialogHeader><DialogTitle className="font-heading">Upload Product Master</DialogTitle></DialogHeader>
             <p className="text-sm text-slate-500 font-body">Required columns: Product ID, Product Name. Other standard columns mapped automatically.</p>

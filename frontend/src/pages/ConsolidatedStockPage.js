@@ -5,7 +5,10 @@ import { Card, CardContent } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
-import { Search, BarChart3 } from 'lucide-react';
+import { Search, BarChart3, Download } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { downloadExcel } from '../lib/api';
+import { toast } from 'sonner';
 
 export default function ConsolidatedStockPage() {
   const [data, setData] = useState({ consolidated: [], stores: [] });
@@ -29,9 +32,15 @@ export default function ConsolidatedStockPage() {
 
   return (
     <div data-testid="consolidated-stock-page" className="space-y-5">
-      <div>
-        <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Consolidated Stock</h2>
-        <p className="text-sm font-body text-slate-500 mt-0.5">Network-wide inventory across all locations</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Consolidated Stock</h2>
+          <p className="text-sm font-body text-slate-500 mt-0.5">Network-wide inventory across all locations</p>
+        </div>
+        <Button variant="outline" className="rounded-sm font-body text-xs" data-testid="export-consolidated-btn"
+          onClick={() => downloadExcel('/export/consolidated', 'consolidated.xlsx').catch(() => toast.error('Export failed'))}>
+          <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+        </Button>
       </div>
 
       <Card className="border-slate-200 shadow-sm rounded-sm">

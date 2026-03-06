@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { ShoppingCart, Plus, AlertTriangle } from 'lucide-react';
+import { ShoppingCart, Plus, AlertTriangle, Download } from 'lucide-react';
+import { downloadExcel } from '../lib/api';
 
 export default function PurchaseRequestsPage() {
   const [purchases, setPurchases] = useState([]);
@@ -80,6 +81,10 @@ export default function PurchaseRequestsPage() {
               <Plus className="w-3.5 h-3.5 mr-1.5" /> New Request
             </Button>
           </DialogTrigger>
+          <Button variant="outline" className="rounded-sm font-body text-xs ml-2" data-testid="export-purchases-btn"
+            onClick={() => downloadExcel('/export/purchases', 'purchases.xlsx').catch(() => toast.error('Export failed'))}>
+            <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+          </Button>
           <DialogContent className="rounded-sm max-w-lg">
             <DialogHeader><DialogTitle className="font-heading">Create Purchase Request</DialogTitle></DialogHeader>
             <Tabs value={tab} onValueChange={v => { setTab(v); setResult(null); }}>

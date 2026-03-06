@@ -6,7 +6,8 @@ import { Card, CardContent } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Upload, Search, Archive } from 'lucide-react';
+import { Upload, Search, Archive, Download } from 'lucide-react';
+import { downloadExcel } from '../lib/api';
 
 export default function StoreStockUploadPage() {
   const [stores, setStores] = useState([]);
@@ -61,6 +62,12 @@ export default function StoreStockUploadPage() {
               <span><Upload className="w-3.5 h-3.5 mr-1.5" />{uploading ? 'Processing...' : 'Upload Stock'}</span>
             </Button>
           </label>
+          {selectedStore && (
+            <Button variant="outline" className="rounded-sm font-body text-xs ml-2" data-testid="export-store-btn"
+              onClick={() => downloadExcel(`/export/store-stock/${selectedStore}`, 'store_stock.xlsx').catch(() => toast.error('Export failed'))}>
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+            </Button>
+          )}
         </div>
       </div>
 

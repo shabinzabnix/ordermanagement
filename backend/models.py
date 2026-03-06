@@ -150,3 +150,30 @@ class UploadHistory(Base):
     failed_records = Column(Integer, default=0)
     error_details = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class RCCustomer(Base):
+    __tablename__ = "rc_customers"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    customer_name = Column(String(255), nullable=False)
+    mobile_number = Column(String(50), nullable=False)
+    medicine_name = Column(String(500), nullable=False)
+    last_purchase_date = Column(DateTime(timezone=True))
+    duration_of_medication = Column(Integer, default=0)
+    days_of_consumption = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_name = Column(String(255))
+    action = Column(String(500), nullable=False)
+    entity_type = Column(String(100))
+    entity_id = Column(String(100))
+    details = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

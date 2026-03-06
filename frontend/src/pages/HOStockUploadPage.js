@@ -5,7 +5,8 @@ import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { toast } from 'sonner';
-import { Upload, Search, Warehouse } from 'lucide-react';
+import { Upload, Search, Warehouse, Download } from 'lucide-react';
+import { downloadExcel } from '../lib/api';
 
 export default function HOStockUploadPage() {
   const [stocks, setStocks] = useState([]);
@@ -55,6 +56,10 @@ export default function HOStockUploadPage() {
               <span><Upload className="w-3.5 h-3.5 mr-1.5" />{uploading ? 'Processing...' : 'Upload Stock Excel'}</span>
             </Button>
           </label>
+          <Button variant="outline" className="rounded-sm font-body text-xs ml-2" data-testid="export-ho-btn"
+            onClick={() => downloadExcel('/export/ho-stock', 'ho_stock.xlsx').catch(() => toast.error('Export failed'))}>
+            <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+          </Button>
         </div>
       </div>
 

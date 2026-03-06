@@ -285,6 +285,101 @@ class PharmacyAPITester:
         """Test stock availability for a product"""
         return self.run_test("Get Product Availability", "GET", "api/stock/availability/P001", 200)
 
+    # ===== PHASE 2 NEW FEATURES TESTING =====
+    
+    def test_aging_report(self):
+        """Test inventory aging report"""
+        # Test basic aging report
+        success, response = self.run_test("Get Aging Report", "GET", "api/aging/report", 200)
+        if success:
+            print(f"   Aging summary: {response.get('summary', {})}")
+            print(f"   Dead stock count: {response.get('dead_count', 0)}")
+            print(f"   Slow stock count: {response.get('slow_count', 0)}")
+        
+        # Test with location filter
+        success2, response2 = self.run_test("Get Aging Report with Filter", "GET", "api/aging/report", 200, 
+                                           params={"location": "Head Office"})
+        return success and success2
+
+    def test_intelligence_summary(self):
+        """Test intelligence dashboard summary"""
+        success, response = self.run_test("Get Intelligence Summary", "GET", "api/intelligence/summary", 200)
+        if success:
+            print(f"   Dead stock items: {len(response.get('dead_stock', []))}")
+            print(f"   Slow moving items: {len(response.get('slow_moving', []))}")
+            print(f"   Transfer recommendations: {len(response.get('recommendations', []))}")
+        return success
+
+    def test_batch_details(self):
+        """Test batch details for a product"""
+        return self.run_test("Get Batch Details", "GET", "api/stock/batch-details/P001", 200)
+
+    def test_rc_customers_crud(self):
+        """Test RC Customer CRUD operations"""
+        if not self.store_id:
+            print("❌ No store_id available for RC customers test")
+            return False
+
+        # Get existing customers
+        success, response = self.run_test("Get RC Customers", "GET", "api/customers", 200)
+        if not success:
+            return False
+
+        # Create new RC customer
+        customer_data = {
+            "store_id": self.store_id,
+            "customer_name": f"Test Customer {datetime.now().strftime('%H%M%S')}",
+            "mobile_number": "9876543210",
+            "medicine_name": "Test Medicine",
+            "last_purchase_date": datetime.now().strftime('%Y-%m-%d'),
+            "duration_of_medication": 30,
+            "days_of_consumption": 7
+        }
+        success, response = self.run_test("Create RC Customer", "POST", "api/customers", 200, data=customer_data)
+        if success:
+            customer_id = response.get('id')
+            print(f"   Created RC customer with ID: {customer_id}")
+        
+        return success
+
+    def test_refill_reminders(self):
+        """Test refill reminders for RC customers"""
+        return self.run_test("Get Refill Reminders", "GET", "api/customers/refill-reminders", 200)
+
+    def test_audit_logs(self):
+        """Test audit log retrieval"""
+        success, response = self.run_test("Get Audit Logs", "GET", "api/audit-logs", 200, 
+                                         params={"page": 1, "limit": 10})
+        if success:
+            print(f"   Total audit logs: {response.get('total', 0)}")
+        return success
+
+    def test_excel_exports(self):
+        """Test Excel export functionality"""
+        exports = [
+            ("Products Export", "api/export/products"),
+            ("HO Stock Export", "api/export/ho-stock"),
+            ("Consolidated Export", "api/export/consolidated"),
+            ("Transfers Export", "api/export/transfers"),
+            ("Purchases Export", "api/export/purchases"),
+            ("Uploads Export", "api/export/uploads"),
+            ("Aging Export", "api/export/aging")
+        ]
+        
+        all_success = True
+        for export_name, endpoint in exports:
+            success, response = self.run_test(export_name, "GET", endpoint, 200)
+            if not success:
+                all_success = False
+        
+        # Test store stock export if we have a store
+        if self.store_id:
+            success, response = self.run_test("Store Stock Export", "GET", f"api/export/store-stock/{self.store_id}", 200)
+            if not success:
+                all_success = False
+                
+        return all_success
+
 def main():
     print("🏥 Starting Sahakar Pharmacy API Testing...")
     print("=" * 60)
@@ -334,6 +429,16 @@ def main():
     # History tests
     print("\n📋 HISTORY TESTS")
     tester.test_upload_history()
+
+    # Phase 2 new features tests
+    print("\n🚀 PHASE 2 NEW FEATURES TESTS")
+    tester.test_aging_report()
+    tester.test_intelligence_summary()
+    tester.test_batch_details()
+    tester.test_rc_customers_crud()
+    tester.test_refill_reminders()
+    tester.test_audit_logs()
+    tester.test_excel_exports()
 
     # Print final results
     print("\n" + "=" * 60)

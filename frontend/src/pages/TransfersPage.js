@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '../components/ui/dialog';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
-import { ArrowLeftRight, Plus, Check, X } from 'lucide-react';
+import { ArrowLeftRight, Plus, Check, X, Download } from 'lucide-react';
+import { downloadExcel } from '../lib/api';
 
 export default function TransfersPage() {
   const [transfers, setTransfers] = useState([]);
@@ -77,6 +78,10 @@ export default function TransfersPage() {
               <Plus className="w-3.5 h-3.5 mr-1.5" /> New Transfer
             </Button>
           </DialogTrigger>
+          <Button variant="outline" className="rounded-sm font-body text-xs ml-2" data-testid="export-transfers-btn"
+            onClick={() => downloadExcel('/export/transfers', 'transfers.xlsx').catch(() => toast.error('Export failed'))}>
+            <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+          </Button>
           <DialogContent className="rounded-sm max-w-lg">
             <DialogHeader><DialogTitle className="font-heading">Request Stock Transfer</DialogTitle></DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">

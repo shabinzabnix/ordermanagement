@@ -10,6 +10,7 @@ from auth import hash_password
 from routers.auth_routes import router as auth_router
 from routers.data_routes import router as data_router
 from routers.operations_routes import router as operations_router
+from routers.phase2_routes import router as phase2_router
 from sqlalchemy import select
 
 ROOT_DIR = Path(__file__).parent
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(data_router, prefix="/api", tags=["Data"])
 app.include_router(operations_router, prefix="/api", tags=["Operations"])
+app.include_router(phase2_router, prefix="/api", tags=["Phase2"])
 
 
 @app.on_event("startup")

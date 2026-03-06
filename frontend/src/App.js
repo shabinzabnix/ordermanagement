@@ -13,6 +13,9 @@ import TransfersPage from '@/pages/TransfersPage';
 import PurchaseRequestsPage from '@/pages/PurchaseRequestsPage';
 import UserManagementPage from '@/pages/UserManagementPage';
 import UploadHistoryPage from '@/pages/UploadHistoryPage';
+import InventoryAgingPage from '@/pages/InventoryAgingPage';
+import RCCustomerPage from '@/pages/RCCustomerPage';
+import AuditLogPage from '@/pages/AuditLogPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -53,6 +56,9 @@ function AppRoutes() {
       <Route path="/purchases" element={<ProtectedRoute><PurchaseRequestsPage /></ProtectedRoute>} />
       <Route path="/users" element={<ProtectedRoute><UserManagementPage /></ProtectedRoute>} />
       <Route path="/uploads" element={<ProtectedRoute><UploadHistoryPage /></ProtectedRoute>} />
+      <Route path="/aging" element={<ProtectedRoute><InventoryAgingPage /></ProtectedRoute>} />
+      <Route path="/customers" element={<ProtectedRoute><RCCustomerPage /></ProtectedRoute>} />
+      <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

@@ -4,7 +4,10 @@ import { Card } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
-import { FileUp } from 'lucide-react';
+import { FileUp, Download } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { downloadExcel } from '../lib/api';
+import { toast } from 'sonner';
 
 export default function UploadHistoryPage() {
   const [uploads, setUploads] = useState([]);
@@ -23,7 +26,12 @@ export default function UploadHistoryPage() {
           <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Upload History</h2>
           <p className="text-sm font-body text-slate-500 mt-0.5">Track all file uploads</p>
         </div>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="rounded-sm font-body text-xs" data-testid="export-uploads-btn"
+            onClick={() => downloadExcel('/export/uploads', 'uploads.xlsx').catch(() => toast.error('Export failed'))}>
+            <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+          </Button>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="w-[180px] font-body text-sm rounded-sm" data-testid="upload-type-filter">
             <SelectValue placeholder="All Types" />
           </SelectTrigger>
@@ -34,6 +42,7 @@ export default function UploadHistoryPage() {
             <SelectItem value="store_stock">Store Stock</SelectItem>
           </SelectContent>
         </Select>
+        </div>
       </div>
 
       <Card className="border-slate-200 shadow-sm rounded-sm">
