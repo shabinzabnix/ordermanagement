@@ -328,7 +328,7 @@ async def create_user(
         email=data.email,
         password_hash=hash_password(data.password),
         full_name=data.full_name,
-        role=UserRole(data.role),
+        role=UserRole(data.role.upper()),
         store_id=data.store_id,
         is_active=True,
     )

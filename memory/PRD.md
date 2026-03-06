@@ -70,6 +70,15 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 35. CRM Task Management - assign follow-ups to staff
 36. Store-level access control for CRM data
 
+## What's Been Implemented (Phase 5 - CRM Enhancement - March 2026)
+37. Separate CRM Portal Login (/crm-login) with crm_staff role - CRM users only see CRM modules
+38. Daily Sales Report Excel Upload - auto-creates/updates customer profiles from pharmacy software export
+39. Medication Duration Manual Entry - CRM staff sets days of medication per sale, triggers refill tracking
+40. Store Allocation - auto-assign on upload + manual reassignment by CRM manager
+41. CRM Performance Reports - call conversion rates, store-wise customer retention, sales import stats
+42. Rule-based Adherence Scoring - High (on-time), Medium (5-10d delay), Low (15+d overdue)
+43. Bulk Customer Import via sales data upload
+
 ## P0 - Remaining (Phase 3)
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
