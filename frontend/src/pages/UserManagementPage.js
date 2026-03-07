@@ -140,7 +140,8 @@ export default function UserManagementPage() {
                 </div>
               )}
 
-              {/* Service Access Selection */}
+              {/* Service Access Selection - only for Admin, HO Staff, CRM Staff */}
+              {form.role && form.role !== 'STORE_STAFF' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="font-body text-xs font-medium">Allowed Services / Modules</Label>
@@ -164,6 +165,11 @@ export default function UserManagementPage() {
                 </div>
                 <p className="text-[10px] font-body text-slate-400">{selectedServices.length} of {ALL_SERVICES.length} services selected. Leave empty for default role-based access.</p>
               </div>
+              )}
+
+              {form.role === 'STORE_STAFF' && (
+                <p className="text-[11px] font-body text-slate-500 bg-slate-50 p-3 rounded-sm">Store Staff gets access to all store-related modules for their assigned store automatically.</p>
+              )}
 
               <DialogFooter>
                 <Button type="submit" data-testid="save-user-btn" className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" disabled={saving}>
