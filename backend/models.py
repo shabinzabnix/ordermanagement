@@ -285,6 +285,7 @@ class SalesRecord(Base):
     mobile_number = Column(String(50), index=True)
     product_id = Column(String(100))
     product_name = Column(String(500))
+    quantity = Column(Float, default=0)
     total_amount = Column(Float, default=0)
     days_of_medication = Column(Integer, nullable=True)
     next_due_date = Column(DateTime(timezone=True), nullable=True)

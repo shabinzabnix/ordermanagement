@@ -694,13 +694,16 @@ async def store_dashboard(
     )).all()
     daily_sales = [{"date": str(r[0]), "invoices": int(r[1] or 0), "amount": round(float(r[2] or 0), 2)} for r in daily_sales_q]
 
-    # Top selling products from SalesRecord
+    # Top selling products from SalesRecord - use SUM(quantity) for actual qty sold
     top_products_q = (await db.execute(
-        select(SalesRecord.product_name, func.count(SalesRecord.id).label("cnt"), func.sum(SalesRecord.total_amount).label("amt"))
+        select(SalesRecord.product_name,
+               func.sum(SalesRecord.quantity).label("qty"),
+               func.count(SalesRecord.id).label("cnt"),
+               func.sum(SalesRecord.total_amount).label("amt"))
         .where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to))
         .group_by(SalesRecord.product_name).order_by(func.sum(SalesRecord.total_amount).desc()).limit(20)
     )).all()
-    top_products = [{"product": str(r[0]), "count": int(r[1] or 0), "amount": round(float(r[2] or 0), 2)} for r in top_products_q]
+    top_products = [{"product": str(r[0]), "qty": round(float(r[1] or 0), 0), "count": int(r[2] or 0), "amount": round(float(r[3] or 0), 2)} for r in top_products_q]
 
     # Customer count for this store
     customer_count = (await db.execute(

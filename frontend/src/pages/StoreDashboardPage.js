@@ -154,8 +154,8 @@ export default function StoreDashboardPage() {
                 <Table>
                   <TableHeader className="sticky top-0 bg-white z-10">
                     <TableRow className="border-b-2 border-slate-100">
-                      {['#', 'Product', 'Sales Count', 'Revenue'].map(h => (
-                        <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['Sales Count','Revenue'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                      {['#', 'Product', 'Qty Sold', 'Invoices', 'Revenue'].map(h => (
+                        <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['Qty Sold','Invoices','Revenue'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
@@ -164,7 +164,8 @@ export default function StoreDashboardPage() {
                       <TableRow key={i} className="hover:bg-slate-50/50">
                         <TableCell className="text-[11px] text-slate-400 font-medium">{i + 1}</TableCell>
                         <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.product}</TableCell>
-                        <TableCell className="text-right text-[12px] tabular-nums">{p.count}</TableCell>
+                        <TableCell className="text-right text-[12px] tabular-nums font-medium">{p.qty}</TableCell>
+                        <TableCell className="text-right text-[12px] tabular-nums text-slate-500">{p.count}</TableCell>
                         <TableCell className="text-right text-[12px] tabular-nums font-medium text-emerald-700">INR {p.amount.toLocaleString('en-IN')}</TableCell>
                       </TableRow>
                     ))}

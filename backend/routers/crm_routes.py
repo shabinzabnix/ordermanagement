@@ -771,6 +771,7 @@ async def upload_sales_report(
                 "entry_number": str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None,
                 "product_id": str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
                 "product_name": product,
+                "quantity": float(row.get("qty", 0)) if pd.notna(row.get("qty")) else (float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0),
                 "total_amount": float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
             })
             success += 1
@@ -804,7 +805,8 @@ async def upload_sales_report(
             invoice_date=s["inv_date"], entry_number=s["entry_number"],
             patient_name=s["name"], mobile_number=s["mobile"] or "",
             product_id=s["product_id"], product_name=s["product_name"],
-            total_amount=s["total_amount"], upload_batch_id=batch_id,
+            quantity=s["quantity"], total_amount=s["total_amount"],
+            upload_batch_id=batch_id,
         ))
 
     try:
