@@ -19,6 +19,13 @@ export default function POManagementPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [detailDialog, setDetailDialog] = useState(null);
   const [stockInfo, setStockInfo] = useState(null);
+  // Emergency PO review items
+  const [reviewItems, setReviewItems] = useState([]);
+  const [reviewCat, setReviewCat] = useState('all');
+  const [reviewStatus, setReviewStatus] = useState('all');
+  const [reviewSelected, setReviewSelected] = useState([]);
+  const [bulkSupplier, setBulkSupplier] = useState('');
+  const [bulkStatus, setBulkStatus] = useState('');
   // Create PO form
   const [createOpen, setCreateOpen] = useState(false);
   const [poForm, setPoForm] = useState({ supplier_name: '', remarks: '', request_id: null });
@@ -88,6 +95,23 @@ export default function POManagementPage() {
   const removeEditItem = (idx) => setEditItems(editItems.filter((_, i) => i !== idx));
   const round2 = (v) => Math.round(v * 100) / 100;
   const editTotal = editItems.reduce((s, i) => s + (i.quantity || 0) * (i.landing_cost || 0), 0);
+
+  // Review helpers
+  const toggleReviewSelect = (id) => setReviewSelected(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  const handleBulkReview = async () => {
+    if (reviewSelected.length === 0) return;
+    try {
+      await api.put('/po/purchase-review/update', { item_ids: reviewSelected, supplier: bulkSupplier || null, status: bulkStatus || null });
+      toast.success(`Updated ${reviewSelected.length} items`);
+      setReviewSelected([]); setBulkSupplier(''); setBulkStatus(''); loadData();
+    } catch { toast.error('Failed'); }
+  };
+  const updateReviewItem = async (id, supplier, status) => {
+    try {
+      await api.put('/po/purchase-review/update', { item_ids: [id], supplier: supplier || null, status: status || null });
+      loadData();
+    } catch { toast.error('Failed'); }
+  };
   // Suppliers + Sub-cat
   const [suppliers, setSuppliers] = useState([]);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -104,8 +128,12 @@ export default function POManagementPage() {
   const loadData = () => {
     api.get('/po/list', { params: statusFilter !== 'all' ? { status: statusFilter } : {} }).then(r => setOrders(r.data.orders)).catch(() => {});
     api.get('/po/store-requests', { params: { status: 'pending' } }).then(r => setStoreRequests(r.data.requests)).catch(() => {});
+    const rp = {};
+    if (reviewCat !== 'all') rp.po_category = reviewCat;
+    if (reviewStatus !== 'all') rp.status = reviewStatus;
+    api.get('/po/purchase-review', { params: rp }).then(r => setReviewItems(r.data.items)).catch(() => {});
   };
-  useEffect(() => { loadData(); }, [statusFilter]);
+  useEffect(() => { loadData(); }, [statusFilter, reviewCat, reviewStatus]);
 
   // Load suppliers
   useEffect(() => {
@@ -222,6 +250,7 @@ export default function POManagementPage() {
       <Tabs defaultValue="requests" className="space-y-4">
         <TabsList className="rounded-sm">
           <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Store Requests ({storeRequests.length})</TabsTrigger>
+          <TabsTrigger value="emergency" className="rounded-sm text-xs font-body">Emergency PO ({reviewItems.length})</TabsTrigger>
           <TabsTrigger value="orders" className="rounded-sm text-xs font-body">Purchase Orders ({orders.length})</TabsTrigger>
           <TabsTrigger value="upload" className="rounded-sm text-xs font-body">Sub-Category Upload</TabsTrigger>
         </TabsList>
@@ -278,6 +307,81 @@ export default function POManagementPage() {
               ))}</CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        {/* Emergency PO Review Tab */}
+        <TabsContent value="emergency">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <CardContent className="p-3 flex gap-3 flex-wrap items-end">
+              <div className="flex gap-1.5">
+                {['all', 'BRAND-RX', 'GEN-RX', 'OTC', 'OTX'].map(c => (
+                  <Button key={c} variant={reviewCat === c ? 'default' : 'outline'} size="sm"
+                    className={`rounded-sm font-body text-xs ${reviewCat === c ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
+                    onClick={() => setReviewCat(c)}>{c === 'all' ? 'All' : c}</Button>
+                ))}
+              </div>
+              <Select value={reviewStatus} onValueChange={setReviewStatus}>
+                <SelectTrigger className="w-[110px] h-7 text-xs rounded-sm"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="ordered">Ordered</SelectItem></SelectContent>
+              </Select>
+              {reviewSelected.length > 0 && (
+                <div className="flex gap-2 items-center ml-auto border-l pl-3 border-slate-200">
+                  <span className="text-[11px] font-body text-sky-700 font-medium">{reviewSelected.length} selected</span>
+                  <Input placeholder="Supplier..." value={bulkSupplier} onChange={e => setBulkSupplier(e.target.value)} className="w-[140px] h-7 rounded-sm text-sm" />
+                  <Select value={bulkStatus} onValueChange={setBulkStatus}>
+                    <SelectTrigger className="w-[90px] h-7 text-[10px] rounded-sm"><SelectValue placeholder="Status" /></SelectTrigger>
+                    <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
+                  </Select>
+                  <Button size="sm" className="h-7 bg-sky-500 hover:bg-sky-600 rounded-sm text-xs" onClick={handleBulkReview}>Apply</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="border-slate-200 shadow-sm rounded-sm mt-3">
+            <div className="overflow-auto max-h-[calc(100vh-350px)]">
+              <Table><TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b-2 border-slate-100">
+                <TableHead className="w-[30px] py-3"><input type="checkbox" className="rounded" checked={reviewSelected.length === reviewItems.length && reviewItems.length > 0}
+                  onChange={e => e.target.checked ? setReviewSelected(reviewItems.map(i => i.id)) : setReviewSelected([])} /></TableHead>
+                {['Store', 'Product', 'Category', 'Qty', 'L.Cost', 'Primary', 'Secondary', 'Assigned', 'Status'].map(h => (
+                  <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Qty', 'L.Cost'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                ))}
+              </TableRow></TableHeader>
+              <TableBody>
+                {reviewItems.length === 0 ? (
+                  <TableRow><TableCell colSpan={10} className="text-center py-16"><Package className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No items. Set category rules in Admin and submit store requests.</p></TableCell></TableRow>
+                ) : reviewItems.map(it => (
+                  <TableRow key={it.id} className={`hover:bg-slate-50/50 ${reviewSelected.includes(it.id) ? 'bg-sky-50/50' : ''}`}>
+                    <TableCell className="py-1.5"><input type="checkbox" className="rounded" checked={reviewSelected.includes(it.id)} onChange={() => toggleReviewSelect(it.id)} /></TableCell>
+                    <TableCell className="text-[11px] text-slate-600">{it.store_name}</TableCell>
+                    <TableCell className="text-[12px] font-medium text-slate-800 max-w-[180px] truncate">{it.product_name}</TableCell>
+                    <TableCell><Badge className={`text-[8px] rounded-sm ${{
+                      'BRAND-RX': 'bg-blue-50 text-blue-700', 'GEN-RX': 'bg-violet-50 text-violet-700',
+                      'OTC': 'bg-emerald-50 text-emerald-700', 'OTX': 'bg-amber-50 text-amber-700',
+                    }[it.po_category] || 'bg-slate-100 text-slate-600'}`}>{it.po_category}</Badge></TableCell>
+                    <TableCell className="text-right text-[11px] tabular-nums">{it.quantity}</TableCell>
+                    <TableCell className="text-right text-[11px] tabular-nums">{it.landing_cost?.toFixed(2)}</TableCell>
+                    <TableCell className="text-[10px] text-sky-700 cursor-pointer hover:underline" onClick={() => updateReviewItem(it.id, it.suppliers?.primary)}>{it.suppliers?.primary || '-'}</TableCell>
+                    <TableCell className="text-[10px] text-slate-500 cursor-pointer hover:underline" onClick={() => updateReviewItem(it.id, it.suppliers?.secondary)}>{it.suppliers?.secondary || '-'}</TableCell>
+                    <TableCell>{it.selected_supplier
+                      ? <Badge className="text-[9px] rounded-sm bg-emerald-50 text-emerald-700">{it.selected_supplier}</Badge>
+                      : <Select value="" onValueChange={v => updateReviewItem(it.id, v)}>
+                          <SelectTrigger className="h-5 w-[70px] text-[9px] rounded-sm px-1"><SelectValue placeholder="Select" /></SelectTrigger>
+                          <SelectContent>{Object.entries(it.suppliers || {}).map(([t, n]) => n && <SelectItem key={t} value={n}>{n}</SelectItem>)}</SelectContent>
+                        </Select>}
+                    </TableCell>
+                    <TableCell>
+                      <Select value="" onValueChange={v => updateReviewItem(it.id, null, v)}>
+                        <SelectTrigger className={`h-5 w-[65px] text-[9px] rounded-sm px-1 ${{
+                          approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700',
+                        }[it.item_status] || 'bg-amber-50 text-amber-700'}`}><SelectValue placeholder={it.item_status} /></SelectTrigger>
+                        <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
+                      </Select>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody></Table>
+            </div>
+          </Card>
         </TabsContent>
 
         {/* Purchase Orders Tab */}
