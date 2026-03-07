@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -14,7 +14,83 @@ import { Textarea } from '../components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
-import { ArrowLeft, Plus, Phone, Pill, Calendar, Clock, Receipt, RefreshCw, StopCircle, User, Edit3, Sun, Moon, Coffee } from 'lucide-react';
+import { ArrowLeft, Plus, Phone, Pill, Calendar, Clock, Receipt, RefreshCw, StopCircle, User, Edit3, Sun, Moon, Coffee, Search, Loader2 } from 'lucide-react';
+
+function MedicineSearchSelect({ value, onChange }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef(null);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const doSearch = useCallback((q) => {
+    if (!q || q.length < 2) { setResults([]); return; }
+    setSearching(true);
+    api.get(`/products?search=${encodeURIComponent(q)}&limit=20`).then(r => {
+      setResults(r.data.products || []);
+      setOpen(true);
+    }).catch(() => setResults([])).finally(() => setSearching(false));
+  }, []);
+
+  const handleInput = (e) => {
+    const v = e.target.value;
+    setQuery(v);
+    onChange(v);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => doSearch(v), 300);
+  };
+
+  const pick = (p) => {
+    const name = p.product_name;
+    setQuery(name);
+    onChange(name);
+    setOpen(false);
+  };
+
+  useEffect(() => { if (value && !query) setQuery(value); }, [value, query]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+        <Input
+          data-testid="medicine-search-input"
+          value={query}
+          onChange={handleInput}
+          onFocus={() => { if (results.length) setOpen(true); }}
+          placeholder="Search medicine name or ID..."
+          className="rounded-sm pl-8 pr-8"
+        />
+        {searching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-sky-500 animate-spin" />}
+      </div>
+      {open && results.length > 0 && (
+        <div data-testid="medicine-search-results" className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-sm shadow-lg max-h-56 overflow-auto">
+          {results.map(p => (
+            <button key={p.id} type="button" data-testid={`medicine-option-${p.product_id}`}
+              className="w-full text-left px-3 py-2 hover:bg-sky-50 transition-colors border-b border-slate-50 last:border-0"
+              onClick={() => pick(p)}>
+              <span className="text-[13px] font-medium text-slate-800">{p.product_name}</span>
+              <span className="text-[10px] text-slate-400 ml-2">ID: {p.product_id}</span>
+              {p.category && <span className="text-[10px] text-slate-400 ml-2">| {p.category}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && query.length >= 2 && results.length === 0 && !searching && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-sm shadow-lg p-3 text-center">
+          <p className="text-[12px] text-slate-400">No products found. You can still type a custom name.</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CustomerProfilePage() {
   const { id } = useParams();
@@ -105,7 +181,9 @@ export default function CustomerProfilePage() {
           <DialogTrigger asChild><Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs"><Plus className="w-3.5 h-3.5 mr-1.5" /> Add Medicine</Button></DialogTrigger>
           <DialogContent className="rounded-sm max-w-lg"><DialogHeader><DialogTitle className="font-heading">Add Medicine / Purchase</DialogTitle></DialogHeader>
             <form onSubmit={handlePurchase} className="space-y-3">
-              <div className="space-y-1.5"><Label className="font-body text-xs">Medicine Name *</Label><Input value={pForm.medicine_name} onChange={e => setPForm({...pForm, medicine_name: e.target.value})} required className="rounded-sm" /></div>
+              <div className="space-y-1.5"><Label className="font-body text-xs">Medicine Name *</Label>
+                <MedicineSearchSelect value={pForm.medicine_name} onChange={v => setPForm({...pForm, medicine_name: v})} />
+              </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1.5"><Label className="font-body text-xs">Quantity</Label><Input type="number" value={pForm.quantity} onChange={e => setPForm({...pForm, quantity: e.target.value})} className="rounded-sm" /></div>
                 <div className="space-y-1.5"><Label className="font-body text-xs">Days of Medication *</Label><Input type="number" value={pForm.days_of_medication} onChange={e => setPForm({...pForm, days_of_medication: e.target.value})} required className="rounded-sm" /></div>

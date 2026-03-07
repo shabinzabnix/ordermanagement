@@ -102,6 +102,7 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 57. Medication Detail Editing - edit dosage, timing, food relation for any active medicine, auto-recalculates next due date
 58. Stop Medicine functionality - deactivate medicines from calendar
 59. Enhanced Medicine Calendar - visual indicators for dosage, timing icons (sun/coffee/moon), food relation badges
+60. Medicine Search Select - searchable dropdown in Add Medicine form that queries product master, supports custom entry if not found
 
 ## P0 - Remaining
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
