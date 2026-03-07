@@ -153,16 +153,16 @@ export default function ProductMasterPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Product ID', 'Product Name', 'Category', 'Sub Category', 'Primary Supplier', 'Secondary Supplier', 'Least Price', 'Most Qty', 'MRP', 'PTR', 'L.Cost'].map(h => (
+                {['Product ID', 'Product Name', 'Category', 'Sub Category', 'Rep', 'Primary Supplier', 'Secondary Supplier', 'Least Price', 'Most Qty', 'MRP', 'PTR', 'L.Cost'].map(h => (
                   <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['MRP', 'PTR', 'L.Cost'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? [...Array(8)].map((_, i) => (
-                <TableRow key={i}>{[...Array(11)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-50 rounded animate-pulse" /></TableCell>)}</TableRow>
+                <TableRow key={i}>{[...Array(12)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-50 rounded animate-pulse" /></TableCell>)}</TableRow>
               )) : products.length === 0 ? (
-                <TableRow><TableCell colSpan={11} className="text-center py-16">
+                <TableRow><TableCell colSpan={12} className="text-center py-16">
                   <Package className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">No products found</p>
                 </TableCell></TableRow>
@@ -172,6 +172,7 @@ export default function ProductMasterPage() {
                   <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.product_name}</TableCell>
                   <TableCell>{p.category && <Badge variant="secondary" className="text-[10px] rounded-sm font-body">{p.category}</Badge>}</TableCell>
                   <TableCell className="text-[11px] font-body text-slate-500">{p.sub_category || '-'}</TableCell>
+                  <TableCell className="text-[11px] font-body text-slate-500">{p.rep || '-'}</TableCell>
                   <TableCell className="text-[11px] font-body text-slate-600">{p.primary_supplier || '-'}</TableCell>
                   <TableCell className="text-[11px] font-body text-slate-500">{p.secondary_supplier || '-'}</TableCell>
                   <TableCell className="text-[11px] font-body text-slate-500">{p.least_price_supplier || '-'}</TableCell>

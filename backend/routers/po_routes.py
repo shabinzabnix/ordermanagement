@@ -44,6 +44,7 @@ async def get_supplier_list(
     if search:
         sl = search.lower()
         supplier_list = [s for s in supplier_list if sl in s.lower()]
+    return {"suppliers": supplier_list[:100], "total": len(supplier_list)}
 
 @router.get("/po/subcategory-data")
 async def get_subcategory_data(
