@@ -17,7 +17,9 @@ export default function ProductMasterPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+  const [subCategory, setSubCategory] = useState('');
   const [categories, setCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -29,15 +31,17 @@ export default function ProductMasterPage() {
       const params = { page, limit };
       if (search) params.search = search;
       if (category) params.category = category;
+      if (subCategory) params.sub_category = subCategory;
       const res = await api.get('/products', { params });
       setProducts(res.data.products);
       setTotal(res.data.total);
     } catch { toast.error('Failed to load products'); }
     finally { setLoading(false); }
-  }, [page, search, category]);
+  }, [page, search, category, subCategory]);
 
   useEffect(() => {
     api.get('/products/categories').then(r => setCategories(r.data.categories)).catch(() => {});
+    api.get('/products/sub-categories').then(r => setSubCategories(r.data.sub_categories)).catch(() => {});
   }, []);
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
@@ -116,6 +120,15 @@ export default function ProductMasterPage() {
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
                 {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={subCategory || 'all'} onValueChange={v => { setSubCategory(v === 'all' ? '' : v); setPage(1); }}>
+              <SelectTrigger data-testid="subcategory-filter" className="w-[180px] font-body text-sm rounded-sm">
+                <SelectValue placeholder="All Sub Categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sub Categories</SelectItem>
+                {subCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

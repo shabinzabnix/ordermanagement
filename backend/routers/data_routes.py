@@ -67,6 +67,7 @@ def map_columns(df, column_map, required_fields):
 async def get_products(
     search: str = Query(None),
     category: str = Query(None),
+    sub_category: str = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -80,6 +81,8 @@ async def get_products(
         )
     if category:
         query = query.where(Product.category == category)
+    if sub_category:
+        query = query.where(Product.sub_category == sub_category)
 
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar()
@@ -122,6 +125,17 @@ async def get_categories(
         select(Product.category).distinct().where(Product.category.isnot(None))
     )
     return {"categories": [r[0] for r in result.all() if r[0]]}
+
+
+@router.get("/products/sub-categories")
+async def get_sub_categories(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Product.sub_category).distinct().where(Product.sub_category.isnot(None))
+    )
+    return {"sub_categories": [r[0] for r in result.all() if r[0]]}
 
 
 @router.post("/products/upload")
