@@ -27,7 +27,6 @@ const navItems = [
   { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'ho_stock' },
   { label: 'Store Stock', path: '/store-stock', icon: Archive, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF'], svc: 'store_stock' },
   { label: 'Consolidated', path: '/consolidated', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'consolidated' },
-  { label: 'Scorecard', path: '/scorecard', icon: Trophy, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'scorecard' },
   { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'aging' },
   { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF'], svc: 'transfers' },
   { label: 'Store Request', path: '/store-request', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF'], svc: 'purchases' },
