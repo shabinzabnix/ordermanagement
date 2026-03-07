@@ -145,19 +145,27 @@ export default function StoreRequestPage() {
   const unreadCount = allComments.filter(c => !viewedMsgs.includes(c.id)).length;
 
   const handleReconcile = async () => {
-    const sid = isStore ? user?.store_id : stores[0]?.id;
-    if (!sid) { toast.error('No store selected'); return; }
     setReconciling(true);
     try {
-      const res = await api.post(`/po/reconcile-received?store_id=${sid}`);
-      toast.success(`Reconciled: ${res.data.received} received, ${res.data.partial} partial, ${res.data.pending} pending`);
+      if (isStore && user?.store_id) {
+        const res = await api.post(`/po/reconcile-received?store_id=${user.store_id}`);
+        toast.success(`Reconciled: ${res.data.received} received, ${res.data.partial} partial, ${res.data.pending} pending`);
+      } else {
+        // HO: reconcile all stores
+        let totalR = 0, totalP = 0;
+        for (const s of stores) {
+          const res = await api.post(`/po/reconcile-received?store_id=${s.id}`);
+          totalR += res.data.received; totalP += res.data.partial;
+        }
+        toast.success(`Reconciled all stores: ${totalR} received, ${totalP} partial`);
+      }
       loadData();
     } catch { toast.error('Failed'); }
     finally { setReconciling(false); }
   };
 
   const reasonBadge = (r) => r === 'emergency_purchase' ? 'bg-red-50 text-red-700' : r === 'stock_refill' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700';
-  const sBadge = (s) => ({ approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700', cancelled: 'bg-slate-200 text-slate-600', order_placed: 'bg-amber-50 text-amber-700' }[s] || 'bg-amber-50 text-amber-700');
+  const sBadge = (s) => ({ approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700', cancelled: 'bg-slate-200 text-slate-600', order_placed: 'bg-amber-50 text-amber-700', partially_received: 'bg-orange-50 text-orange-700', received: 'bg-emerald-100 text-emerald-800' }[s] || 'bg-amber-50 text-amber-700');
 
   let filteredItems = reviewFilter === 'all' ? allItems : allItems.filter(i =>
     i.item_status === reviewFilter || i.fulfillment_status === reviewFilter
@@ -180,9 +188,6 @@ export default function StoreRequestPage() {
         <TabsList className="rounded-sm">
           <TabsTrigger value="new" className="rounded-sm text-xs font-body">New Request</TabsTrigger>
           <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Requests ({allItems.length})</TabsTrigger>
-          <TabsTrigger value="received" className="rounded-sm text-xs font-body">
-            Received ({receivedItems.length})
-          </TabsTrigger>
           <TabsTrigger value="messages" className="rounded-sm text-xs font-body">
             Messages {unreadCount > 0 && <Badge className="ml-1 text-[8px] rounded-full bg-red-500 text-white px-1.5 animate-pulse">{unreadCount}</Badge>}
           </TabsTrigger>
@@ -190,15 +195,18 @@ export default function StoreRequestPage() {
 
         {/* Requests - Individual Products */}
         <TabsContent value="requests">
-          <div className="flex gap-3 mb-3 items-center">
+          <div className="flex gap-3 mb-3 items-center flex-wrap">
             <div className="flex gap-1.5 flex-wrap">
-              {['all', 'pending', 'approved', 'rejected', 'cancelled', 'order_placed'].map(s => (
+              {['all', 'pending', 'approved', 'rejected', 'cancelled', 'order_placed', 'partially_received', 'received'].map(s => (
                 <Button key={s} variant={reviewFilter === s ? 'default' : 'outline'} size="sm"
                   className={`rounded-sm font-body text-xs capitalize ${reviewFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
                   onClick={() => setReviewFilter(s)}>{s.replace('_', ' ')}</Button>
               ))}
             </div>
-            <div className="relative flex-1 min-w-[200px] ml-auto"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+            <Button size="sm" variant="outline" className="rounded-sm font-body text-xs ml-auto border-sky-300 text-sky-700 hover:bg-sky-50" onClick={handleReconcile} disabled={reconciling}>
+              <RefreshCw className={`w-3 h-3 mr-1 ${reconciling ? 'animate-spin' : ''}`} /> {reconciling ? 'Checking...' : 'Check Deliveries'}
+            </Button>
+            <div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
               <Input placeholder="Search by request ID, store, product..." value={reqSearch} onChange={e => setReqSearch(e.target.value)}
                 className="pl-9 h-8 text-[11px] rounded-sm" /></div>
           </div>
@@ -221,7 +229,7 @@ export default function StoreRequestPage() {
                       <span className="font-mono text-[10px] text-slate-400 shrink-0">{it.product_id}</span>
                       {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm shrink-0">{it.product_info.sub_category}</Badge>}
                     </div>
-                    <Badge className={`text-[10px] rounded-sm px-2 font-medium ${sBadge(it.item_status)}`}>{it.item_status?.replace('_',' ').toUpperCase()}</Badge>
+                  <Badge className={`text-[10px] rounded-sm px-2 font-medium ${sBadge(it.item_status)}`}>{it.item_status?.replace('_',' ').toUpperCase()}</Badge>
                   </div>
                   {/* Info Grid */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-0 border-b border-slate-100">
@@ -254,6 +262,22 @@ export default function StoreRequestPage() {
                         ))}
                       </div>
                     )}
+                    {/* Delivery Progress (for order_placed/partially_received/received) */}
+                    {['order_placed', 'partially_received', 'received'].includes(it.item_status) && (() => {
+                      const rcv = it.received_qty || 0;
+                      const pct = it.quantity > 0 ? Math.round((rcv / it.quantity) * 100) : 0;
+                      return (
+                        <div className="bg-slate-50 rounded-sm p-2 space-y-1">
+                          <div className="flex items-center justify-between text-[10px] font-body">
+                            <span className="text-slate-500">Delivery: <b className="text-slate-700">{rcv}</b> / {it.quantity} received</span>
+                            <span className={`font-medium ${pct >= 100 ? 'text-emerald-600' : pct > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{pct}%</span>
+                          </div>
+                          <div className="w-full bg-slate-200 rounded-full h-1.5">
+                            <div className={`h-1.5 rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct > 0 ? 'bg-amber-500' : 'bg-slate-300'}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })()}
                     {/* Communication */}
                     {it.ho_remarks && <p className="text-[10px] font-body text-violet-600 bg-violet-50/50 px-2 py-1 rounded-sm">{it.ho_remarks}</p>}
                     {/* Chat Button */}
@@ -341,64 +365,6 @@ export default function StoreRequestPage() {
           </div>
         </TabsContent>
 
-
-
-        {/* Received Panel */}
-        <TabsContent value="received">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex gap-1.5">
-              {['all', 'order_placed', 'partially_received', 'received'].map(s => (
-                <Button key={s} variant={receivedFilter === s ? 'default' : 'outline'} size="sm"
-                  className={`rounded-sm font-body text-xs capitalize ${receivedFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
-                  onClick={() => setReceivedFilter(s)}>{s.replace('_', ' ')}</Button>
-              ))}
-            </div>
-            <Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" onClick={handleReconcile} disabled={reconciling}>
-              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${reconciling ? 'animate-spin' : ''}`} /> {reconciling ? 'Checking...' : 'Check Purchase Uploads'}
-            </Button>
-          </div>
-          <div className="space-y-2">
-            {receivedItems.length === 0 ? (
-              <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><CheckCircle2 className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No items in order/received status</p></CardContent></Card>
-            ) : receivedItems.map(it => {
-              const pct = it.quantity > 0 ? Math.round((it.received_qty / it.quantity) * 100) : 0;
-              return (
-                <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm overflow-hidden ${
-                  it.item_status === 'received' ? 'border-l-4 border-l-emerald-500' :
-                  it.item_status === 'partially_received' ? 'border-l-4 border-l-amber-500' :
-                  'border-l-4 border-l-sky-400'}`}>
-                  <CardContent className="p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Badge className="text-[9px] rounded-sm bg-slate-200 text-slate-700 font-mono">REQ-{it.request_id}</Badge>
-                        <span className="text-[14px] font-heading font-bold text-slate-900">{it.product_name}</span>
-                        <span className="font-mono text-[10px] text-slate-400">{it.product_id}</span>
-                      </div>
-                      <Badge className={`text-[10px] rounded-sm px-2 font-medium ${
-                        it.item_status === 'received' ? 'bg-emerald-100 text-emerald-700' :
-                        it.item_status === 'partially_received' ? 'bg-amber-100 text-amber-700' :
-                        'bg-sky-100 text-sky-700'}`}>
-                        {it.item_status === 'received' ? 'RECEIVED' : it.item_status === 'partially_received' ? 'PARTIAL' : 'ORDER PLACED'}
-                      </Badge>
-                    </div>
-                    <div className="grid grid-cols-4 gap-3">
-                      <div><p className="text-[9px] text-slate-400 uppercase">Store</p><p className="text-[12px] font-semibold">{it.store_name}</p></div>
-                      <div><p className="text-[9px] text-slate-400 uppercase">Ordered</p><p className="text-[12px] font-semibold">{it.quantity}</p></div>
-                      <div><p className="text-[9px] text-slate-400 uppercase">Received</p><p className={`text-[12px] font-semibold ${it.received_qty < it.quantity ? 'text-amber-600' : 'text-emerald-600'}`}>{it.received_qty}</p></div>
-                      <div><p className="text-[9px] text-slate-400 uppercase">Supplier</p><p className="text-[12px] font-semibold">{it.selected_supplier || '-'}</p></div>
-                    </div>
-                    {/* Progress bar */}
-                    <div className="w-full bg-slate-100 rounded-full h-2">
-                      <div className={`h-2 rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct > 0 ? 'bg-amber-500' : 'bg-slate-200'}`}
-                        style={{ width: `${Math.min(pct, 100)}%` }} />
-                    </div>
-                    <p className="text-[10px] text-slate-500 text-right">{pct}% fulfilled</p>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </TabsContent>
 
 
         {/* Messages Panel */}
