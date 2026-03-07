@@ -5,7 +5,7 @@ from database import get_db
 from models import (
     Product, Store, StoreStockBatch, SalesRecord, PurchaseRecord,
     PurchaseOrder, PurchaseOrderItem, StoreRequest, StoreRequestItem,
-    AuditLog,
+    AuditLog, POComment,
 )
 from auth import get_current_user, require_roles
 from pydantic import BaseModel
@@ -411,6 +411,17 @@ async def get_po_detail(po_id: int, db: AsyncSession = Depends(get_db), user: di
             "store_stock": store_stock, "total_stock": sum(s["stock"] for s in store_stock),
         })
 
+    # Comments
+    comments = (await db.execute(
+        select(POComment).where(POComment.po_id == po_id).order_by(POComment.created_at.desc())
+    )).scalars().all()
+
+    # Activity log for this PO
+    activities = (await db.execute(
+        select(AuditLog).where(and_(AuditLog.entity_type == "purchase_order", AuditLog.entity_id == str(po_id)))
+        .order_by(AuditLog.created_at.desc()).limit(20)
+    )).scalars().all()
+
     return {
         "po": {
             "id": po.id, "po_number": po.po_number, "store_id": po.store_id,
@@ -421,6 +432,10 @@ async def get_po_detail(po_id: int, db: AsyncSession = Depends(get_db), user: di
             "created_at": po.created_at.isoformat() if po.created_at else None,
         },
         "items": items_with_stock,
+        "comments": [{"id": c.id, "user_name": c.user_name, "message": c.message,
+                       "created_at": c.created_at.isoformat() if c.created_at else None} for c in comments],
+        "activity_log": [{"user_name": a.user_name, "action": a.action,
+                          "created_at": a.created_at.isoformat() if a.created_at else None} for a in activities],
     }
 
 
@@ -472,6 +487,21 @@ async def delete_po(po_id: int, db: AsyncSession = Depends(get_db), user: dict =
     await _log(db, user, f"Deleted PO {po.po_number}", "purchase_order", po_id)
     await db.commit()
     return {"message": "PO deleted"}
+
+
+class POCommentReq(BaseModel):
+    message: str
+
+
+@router.post("/po/{po_id}/comment")
+async def add_po_comment(po_id: int, data: POCommentReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
+    if not po:
+        raise HTTPException(404, "PO not found")
+    db.add(POComment(po_id=po_id, user_name=user.get("full_name", ""), message=data.message))
+    await _log(db, user, f"Commented on PO {po.po_number}: {data.message[:50]}", "purchase_order", po_id)
+    await db.commit()
+    return {"message": "Comment added"}
 
 
 @router.put("/po/{po_id}/approve")

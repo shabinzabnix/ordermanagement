@@ -373,5 +373,14 @@ class StoreRequestItem(Base):
     current_store_stock = Column(Float, default=0)
     pending_orders = Column(Integer, default=0)
     has_prescription = Column(Boolean, default=False)
+
+class POComment(Base):
+    __tablename__ = "po_comments"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False, index=True)
+    user_name = Column(String(255))
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
     doctor_name = Column(String(255), nullable=True)
     clinic_location = Column(String(500), nullable=True)

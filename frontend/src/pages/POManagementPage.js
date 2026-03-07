@@ -35,6 +35,7 @@ export default function POManagementPage() {
   const [editSupplier, setEditSupplier] = useState('');
   const [editRemarks, setEditRemarks] = useState('');
   const [saving, setSaving] = useState(false);
+  const [newComment, setNewComment] = useState('');
 
   const openPoDetail = async (poId) => {
     try {
@@ -43,7 +44,18 @@ export default function POManagementPage() {
       setEditItems(res.data.items.map(it => ({ ...it })));
       setEditSupplier(res.data.po.supplier_name);
       setEditRemarks(res.data.po.remarks || '');
+      setNewComment('');
     } catch { toast.error('Failed to load PO'); }
+  };
+
+  const addComment = async () => {
+    if (!newComment.trim() || !poDetail) return;
+    try {
+      await api.post(`/po/${poDetail.po.id}/comment`, { message: newComment });
+      toast.success('Comment added');
+      setNewComment('');
+      openPoDetail(poDetail.po.id);
+    } catch { toast.error('Failed'); }
   };
 
   const savePoEdit = async () => {
@@ -536,6 +548,43 @@ export default function POManagementPage() {
                 <span className="text-lg font-heading font-bold text-sky-700 tabular-nums">INR {poDetail.po.status === 'draft' ? editTotal.toFixed(2) : poDetail.po.total_value?.toLocaleString('en-IN')}</span>
               </div>
             </Card>
+            {/* Communications */}
+            <div className="space-y-2">
+              <Label className="font-body text-xs font-medium">Communications</Label>
+              <div className="flex gap-2">
+                <Input placeholder="Add comment..." value={newComment} onChange={e => setNewComment(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addComment()} className="rounded-sm text-sm flex-1" />
+                <Button variant="outline" size="sm" className="rounded-sm text-xs" onClick={addComment} disabled={!newComment.trim()}>Send</Button>
+              </div>
+              {poDetail.comments?.length > 0 && (
+                <div className="max-h-[150px] overflow-auto space-y-1.5 border border-slate-200 rounded-sm p-2">
+                  {poDetail.comments.map(c => (
+                    <div key={c.id} className="flex gap-2 py-1.5 border-b border-slate-50 last:border-0">
+                      <div className="w-6 h-6 bg-sky-100 rounded-full flex items-center justify-center shrink-0"><span className="text-[9px] font-bold text-sky-700">{c.user_name?.[0]}</span></div>
+                      <div><p className="text-[11px] font-body"><span className="font-medium text-slate-800">{c.user_name}</span> <span className="text-slate-400">{c.created_at ? new Date(c.created_at).toLocaleString() : ''}</span></p>
+                        <p className="text-[12px] font-body text-slate-700">{c.message}</p></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Activity Log */}
+            {poDetail.activity_log?.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="font-body text-xs font-medium text-slate-500">Activity Log</Label>
+                <div className="max-h-[120px] overflow-auto border border-slate-100 rounded-sm p-2 bg-slate-50/50">
+                  {poDetail.activity_log.map((a, i) => (
+                    <div key={i} className="flex items-center gap-2 py-1 border-b border-slate-100 last:border-0 text-[10px] font-body">
+                      <span className="text-slate-400 shrink-0">{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span>
+                      <span className="font-medium text-slate-600">{a.user_name}</span>
+                      <span className="text-slate-500">{a.action}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="flex gap-2 justify-end flex-wrap">
               {poDetail.po.status === 'draft' && (<>
