@@ -182,27 +182,61 @@ export default function StoreRequestPage() {
             </div>
           </TabsContent>
 
-        {/* Requests List */}
+        {/* Requests List - Individual Products */}
         <TabsContent value="requests">
-          <Card className="border-slate-200 shadow-sm rounded-sm">
-            <div className="overflow-auto max-h-[calc(100vh-300px)]"><Table><TableHeader><TableRow className="border-b-2 border-slate-100">
-              {['#', 'Store', 'Reason', 'Customer', 'Items', 'Value', 'Status', 'Date'].map(h => <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3">{h}</TableHead>)}
-            </TableRow></TableHeader><TableBody>
-              {normalRequests.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-10"><ShoppingCart className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-xs text-slate-400">No requests</p></TableCell></TableRow>
-              : normalRequests.map(r => (
-                <TableRow key={r.id} className="hover:bg-slate-50/50">
-                  <TableCell className="font-mono text-[11px]">#{r.id}</TableCell>
-                  <TableCell className="text-[12px]">{r.store_name}</TableCell>
-                  <TableCell><Badge className={`text-[9px] rounded-sm ${reasonBadge(r.request_reason)}`}>{r.request_reason?.replace('_',' ')}</Badge></TableCell>
-                  <TableCell className="text-[11px]">{r.customer_name ? `${r.customer_name} (${r.customer_mobile})` : '-'}</TableCell>
-                  <TableCell className="text-[12px] tabular-nums">{r.total_items}</TableCell>
-                  <TableCell className="text-[12px] tabular-nums font-medium">INR {r.total_value?.toLocaleString('en-IN')}</TableCell>
-                  <TableCell><Badge className={`text-[9px] rounded-sm ${sBadge(r.status)}`}>{r.status}</Badge></TableCell>
-                  <TableCell className="text-[11px] text-slate-400">{r.created_at ? new Date(r.created_at).toLocaleDateString() : '-'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody></Table></div>
-          </Card>
+          <div className="space-y-2">
+            {allItems.length === 0 ? (
+              <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><ShoppingCart className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No requests</p></CardContent></Card>
+            ) : allItems.map(it => (
+              <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm ${it.item_status === 'approved' ? 'border-l-4 border-l-emerald-400' : it.item_status === 'ordered' ? 'border-l-4 border-l-sky-400' : it.item_status === 'rejected' ? 'border-l-4 border-l-red-400' : ''}`}>
+                <CardContent className="p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-heading font-bold text-slate-900">{it.product_name}</span>
+                      {it.po_category && <Badge className={`text-[8px] rounded-sm ${{
+                        'BRAND-RX':'bg-blue-50 text-blue-700','GEN-RX':'bg-violet-50 text-violet-700','OTC':'bg-emerald-50 text-emerald-700','OTX':'bg-amber-50 text-amber-700',
+                      }[it.po_category]||'bg-slate-100'}`}>{it.po_category}</Badge>}
+                      {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm">{it.product_info.sub_category}</Badge>}
+                      <span className="font-mono text-[10px] text-slate-400">{it.product_id}</span>
+                    </div>
+                    <Badge className={`text-[9px] rounded-sm ${sBadge(it.item_status)}`}>{it.item_status}</Badge>
+                  </div>
+                  <div className="flex gap-3 text-[11px] font-body text-slate-500 flex-wrap">
+                    <span>Store: <b className="text-slate-700">{it.store_name}</b></span>
+                    <span>Qty: <b className="text-slate-700">{it.quantity}</b></span>
+                    <span>L.Cost: <b className="text-slate-700">{it.landing_cost?.toFixed(2)}</b></span>
+                    <span>Value: <b className="text-slate-700">INR {(it.quantity*(it.landing_cost||0)).toFixed(2)}</b></span>
+                    <span>Sales 30d: <b className="text-slate-700">{it.sales_30d}</b></span>
+                    {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name} ({it.customer_mobile})</b></span>}
+                    <span>Reason: <Badge className={`text-[8px] rounded-sm ${reasonBadge(it.request_reason)}`}>{it.request_reason?.replace('_',' ')}</Badge></span>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-400">Stock:</span>
+                    {it.store_stock?.length > 0 ? it.store_stock.map((s,j) => <Badge key={j} variant="secondary" className="text-[8px] rounded-sm px-1">{s.store}: {s.stock}</Badge>) : <span className="text-[10px] text-red-500">No stock</span>}
+                  </div>
+                  {isHO && (
+                    <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
+                      {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
+                        <Button key={type} variant="outline" size="sm" className={`h-5 px-2 rounded-sm text-[9px] ${it.selected_supplier===name?'bg-emerald-50 text-emerald-700 border-emerald-300':''}`}
+                          onClick={() => updateItem(it.id, name)}>{name} <span className="text-slate-400 ml-0.5">({type})</span></Button>
+                      ))}
+                      {it.selected_supplier && <Badge className="text-[9px] rounded-sm bg-emerald-100 text-emerald-800">Assigned: {it.selected_supplier}</Badge>}
+                      <div className="ml-auto flex items-center gap-2">
+                        <Select value="" onValueChange={v => updateItem(it.id, null, v)}>
+                          <SelectTrigger className="w-[90px] h-6 text-[10px] rounded-sm"><SelectValue placeholder="Status" /></SelectTrigger>
+                          <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
+                        </Select>
+                        <span className="text-[10px] text-slate-400">TAT:</span>
+                        <Input type="number" placeholder="d" className="w-[40px] h-6 text-[10px] rounded-sm text-center"
+                          defaultValue={it.tat_days||''} onBlur={e => {const v=parseInt(e.target.value);if(v>0)updateItem(it.id,null,null,v);}} />
+                        {it.tat_days && <span className="text-[10px] text-sky-600">{it.tat_days}d</span>}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </TabsContent>
 
         {/* New Request Form (Store Staff) */}
