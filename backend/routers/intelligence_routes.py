@@ -134,20 +134,20 @@ async def intel_dashboard(
 @router.get("/intel/demand-forecast")
 async def demand_forecast(
     store_id: int = Query(None),
+    search: str = Query(None),
     days: int = Query(30),
     page: int = Query(1, ge=1),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
-    """Demand forecasting: Sales from SalesRecord ONLY, Stock from StoreStockBatch ONLY."""
+    """Demand forecasting: Sales QTY from SalesRecord, Stock UNITS from StoreStockBatch."""
     now = datetime.now(timezone.utc)
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     cutoff_30 = now - timedelta(days=30)
     cutoff_60 = now - timedelta(days=60)
     cutoff_90 = now - timedelta(days=90)
 
-    # Sales data from SalesRecord ONLY (CRM sales uploads)
     sr_query = select(SalesRecord)
     if store_id:
         sr_query = sr_query.where(SalesRecord.store_id == store_id)
@@ -157,50 +157,60 @@ async def demand_forecast(
     for sr in sales_records:
         key = (sr.product_name, sr.store_id)
         if key not in product_sales:
-            product_sales[key] = {"d30": 0, "d60": 0, "d90": 0, "amount_30": 0, "amount_60": 0, "amount_90": 0, "pid": sr.product_id}
-        product_sales[key]["d90"] += 1
-        product_sales[key]["amount_90"] += float(sr.total_amount or 0)
+            product_sales[key] = {"qty_30": 0, "qty_60": 0, "qty_90": 0, "amt_30": 0, "amt_90": 0, "pid": sr.product_id}
+        qty = float(sr.quantity or 0) if sr.quantity else 1
+        amt = float(sr.total_amount or 0)
+        product_sales[key]["qty_90"] += qty
+        product_sales[key]["amt_90"] += amt
         if sr.invoice_date and sr.invoice_date >= cutoff_60:
-            product_sales[key]["d60"] += 1
-            product_sales[key]["amount_60"] += float(sr.total_amount or 0)
+            product_sales[key]["qty_60"] += qty
         if sr.invoice_date and sr.invoice_date >= cutoff_30:
-            product_sales[key]["d30"] += 1
-            product_sales[key]["amount_30"] += float(sr.total_amount or 0)
+            product_sales[key]["qty_30"] += qty
+            product_sales[key]["amt_30"] += amt
 
-    # Stock levels from StoreStockBatch ONLY (stock ledger)
-    stock_levels = {}
+    stock_by_pid = {}
+    stock_by_name = {}
     for ss in (await db.execute(select(StoreStockBatch))).scalars().all():
-        key = (ss.product_name, ss.store_id)
-        stock_levels[key] = stock_levels.get(key, 0) + float(ss.closing_stock_strips or 0)
+        units = float(ss.closing_stock or 0)
+        if ss.ho_product_id:
+            k = (ss.ho_product_id, ss.store_id)
+            stock_by_pid[k] = stock_by_pid.get(k, 0) + units
+        k2 = (ss.product_name, ss.store_id)
+        stock_by_name[k2] = stock_by_name.get(k2, 0) + units
 
     forecasts = []
     for (product, sid), data in product_sales.items():
-        avg_daily_30 = data["d30"] / 30 if data["d30"] > 0 else 0
-        avg_daily_60 = data["d60"] / 60 if data["d60"] > 0 else 0
-        avg_daily_90 = data["d90"] / 90 if data["d90"] > 0 else 0
-        best_avg = max(avg_daily_30, avg_daily_60, avg_daily_90)
+        avg_30 = data["qty_30"] / 30 if data["qty_30"] > 0 else 0
+        avg_60 = data["qty_60"] / 60 if data["qty_60"] > 0 else 0
+        avg_90 = data["qty_90"] / 90 if data["qty_90"] > 0 else 0
+        best_avg = max(avg_30, avg_60, avg_90)
         reorder_qty = round(best_avg * days, 0)
-        current_stock = stock_levels.get((product, sid), 0)
+        pid = data.get("pid", "")
+        current_stock = stock_by_pid.get((pid, sid), 0) if pid else 0
+        if current_stock == 0:
+            current_stock = stock_by_name.get((product, sid), 0)
         days_of_stock = round(current_stock / best_avg, 0) if best_avg > 0 else 999
 
-        if reorder_qty > 0:
-            forecasts.append({
-                "product_name": product, "product_id": data.get("pid", ""),
-                "store_id": sid, "store_name": stores_map.get(sid, ""),
-                "sales_30d": data["d30"], "sales_60d": data["d60"], "sales_90d": data["d90"],
-                "revenue_30d": round(data["amount_30"], 2), "revenue_90d": round(data["amount_90"], 2),
-                "avg_daily": round(best_avg, 2),
-                "reorder_qty": reorder_qty,
-                "current_stock": round(current_stock, 1),
-                "days_of_stock": min(days_of_stock, 999),
-                "urgency": "critical" if days_of_stock < 7 else "low" if days_of_stock < 15 else "normal",
-            })
+        forecasts.append({
+            "product_name": product, "product_id": pid,
+            "store_id": sid, "store_name": stores_map.get(sid, ""),
+            "sales_30d": round(data["qty_30"], 0), "sales_60d": round(data["qty_60"], 0), "sales_90d": round(data["qty_90"], 0),
+            "revenue_30d": round(data["amt_30"], 2), "revenue_90d": round(data["amt_90"], 2),
+            "avg_daily": round(best_avg, 2),
+            "reorder_qty": reorder_qty,
+            "current_stock": round(current_stock, 0),
+            "days_of_stock": min(days_of_stock, 999),
+            "urgency": "critical" if days_of_stock < 7 else "low" if days_of_stock < 15 else "normal",
+        })
+
+    if search:
+        sl = search.lower()
+        forecasts = [f for f in forecasts if sl in f["product_name"].lower() or sl in (f["product_id"] or "").lower()]
 
     forecasts.sort(key=lambda x: x["days_of_stock"])
     total = len(forecasts)
     start = (page - 1) * limit
     return {"forecasts": forecasts[start:start + limit], "total": total, "forecast_days": days, "page": page, "limit": limit}
-
 
 # ─── Expiry Risk Detection ────────────────────────────────
 

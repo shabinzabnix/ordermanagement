@@ -3,30 +3,37 @@ import api from '../lib/api';
 import { Card, CardContent } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Skeleton } from '../components/ui/skeleton';
-import { TrendingUp, AlertCircle } from 'lucide-react';
+import { TrendingUp, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function DemandForecastPage() {
   const [data, setData] = useState({ forecasts: [], total: 0 });
   const [stores, setStores] = useState([]);
   const [storeFilter, setStoreFilter] = useState('all');
   const [period, setPeriod] = useState('30');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const limit = 100;
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
 
   useEffect(() => {
     setLoading(true);
-    const params = { days: parseInt(period) };
+    const params = { days: parseInt(period), page, limit };
     if (storeFilter !== 'all') params.store_id = storeFilter;
+    if (search) params.search = search;
     api.get('/intel/demand-forecast', { params })
       .then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
-  }, [storeFilter, period]);
+  }, [storeFilter, period, search, page]);
 
   const urgencyBadge = (u) => u === 'critical' ? 'bg-red-100 text-red-700' : u === 'low' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700';
+  const totalPages = Math.ceil((data.total || 0) / limit);
 
-  if (loading) return <div className="space-y-4"><Skeleton className="h-16 rounded-sm" /><Skeleton className="h-96 rounded-sm" /></div>;
+  if (loading && page === 1) return <div className="space-y-4"><Skeleton className="h-16 rounded-sm" /><Skeleton className="h-96 rounded-sm" /></div>;
 
   return (
     <div data-testid="demand-forecast-page" className="space-y-5">
@@ -36,15 +43,18 @@ export default function DemandForecastPage() {
       </div>
 
       <Card className="border-slate-200 shadow-sm rounded-sm">
-        <CardContent className="p-3 flex gap-3">
-          <Select value={storeFilter} onValueChange={setStoreFilter}>
+        <CardContent className="p-3 flex gap-3 flex-wrap">
+          <Select value={storeFilter} onValueChange={v => { setStoreFilter(v); setPage(1); }}>
             <SelectTrigger className="w-[200px] font-body text-sm rounded-sm"><SelectValue placeholder="All Stores" /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Stores</SelectItem>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
           </Select>
-          <Select value={period} onValueChange={setPeriod}>
+          <Select value={period} onValueChange={v => { setPeriod(v); setPage(1); }}>
             <SelectTrigger className="w-[140px] font-body text-sm rounded-sm"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="15">15 Day Forecast</SelectItem><SelectItem value="30">30 Day Forecast</SelectItem><SelectItem value="60">60 Day Forecast</SelectItem></SelectContent>
           </Select>
+          <div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Input placeholder="Search product..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+              className="pl-9 font-body text-sm rounded-sm" data-testid="forecast-search" /></div>
         </CardContent>
       </Card>
 
@@ -53,8 +63,8 @@ export default function DemandForecastPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Product', 'Store', '30d Sales', '60d Sales', '90d Sales', 'Avg/Day', 'Current Stock', 'Days Left', 'Reorder Qty', 'Urgency'].map(h => (
-                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['30d Sales','60d Sales','90d Sales','Avg/Day','Current Stock','Days Left','Reorder Qty'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                {['Product', 'Store', '30d Qty', '60d Qty', '90d Qty', 'Avg/Day', 'Stock (Units)', 'Days Left', 'Reorder (Units)', 'Urgency'].map(h => (
+                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['30d Qty','60d Qty','90d Qty','Avg/Day','Stock (Units)','Days Left','Reorder (Units)'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -78,6 +88,15 @@ export default function DemandForecastPage() {
             </TableBody>
           </Table>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100">
+            <p className="text-[11px] text-slate-400 font-body">Page {page}/{totalPages} | {data.total?.toLocaleString()} products</p>
+            <div className="flex gap-1">
+              <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1} className="h-7 w-7 p-0 rounded-sm"><ChevronLeft className="w-3.5 h-3.5" /></Button>
+              <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages} className="h-7 w-7 p-0 rounded-sm"><ChevronRight className="w-3.5 h-3.5" /></Button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );
