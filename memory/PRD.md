@@ -103,6 +103,12 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 58. Stop Medicine functionality - deactivate medicines from calendar
 59. Enhanced Medicine Calendar - visual indicators for dosage, timing icons (sun/coffee/moon), food relation badges
 60. Medicine Search Select - searchable dropdown in Add Medicine form that queries product master, supports custom entry if not found
+61. Store CRM Dashboard - dedicated page for store staff with date-wise new customers, RC purchases, upcoming refills by due date, 6 KPIs
+62. STORE_MANAGER Role - new role with authority to assign RC customers to store staff, access CRM reports and sales upload
+63. RC Customer Staff Assignment - store managers/admin can assign RC customers to specific staff via customer profile
+64. Staff Performance Dashboard - tracks per-staff: assigned customers, calls made, confirmed calls, conversion rate, overdue refills, tasks completed
+65. Enhanced Refill Due - shows in-stock quantity at store, required shortfall, and assigned staff for each refill item
+66. Store Staff CRM Access - store staff and managers can access Customer List, Customer Profile, Refill Due, CRM dashboard pages
 
 ## P0 - Remaining
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
