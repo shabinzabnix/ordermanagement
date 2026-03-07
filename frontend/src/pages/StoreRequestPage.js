@@ -44,7 +44,7 @@ export default function StoreRequestPage() {
 
   const loadData = () => {
     api.get('/po/store-requests').then(r => setRequests(r.data.requests)).catch(() => {});
-    if (isHO) { api.get('/po/purchase-review?po_category=all').then(r => setAllItems(r.data.items)).catch(() => {}); }
+    api.get('/po/purchase-review?po_category=all').then(r => setAllItems(r.data.items)).catch(() => {});
   };
 
   useEffect(() => {
@@ -115,15 +115,13 @@ export default function StoreRequestPage() {
 
       <Tabs defaultValue={isHO ? "review" : "new"}>
         <TabsList className="rounded-sm">
-          {!isHO && <TabsTrigger value="new" className="rounded-sm text-xs font-body">New Request</TabsTrigger>}
-          {isHO && <TabsTrigger value="review" className="rounded-sm text-xs font-body">Product Review ({allItems.length})</TabsTrigger>}
+          <TabsTrigger value="new" className="rounded-sm text-xs font-body">New Request</TabsTrigger>
+          <TabsTrigger value="review" className="rounded-sm text-xs font-body">Product Review ({allItems.length})</TabsTrigger>
           <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Requests ({requests.length})</TabsTrigger>
-          {!isHO && <TabsTrigger value="new" className="rounded-sm text-xs font-body">New Request</TabsTrigger>}
         </TabsList>
 
-        {/* HO: Individual Product Review */}
-        {isHO && (
-          <TabsContent value="review">
+        {/* Product Review - Individual items with actions */}
+        <TabsContent value="review">
             <div className="flex gap-1.5 mb-3">
               {['all', 'pending', 'approved', 'ordered', 'rejected'].map(s => (
                 <Button key={s} variant={reviewFilter === s ? 'default' : 'outline'} size="sm"
@@ -183,7 +181,6 @@ export default function StoreRequestPage() {
               ))}
             </div>
           </TabsContent>
-        )}
 
         {/* Requests List */}
         <TabsContent value="requests">
