@@ -667,51 +667,56 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
 
     html = f"""<!DOCTYPE html><html><head><style>
         @page {{ margin: 0; size: A4; }}
-        body {{ font-family: 'Helvetica', sans-serif; margin: 0; padding: 0; }}
-        .letterhead {{ width: 100%; }}
+        body {{ font-family: 'Helvetica', sans-serif; margin: 0; padding: 0; position: relative; }}
+        .page {{ position: relative; width: 210mm; min-height: 297mm; }}
+        .letterhead {{ position: absolute; top: 0; left: 0; width: 100%; z-index: 0; }}
         .letterhead img {{ width: 100%; display: block; }}
-        .content {{ padding: 20px 40px; }}
-        .po-title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 10px 0; }}
-        .info-row {{ display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; color: #475569; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-        th {{ background: #f1f5f9; padding: 8px; text-align: left; font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; }}
-        .total-row {{ background: #f0f9ff; font-weight: 700; font-size: 14px; }}
-        .footer {{ position: fixed; bottom: 0; width: 100%; height: 50px; background: #475569; display: flex; align-items: center; justify-content: center; }}
-        .footer span {{ color: white; font-size: 13px; font-weight: 600; }}
+        .content {{ position: relative; z-index: 1; padding: 180px 40px 60px 40px; }}
+        .po-title {{ font-size: 18px; font-weight: 700; color: #0f172a; margin: 5px 0 10px 0; text-align: center; text-decoration: underline; }}
+        .info-grid {{ display: flex; justify-content: space-between; margin-bottom: 10px; }}
+        .info-item {{ font-size: 11px; color: #475569; margin-bottom: 3px; }}
+        .info-item b {{ color: #1e293b; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+        th {{ background: #f1f5f9; padding: 6px 8px; text-align: left; font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; border: 1px solid #e2e8f0; }}
+        td {{ border: 1px solid #e2e8f0; }}
+        .total-row {{ background: #f0f9ff; font-weight: 700; font-size: 13px; }}
+        .sign-area {{ margin-top: 30px; display: flex; justify-content: space-between; font-size: 11px; color: #64748b; }}
     </style></head><body>
-    <div class="letterhead">{'<img src="data:image/jpeg;base64,' + letterhead_b64 + '" />' if letterhead_b64 else ''}</div>
-    <div class="content">
-        <div class="po-title">PURCHASE ORDER</div>
-        <div style="display:flex;justify-content:space-between;">
-            <div>
-                <div class="info-row"><b>PO Number:</b>&nbsp;{po.po_number}</div>
-                <div class="info-row"><b>Date:</b>&nbsp;{po.created_at.strftime('%d %b %Y') if po.created_at else '-'}</div>
-                <div class="info-row"><b>Supplier:</b>&nbsp;{po.supplier_name or 'To be assigned'}</div>
+    <div class="page">
+        <div class="letterhead">{'<img src="data:image/jpeg;base64,' + letterhead_b64 + '" />' if letterhead_b64 else ''}</div>
+        <div class="content">
+            <div class="po-title">PURCHASE ORDER</div>
+            <div class="info-grid">
+                <div>
+                    <div class="info-item"><b>PO Number:</b> {po.po_number}</div>
+                    <div class="info-item"><b>Date:</b> {po.created_at.strftime('%d %b %Y') if po.created_at else '-'}</div>
+                    <div class="info-item"><b>Supplier:</b> {po.supplier_name or 'To be assigned'}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div class="info-item"><b>Sub Category:</b> {po.sub_category or '-'}</div>
+                    <div class="info-item"><b>Status:</b> {po.status.upper()}</div>
+                    <div class="info-item"><b>Store:</b> {smap.get(po.store_id, 'Head Office')}</div>
+                </div>
             </div>
-            <div style="text-align:right;">
-                <div class="info-row"><b>Sub Category:</b>&nbsp;{po.sub_category or '-'}</div>
-                <div class="info-row"><b>Status:</b>&nbsp;{po.status.upper()}</div>
-                <div class="info-row"><b>Store:</b>&nbsp;{smap.get(po.store_id, 'Head Office')}</div>
+            <table>
+                <thead><tr>
+                    <th style="width:30px;">#</th><th>Product ID</th><th>Product Name</th>
+                    <th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Value</th>
+                </tr></thead>
+                <tbody>{items_html}
+                <tr class="total-row">
+                    <td colspan="3" style="padding:8px;border:1px solid #e2e8f0;">TOTAL</td>
+                    <td style="padding:8px;text-align:right;border:1px solid #e2e8f0;">{po.total_qty:.0f}</td>
+                    <td style="padding:8px;border:1px solid #e2e8f0;"></td>
+                    <td style="padding:8px;text-align:right;border:1px solid #e2e8f0;">INR {po.total_value:,.2f}</td>
+                </tr></tbody>
+            </table>
+            <div class="sign-area">
+                <div>Prepared by: _________________</div>
+                <div>Authorized Signature: _________________</div>
             </div>
-        </div>
-        <table>
-            <thead><tr>
-                <th style="width:40px;">#</th><th>Product ID</th><th>Product Name</th>
-                <th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Value</th>
-            </tr></thead>
-            <tbody>{items_html}
-            <tr class="total-row">
-                <td colspan="3" style="padding:10px 8px;">TOTAL</td>
-                <td style="padding:10px 8px;text-align:right;">{po.total_qty}</td>
-                <td style="padding:10px 8px;"></td>
-                <td style="padding:10px 8px;text-align:right;">INR {po.total_value:,.2f}</td>
-            </tr></tbody>
-        </table>
-        <div style="margin-top:40px;font-size:11px;color:#94a3b8;">
-            <p>Authorized Signature: _______________________</p>
         </div>
     </div>
-    <div class="footer"><span>www.starlex.in</span></div>
     </body></html>"""
 
     return {"html": html, "po_number": po.po_number}
