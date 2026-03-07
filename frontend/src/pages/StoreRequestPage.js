@@ -16,6 +16,10 @@ import { ShoppingCart, Search, Trash2, Plus, Package } from 'lucide-react';
 export default function StoreRequestPage() {
   const { user } = useAuth();
   const isHO = user?.role === 'ADMIN' || user?.role === 'HO_STAFF';
+  const isCRM = user?.role === 'CRM_STAFF';
+  const isStore = user?.role === 'STORE_STAFF';
+  const canApprove = isHO || isCRM;
+  const canManage = isHO;
   const [stores, setStores] = useState([]);
   const [requests, setRequests] = useState([]);
   // New request form
@@ -93,16 +97,12 @@ export default function StoreRequestPage() {
     finally { setSaving(false); }
   };
 
-  const updateItem = async (id, supplier, status, tat) => {
-    const payload = { item_ids: [id] };
-    if (supplier) payload.supplier = supplier;
-    if (status) payload.status = status;
-    if (tat) payload.tat_days = tat;
-    try { await api.put('/po/purchase-review/update', payload); loadData(); } catch { toast.error('Failed'); }
+  const updateItem = async (id, updates) => {
+    try { await api.put('/po/purchase-review/update', { item_ids: [id], ...updates }); loadData(); } catch { toast.error('Failed'); }
   };
 
   const reasonBadge = (r) => r === 'emergency_purchase' ? 'bg-red-50 text-red-700' : r === 'stock_refill' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700';
-  const sBadge = (s) => ({ approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700' }[s] || 'bg-amber-50 text-amber-700');
+  const sBadge = (s) => ({ approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700', cancelled: 'bg-slate-200 text-slate-600', order_placed: 'bg-amber-50 text-amber-700' }[s] || 'bg-amber-50 text-amber-700');
 
   const filteredItems = reviewFilter === 'all' ? allItems : allItems.filter(i =>
     i.item_status === reviewFilter || i.fulfillment_status === reviewFilter
@@ -124,64 +124,106 @@ export default function StoreRequestPage() {
         {/* Requests - Individual Products */}
         <TabsContent value="requests">
           <div className="flex gap-1.5 mb-3">
-            {['all', 'pending', 'approved', 'rejected', 'order_placed', 'dispatched', 'received'].map(s => (
+            {['all', 'pending', 'approved', 'rejected', 'cancelled', 'order_placed'].map(s => (
               <Button key={s} variant={reviewFilter === s ? 'default' : 'outline'} size="sm"
                 className={`rounded-sm font-body text-xs capitalize ${reviewFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
                 onClick={() => setReviewFilter(s)}>{s.replace('_', ' ')}</Button>
             ))}
           </div>
-            <div className="space-y-2">
-              {filteredItems.length === 0 ? (
-                <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><Package className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No items</p></CardContent></Card>
-              ) : filteredItems.map(it => (
-                <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm ${it.item_status === 'approved' ? 'border-l-4 border-l-emerald-400' : it.item_status === 'ordered' ? 'border-l-4 border-l-sky-400' : it.item_status === 'rejected' ? 'border-l-4 border-l-red-400' : ''}`}>
-                  <CardContent className="p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[14px] font-heading font-bold text-slate-900">{it.product_name}</span>
-                        {it.po_category && <Badge className={`text-[8px] rounded-sm ${{
-                          'BRAND-RX':'bg-blue-50 text-blue-700','GEN-RX':'bg-violet-50 text-violet-700','OTC':'bg-emerald-50 text-emerald-700','OTX':'bg-amber-50 text-amber-700',
-                        }[it.po_category]||'bg-slate-100'}`}>{it.po_category}</Badge>}
-                        <span className="font-mono text-[10px] text-slate-400">{it.product_id}</span>
-                        {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm">{it.product_info.sub_category}</Badge>}
+          <div className="space-y-3">
+            {filteredItems.length === 0 ? (
+              <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><ShoppingCart className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No requests</p></CardContent></Card>
+            ) : filteredItems.map(it => (
+              <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm overflow-hidden ${
+                it.item_status === 'approved' ? 'border-l-4 border-l-emerald-500' :
+                it.item_status === 'order_placed' ? 'border-l-4 border-l-sky-500' :
+                it.item_status === 'rejected' ? 'border-l-4 border-l-red-500' :
+                it.item_status === 'cancelled' ? 'border-l-4 border-l-slate-400' :
+                'border-l-4 border-l-amber-400'}`}>
+                <CardContent className="p-0">
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-100">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[14px] font-heading font-bold text-slate-900 truncate">{it.product_name}</span>
+                      <span className="font-mono text-[10px] text-slate-400 shrink-0">{it.product_id}</span>
+                      {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm shrink-0">{it.product_info.sub_category}</Badge>}
+                    </div>
+                    <Badge className={`text-[10px] rounded-sm px-2 font-medium ${sBadge(it.item_status)}`}>{it.item_status?.replace('_',' ').toUpperCase()}</Badge>
+                  </div>
+                  {/* Info Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-0 border-b border-slate-100">
+                    {[{l:'Store',v:it.store_name},{l:'Qty',v:it.quantity},{l:'L.Cost',v:`INR ${(it.landing_cost||0).toFixed(2)}`},{l:'Value',v:`INR ${(it.quantity*(it.landing_cost||0)).toFixed(2)}`}].map(d => (
+                      <div key={d.l} className="px-4 py-2 border-r border-slate-100 last:border-r-0">
+                        <p className="text-[9px] font-body text-slate-400 uppercase">{d.l}</p>
+                        <p className="text-[13px] font-heading font-semibold text-slate-800">{d.v}</p>
                       </div>
-                      <Badge className={`text-[9px] rounded-sm ${sBadge(it.item_status)}`}>{it.item_status}</Badge>
+                    ))}
+                  </div>
+                  <div className="px-4 py-2.5 space-y-2">
+                    {/* Details */}
+                    <div className="flex gap-3 text-[11px] font-body text-slate-500 flex-wrap">
+                      <span>Sales 30d: <b className="text-slate-700">{it.sales_30d||0}</b></span>
+                      <span>Reason: <Badge className={`text-[8px] rounded-sm ${reasonBadge(it.request_reason)}`}>{it.request_reason?.replace('_',' ')}</Badge></span>
+                      {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name}</b> ({it.customer_mobile})</span>}
+                      {it.tat_type && <span>TAT: <b className="text-sky-700">{it.tat_type==='same_day'?'Same Day':it.tat_type==='next_day'?'Next Day':`${it.tat_days}d`}</b></span>}
                     </div>
-                    <div className="flex gap-4 text-[11px] font-body text-slate-500 flex-wrap">
-                      <span>Store: <b className="text-slate-700">{it.store_name}</b></span>
-                      <span>Qty: <b className="text-slate-700">{it.quantity}</b></span>
-                      <span>L.Cost: <b className="text-slate-700">{it.landing_cost?.toFixed(2)}</b></span>
-                      <span>Value: <b className="text-slate-700">INR {(it.quantity*(it.landing_cost||0)).toFixed(2)}</b></span>
-                      <span>Sales 30d: <b className="text-slate-700">{it.sales_30d}</b></span>
-                      {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name} ({it.customer_mobile})</b></span>}
-                    </div>
+                    {/* Stock */}
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] text-slate-400">Stock:</span>
-                      {it.store_stock?.length > 0 ? it.store_stock.map((s,j) => <Badge key={j} variant="secondary" className="text-[8px] rounded-sm px-1">{s.store}: {s.stock}</Badge>) : <span className="text-[10px] text-red-500">No stock</span>}
+                      <span className="text-[10px] text-slate-400 font-medium">STOCK:</span>
+                      {it.store_stock?.length > 0 ? it.store_stock.map((s,j) => <Badge key={j} className="text-[9px] rounded-sm bg-sky-50 text-sky-700 px-1.5">{s.store}: {s.stock}</Badge>) : <Badge className="text-[9px] rounded-sm bg-red-50 text-red-600">No stock</Badge>}
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] text-slate-400">Suppliers:</span>
-                      {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
-                        <Button key={type} variant="outline" size="sm" className={`h-5 px-2 rounded-sm text-[9px] ${it.selected_supplier===name?'bg-emerald-50 text-emerald-700 border-emerald-300':''}`}
-                          onClick={() => updateItem(it.id, name)}>{name} <span className="text-slate-400 ml-1">({type})</span></Button>
-                      ))}
-                      {it.selected_supplier && <Badge className="text-[9px] rounded-sm bg-emerald-100 text-emerald-800">Assigned: {it.selected_supplier}</Badge>}
-                    </div>
-                    <div className="flex items-center gap-3 pt-1 border-t border-slate-100">
-                      <Select value="" onValueChange={v => updateItem(it.id, null, v)}>
-                        <SelectTrigger className="w-[100px] h-6 text-[10px] rounded-sm"><SelectValue placeholder="Status" /></SelectTrigger>
-                        <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
-                      </Select>
-                      <div className="flex items-center gap-1"><span className="text-[10px] text-slate-400">TAT:</span>
-                        <Input type="number" placeholder="days" className="w-[50px] h-6 text-[10px] rounded-sm text-center"
-                          defaultValue={it.tat_days||''} onBlur={e => {const v=parseInt(e.target.value);if(v>0)updateItem(it.id,null,null,v);}} /></div>
-                      {it.tat_days && <span className="text-[10px] text-sky-600">TAT: {it.tat_days}d</span>}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    {/* Suppliers (read-only list) */}
+                    {Object.values(it.suppliers||{}).some(Boolean) && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-slate-400 font-medium">SUPPLIERS:</span>
+                        {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
+                          <Badge key={type} variant="secondary" className="text-[9px] rounded-sm">{name} ({type})</Badge>
+                        ))}
+                      </div>
+                    )}
+                    {/* Communication */}
+                    {(canApprove || canManage) && (
+                      <div className="flex items-center gap-2">
+                        <Input placeholder="Add remark / communication..." className="flex-1 h-7 text-[11px] rounded-sm"
+                          defaultValue={it.ho_remarks||''} onBlur={e => {if(e.target.value!==it.ho_remarks)updateItem(it.id,{ho_remarks:e.target.value});}} />
+                      </div>
+                    )}
+                    {it.ho_remarks && <p className="text-[10px] font-body text-violet-600 bg-violet-50/50 px-2 py-1 rounded-sm">{it.ho_remarks}</p>}
+                    {/* Store: Cancel option */}
+                    {isStore && it.item_status === 'pending' && (
+                      <Button size="sm" variant="outline" className="h-7 px-3 rounded-sm text-[10px] text-red-600 border-red-200 hover:bg-red-50"
+                        onClick={() => updateItem(it.id, {status:'cancelled'})}>Cancel Request</Button>
+                    )}
+                    {/* CRM/HO: Approve/Reject */}
+                    {canApprove && it.item_status === 'pending' && (
+                      <div className="flex items-center gap-2 bg-slate-50 rounded-sm p-2">
+                        <Button size="sm" className="h-7 px-4 rounded-sm text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white"
+                          onClick={() => updateItem(it.id, {status:'approved'})}>Approve</Button>
+                        <Button size="sm" variant="outline" className="h-7 px-4 rounded-sm text-[10px] text-red-600 border-red-200 hover:bg-red-50"
+                          onClick={() => updateItem(it.id, {status:'rejected'})}>Reject</Button>
+                        <div className="flex items-center gap-1.5 ml-auto">
+                          <span className="text-[10px] text-slate-500">TAT:</span>
+                          {['same_day','next_day'].map(t => (
+                            <Button key={t} size="sm" variant="outline" className={`h-6 px-2 rounded-sm text-[9px] ${it.tat_type===t?'bg-sky-500 text-white border-sky-500':''}`}
+                              onClick={() => updateItem(it.id, {tat_type:t, tat_days:t==='same_day'?0:1})}>{t==='same_day'?'Same Day':'Next Day'}</Button>
+                          ))}
+                          <Input type="number" placeholder="days" className="w-[45px] h-6 text-[10px] rounded-sm text-center"
+                            defaultValue={it.tat_days>1?it.tat_days:''} onBlur={e=>{const v=parseInt(e.target.value);if(v>1)updateItem(it.id,{tat_type:'days',tat_days:v});}} />
+                        </div>
+                      </div>
+                    )}
+                    {/* HO only: Order Placed (after approval) */}
+                    {canManage && it.item_status === 'approved' && (
+                      <Button size="sm" className="h-7 px-4 rounded-sm text-[10px] bg-amber-500 hover:bg-amber-600 text-white"
+                        onClick={() => updateItem(it.id, {fulfillment_status:'order_placed', status:'order_placed'})}>Mark Order Placed</Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </TabsContent>
+
 
         {/* New Request Form */}
         <TabsContent value="new">
