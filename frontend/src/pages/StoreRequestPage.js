@@ -44,6 +44,8 @@ export default function StoreRequestPage() {
   const [chatMsg, setChatMsg] = useState('');
   const [allComments, setAllComments] = useState([]);
   const [msgSearch, setMsgSearch] = useState('');
+  const [viewedMsgs, setViewedMsgs] = useState(() => { try { return JSON.parse(localStorage.getItem('viewed_msgs') || '[]'); } catch { return []; } });
+  const [reqSearch, setReqSearch] = useState('');
   // HO review
   const [allItems, setAllItems] = useState([]);
   const [reviewFilter, setReviewFilter] = useState('all');
@@ -123,12 +125,29 @@ export default function StoreRequestPage() {
     } catch { toast.error('Failed'); }
   };
 
+  const markViewed = (msgId) => {
+    const updated = [...new Set([...viewedMsgs, msgId])];
+    setViewedMsgs(updated);
+    localStorage.setItem('viewed_msgs', JSON.stringify(updated));
+  };
+  const openChatFromMsg = (msg) => {
+    markViewed(msg.id);
+    openChat(msg.item_id);
+  };
+  const unreadCount = allComments.filter(c => !viewedMsgs.includes(c.id)).length;
+
   const reasonBadge = (r) => r === 'emergency_purchase' ? 'bg-red-50 text-red-700' : r === 'stock_refill' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700';
   const sBadge = (s) => ({ approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700', cancelled: 'bg-slate-200 text-slate-600', order_placed: 'bg-amber-50 text-amber-700' }[s] || 'bg-amber-50 text-amber-700');
 
-  const filteredItems = reviewFilter === 'all' ? allItems : allItems.filter(i =>
+  let filteredItems = reviewFilter === 'all' ? allItems : allItems.filter(i =>
     i.item_status === reviewFilter || i.fulfillment_status === reviewFilter
   );
+  if (reqSearch) {
+    const sl = reqSearch.toLowerCase();
+    filteredItems = filteredItems.filter(i =>
+      i.product_name?.toLowerCase().includes(sl) || String(i.request_id).includes(sl) || i.store_name?.toLowerCase().includes(sl) || i.product_id?.includes(sl)
+    );
+  }
   // Non-categorized items (no po_category) for normal requests view
   const normalRequests = requests;
 
@@ -142,18 +161,23 @@ export default function StoreRequestPage() {
           <TabsTrigger value="new" className="rounded-sm text-xs font-body">New Request</TabsTrigger>
           <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Requests ({allItems.length})</TabsTrigger>
           <TabsTrigger value="messages" className="rounded-sm text-xs font-body">
-            Messages {allComments.length > 0 && <Badge className="ml-1 text-[8px] rounded-full bg-sky-500 text-white px-1.5">{allComments.length}</Badge>}
+            Messages {unreadCount > 0 && <Badge className="ml-1 text-[8px] rounded-full bg-red-500 text-white px-1.5 animate-pulse">{unreadCount}</Badge>}
           </TabsTrigger>
         </TabsList>
 
         {/* Requests - Individual Products */}
         <TabsContent value="requests">
-          <div className="flex gap-1.5 mb-3">
-            {['all', 'pending', 'approved', 'rejected', 'cancelled', 'order_placed'].map(s => (
-              <Button key={s} variant={reviewFilter === s ? 'default' : 'outline'} size="sm"
-                className={`rounded-sm font-body text-xs capitalize ${reviewFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
-                onClick={() => setReviewFilter(s)}>{s.replace('_', ' ')}</Button>
-            ))}
+          <div className="flex gap-3 mb-3 items-center">
+            <div className="flex gap-1.5 flex-wrap">
+              {['all', 'pending', 'approved', 'rejected', 'cancelled', 'order_placed'].map(s => (
+                <Button key={s} variant={reviewFilter === s ? 'default' : 'outline'} size="sm"
+                  className={`rounded-sm font-body text-xs capitalize ${reviewFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
+                  onClick={() => setReviewFilter(s)}>{s.replace('_', ' ')}</Button>
+              ))}
+            </div>
+            <div className="relative flex-1 min-w-[200px] ml-auto"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+              <Input placeholder="Search by request ID, store, product..." value={reqSearch} onChange={e => setReqSearch(e.target.value)}
+                className="pl-9 h-8 text-[11px] rounded-sm" /></div>
           </div>
           <div className="space-y-3">
             {filteredItems.length === 0 ? (
@@ -299,14 +323,10 @@ export default function StoreRequestPage() {
         <TabsContent value="messages">
           <Card className="border-slate-200 shadow-sm rounded-sm">
             <CardHeader className="pb-2 border-b border-slate-100">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
-                  <MessageCircle className="w-4 h-4 text-sky-500" /> All Communications ({allComments.length})
-                </CardTitle>
-                <div className="relative w-[250px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                  <Input placeholder="Search by request ID, store, product..." value={msgSearch} onChange={e => setMsgSearch(e.target.value)}
-                    className="pl-9 h-8 text-[11px] rounded-sm" /></div>
-              </div>
+              <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
+                <MessageCircle className="w-4 h-4 text-sky-500" /> All Communications ({allComments.length})
+                {unreadCount > 0 && <Badge className="text-[9px] rounded-full bg-red-500 text-white px-2">{unreadCount} new</Badge>}
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <div className="max-h-[calc(100vh-280px)] overflow-auto">
@@ -314,8 +334,12 @@ export default function StoreRequestPage() {
                   <div className="text-center py-16"><MessageCircle className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No messages</p></div>
                 ) : allComments.map(m => {
                   const isMe = m.user_name === user?.full_name;
+                  const isUnread = !viewedMsgs.includes(m.id);
                   return (
-                    <div key={m.id} className={`flex gap-3 px-4 py-3 border-b border-slate-50 hover:bg-slate-50/50 ${isMe ? 'bg-sky-50/20' : ''}`}>
+                    <div key={m.id}
+                      className={`flex gap-3 px-4 py-3 border-b border-slate-50 cursor-pointer transition-colors ${isUnread ? 'bg-sky-50/60 hover:bg-sky-100/60' : 'hover:bg-slate-50/50'}`}
+                      onClick={() => openChatFromMsg(m)}>
+                      {isUnread && <div className="w-2 h-2 rounded-full bg-sky-500 shrink-0 mt-3" />}
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-[11px] font-bold ${
                         m.user_role === 'STORE_STAFF' ? 'bg-emerald-100 text-emerald-700' :
                         m.user_role === 'CRM_STAFF' ? 'bg-rose-100 text-rose-700' :
@@ -325,7 +349,7 @@ export default function StoreRequestPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[12px] font-body font-semibold text-slate-800">{m.user_name}</span>
+                          <span className={`text-[12px] font-body ${isUnread ? 'font-bold text-slate-900' : 'font-semibold text-slate-800'}`}>{m.user_name}</span>
                           <Badge className={`text-[7px] rounded-sm px-1 ${
                             m.user_role === 'STORE_STAFF' ? 'bg-emerald-50 text-emerald-600' :
                             m.user_role === 'CRM_STAFF' ? 'bg-rose-50 text-rose-600' :
@@ -336,7 +360,7 @@ export default function StoreRequestPage() {
                           <span className="text-[9px] text-slate-400">{m.created_at ? new Date(m.created_at).toLocaleString() : ''}</span>
                         </div>
                         <Badge variant="secondary" className="text-[8px] rounded-sm px-1 mt-0.5">{m.product_name?.slice(0,40)}</Badge>
-                        <p className="text-[12px] font-body text-slate-700 mt-1">{m.message}</p>
+                        <p className={`text-[12px] font-body mt-1 ${isUnread ? 'text-slate-900' : 'text-slate-600'}`}>{m.message}</p>
                       </div>
                     </div>
                   );
