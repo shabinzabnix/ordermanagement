@@ -206,10 +206,16 @@ async def upload_store_stock(
             ho_pid = str(row.get("ho_product_id", "")).strip() if pd.notna(row.get("ho_product_id")) else None
             if ho_pid in ("", "nan", "None"):
                 ho_pid = None
+            if ho_pid and ho_pid.endswith(".0"):
+                ho_pid = ho_pid[:-2]
+
+            store_pid = str(row.get("store_product_id", "")).strip() if pd.notna(row.get("store_product_id")) else None
+            if store_pid and store_pid.endswith(".0"):
+                store_pid = store_pid[:-2]
 
             db.add(StoreStockBatch(
                 store_id=store_id, ho_product_id=ho_pid,
-                store_product_id=str(row.get("store_product_id", "")).strip() if pd.notna(row.get("store_product_id")) else None,
+                store_product_id=store_pid,
                 product_name=pname, packing=packing, batch=batch,
                 mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
                 sales=float(row.get("sales", 0)) if pd.notna(row.get("sales")) else 0,

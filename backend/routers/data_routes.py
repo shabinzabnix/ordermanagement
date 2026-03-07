@@ -153,6 +153,8 @@ async def upload_products(
     for idx, row in df_mapped.iterrows():
         try:
             product_id = str(row.get("product_id", "")).strip()
+            if product_id.endswith(".0"):
+                product_id = product_id[:-2]
             if not product_id:
                 errors.append(f"Row {idx+2}: Missing product_id")
                 failed += 1
