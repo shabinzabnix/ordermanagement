@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { ShoppingCart, Search, Trash2, Plus, Package, MessageCircle, Send } from 'lucide-react';
 
@@ -130,9 +131,11 @@ export default function StoreRequestPage() {
     setViewedMsgs(updated);
     localStorage.setItem('viewed_msgs', JSON.stringify(updated));
   };
-  const openChatFromMsg = (msg) => {
+  const openChatFromMsg = async (msg) => {
     markViewed(msg.id);
-    openChat(msg.item_id);
+    setChatOpen(msg.item_id);
+    setChatMsg('');
+    try { const r = await api.get(`/po/request-comments/${msg.item_id}`); setChatMessages(r.data.comments); } catch { setChatMessages([]); }
   };
   const unreadCount = allComments.filter(c => !viewedMsgs.includes(c.id)).length;
 
@@ -422,6 +425,47 @@ export default function StoreRequestPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Chat Popup Dialog */}
+      <Dialog open={chatOpen !== null} onOpenChange={v => { if (!v) setChatOpen(null); }}>
+        <DialogContent className="rounded-sm max-w-md max-h-[80vh] flex flex-col p-0">
+          <DialogHeader className="px-4 py-3 border-b border-slate-200">
+            <DialogTitle className="font-heading text-sm">
+              Chat {chatOpen && allItems.find(i => i.id === chatOpen) ? `— ${allItems.find(i => i.id === chatOpen)?.product_name}` : ''}
+            </DialogTitle>
+            {chatOpen && allItems.find(i => i.id === chatOpen) && (
+              <p className="text-[10px] font-body text-slate-500">
+                REQ-{allItems.find(i => i.id === chatOpen)?.request_id} | {allItems.find(i => i.id === chatOpen)?.store_name}
+              </p>
+            )}
+          </DialogHeader>
+          <div className="flex-1 overflow-auto p-3 space-y-2 min-h-[250px] max-h-[400px]">
+            {chatMessages.length === 0 && <p className="text-[11px] text-slate-400 text-center py-8">No messages yet. Start the conversation.</p>}
+            {chatMessages.map(m => {
+              const isMe = m.user_name === user?.full_name;
+              return (
+                <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[80%] rounded-lg px-3 py-2 ${isMe ? 'bg-sky-500 text-white' : 'bg-slate-100 border border-slate-200'}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] font-semibold ${isMe ? 'text-sky-100' : 'text-sky-700'}`}>{m.user_name}</span>
+                      <Badge className={`text-[7px] rounded-sm px-1 ${isMe ? 'bg-sky-400 text-white' : 'bg-slate-200 text-slate-500'}`}>{m.user_role?.replace('_',' ')}</Badge>
+                    </div>
+                    <p className={`text-[12px] mt-0.5 ${isMe ? 'text-white' : 'text-slate-700'}`}>{m.message}</p>
+                    <p className={`text-[8px] mt-0.5 ${isMe ? 'text-sky-200' : 'text-slate-400'}`}>{m.created_at ? new Date(m.created_at).toLocaleString() : ''}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 p-3 border-t border-slate-200 bg-white">
+            <Input placeholder="Type message..." value={chatMsg} onChange={e => setChatMsg(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && sendChat()} className="flex-1 h-9 text-[12px] rounded-sm" autoFocus />
+            <Button className="h-9 w-9 p-0 bg-sky-500 hover:bg-sky-600 rounded-sm" onClick={sendChat} disabled={!chatMsg.trim()}>
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
