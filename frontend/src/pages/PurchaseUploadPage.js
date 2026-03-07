@@ -114,9 +114,16 @@ export default function PurchaseUploadPage() {
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-[140px] font-body text-sm rounded-sm" />
           <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-[140px] font-body text-sm rounded-sm" />
           {uploadResult && (
-            <Badge className="text-[11px] rounded-sm bg-emerald-50 text-emerald-700"><CheckCircle className="w-3 h-3 mr-1 inline" />
-              New: {uploadResult.new_records} | Skipped: {uploadResult.skipped_duplicate} | Failed: {uploadResult.failed}
-            </Badge>
+            <div className="space-y-1">
+              <Badge className="text-[11px] rounded-sm bg-emerald-50 text-emerald-700"><CheckCircle className="w-3 h-3 mr-1 inline" />
+                New: {uploadResult.new_records} | Skipped: {uploadResult.skipped_duplicate} | Failed: {uploadResult.failed}
+              </Badge>
+              {uploadResult.errors?.length > 0 && (
+                <div className="text-[10px] font-body text-red-600 bg-red-50 rounded-sm px-2 py-1.5 max-h-24 overflow-auto">
+                  {uploadResult.errors.map((e, i) => <p key={i}>{e}</p>)}
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
         <UploadProgress phase={uploadProgress.phase} percent={uploadProgress.percent} />

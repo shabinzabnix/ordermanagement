@@ -1002,13 +1002,19 @@ async def upload_purchase_report(
     batch_id = str(uuid.uuid4())[:12]
     success, skipped, failed = 0, 0, 0
     records = []
+    errors = []
 
     for idx, row in df.iterrows():
         try:
             product = str(row.get("product_name", "")).strip()
             supplier = str(row.get("supplier_name", "")).strip()
-            if not product or product == "nan" or not supplier or supplier == "nan":
+            if not product or product == "nan":
                 failed += 1
+                errors.append(f"Row {idx+2}: Missing product name")
+                continue
+            if not supplier or supplier == "nan":
+                failed += 1
+                errors.append(f"Row {idx+2}: Missing supplier name for '{product}'")
                 continue
 
             entry_num = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None
@@ -1052,6 +1058,7 @@ async def upload_purchase_report(
             success += 1
         except Exception as e:
             failed += 1
+            errors.append(f"Row {idx+2}: {str(e)[:80]}")
 
     for r in records:
         db.add(r)
@@ -1061,7 +1068,7 @@ async def upload_purchase_report(
         await db.rollback()
         raise HTTPException(500, f"Failed to save: {str(e)[:200]}")
 
-    return {"message": "Purchase report uploaded", "total": len(df), "new_records": success, "skipped_duplicate": skipped, "failed": failed}
+    return {"message": "Purchase report uploaded", "total": len(df), "new_records": success, "skipped_duplicate": skipped, "failed": failed, "errors": errors[:20]}
 
 
 @router.get("/intel/purchase-records")
