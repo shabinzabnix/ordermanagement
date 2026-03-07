@@ -73,6 +73,16 @@ export default function POManagementPage() {
     catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
   };
 
+  const generatePDF = async (poId) => {
+    try {
+      const res = await api.get(`/po/${poId}/pdf`);
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(res.data.html);
+      printWindow.document.close();
+      printWindow.onload = () => { printWindow.print(); };
+    } catch { toast.error('Failed to generate PDF'); }
+  };
+
   const editQty = (idx, val) => { const n = [...editItems]; n[idx].quantity = parseFloat(val) || 0; n[idx].estimated_value = round2(n[idx].quantity * n[idx].landing_cost); setEditItems(n); };
   const editCost = (idx, val) => { const n = [...editItems]; n[idx].landing_cost = parseFloat(val) || 0; n[idx].estimated_value = round2(n[idx].quantity * n[idx].landing_cost); setEditItems(n); };
   const removeEditItem = (idx) => setEditItems(editItems.filter((_, i) => i !== idx));
@@ -184,10 +194,10 @@ export default function POManagementPage() {
   };
 
   const handleSubcatUpload = async (e) => {
-    const file = e.target.files[0]; if (!file || !uploadSupplier) { toast.error('Select supplier first'); return; }
+    const file = e.target.files[0]; if (!file) return;
     const fd = new FormData(); fd.append('file', file);
     try {
-      const res = await api.post(`/po/upload-subcategory?supplier_name=${encodeURIComponent(uploadSupplier)}`, fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
+      const res = await api.post('/po/upload-subcategory', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
       toast.success(`${res.data.purchase_orders?.length} POs created by sub-category`);
       loadData();
     } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
@@ -312,20 +322,10 @@ export default function POManagementPage() {
           <Card className="border-slate-200 shadow-sm rounded-sm">
             <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold flex items-center gap-2"><Upload className="w-4 h-4 text-sky-500" /> Upload PO by Sub-Category</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-[11px] font-body text-slate-500">Excel format: Sub Category, Product Name, Qty, Rate (optional: HO ID). Creates separate POs per sub-category.</p>
+              <p className="text-[11px] font-body text-slate-500">Upload Excel with: <b>HO ID</b>, <b>Product Name</b>, <b>Qty</b>. System auto-detects sub-category from Product Master and creates separate POs per sub-category. Supplier can be assigned later.</p>
               <div className="flex gap-3">
-                <div className="relative w-[250px]">
-                  <Input placeholder="Search supplier *" value={uploadSupplier} onChange={e => { setUploadSupplier(e.target.value); setSupplierSearch(e.target.value); }}
-                    onFocus={() => setShowSuppliers(true)} className="rounded-sm" />
-                  {showSuppliers && uploadSupplier && suppliers.length > 0 && (
-                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[150px] overflow-auto">
-                      {suppliers.map(s => (<button key={s} type="button" className="w-full text-left px-3 py-1.5 hover:bg-sky-50 border-b border-slate-50 text-[12px]"
-                        onClick={() => { setUploadSupplier(s); setShowSuppliers(false); }}>{s}</button>))}
-                    </div>
-                  )}
-                </div>
-                <input type="file" accept=".xlsx,.xls" onChange={handleSubcatUpload} disabled={!uploadSupplier} className="hidden" id="subcat-upload" />
-                <label htmlFor="subcat-upload"><Button asChild className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" disabled={!uploadSupplier}><span><Upload className="w-3.5 h-3.5 mr-1.5" /> Upload</span></Button></label>
+                <input type="file" accept=".xlsx,.xls" onChange={handleSubcatUpload} className="hidden" id="subcat-upload" />
+                <label htmlFor="subcat-upload"><Button asChild className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs"><span><Upload className="w-3.5 h-3.5 mr-1.5" /> Upload Excel</span></Button></label>
               </div>
             </CardContent>
           </Card>
@@ -587,6 +587,9 @@ export default function POManagementPage() {
 
             {/* Action Buttons */}
             <div className="flex gap-2 justify-end flex-wrap">
+              <Button variant="outline" className="rounded-sm font-body text-xs" onClick={() => generatePDF(poDetail.po.id)}>
+                <FileText className="w-3 h-3 mr-1" /> Print PO
+              </Button>
               {poDetail.po.status === 'draft' && (<>
                 <Button variant="outline" className="rounded-sm font-body text-xs text-red-600 hover:bg-red-50" onClick={() => deletePo(poDetail.po.id)}>
                   <Trash2 className="w-3 h-3 mr-1" /> Delete PO

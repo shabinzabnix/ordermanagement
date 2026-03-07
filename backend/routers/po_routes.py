@@ -546,12 +546,11 @@ async def update_po_fulfillment(
 
 @router.post("/po/upload-subcategory")
 async def upload_po_by_subcategory(
-    supplier_name: str = Query(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
-    """Upload Excel: Sub Category, Product Name, Qty, Rate → creates POs grouped by sub-category."""
+    """Upload Excel: HO ID, Product Name, Qty. Auto-categorizes by sub_category from Product Master."""
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()
@@ -559,44 +558,60 @@ async def upload_po_by_subcategory(
     for skip in [0, 1, 2, 3]:
         try:
             test_df = pd.read_excel(BytesIO(content), header=skip)
-            if not test_df.empty and len(test_df.columns) >= 3:
-                df = test_df; break
+            if not test_df.empty and len(test_df.columns) >= 2:
+                cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
+                if any(c in cols_lower for c in ["product name", "product", "name"]):
+                    df = test_df; break
         except: continue
     if df is None:
         raise HTTPException(400, "Failed to read Excel")
 
-    col_map = {"sub category": "sub_category", "subcategory": "sub_category", "category": "sub_category",
-               "product name": "product_name", "product": "product_name", "name": "product_name",
+    col_map = {"product name": "product_name", "product": "product_name", "name": "product_name",
                "qty": "quantity", "quantity": "quantity",
-               "rate": "landing_cost", "cost": "landing_cost", "price": "landing_cost", "landing cost": "landing_cost",
-               "ho id": "product_id", "product id": "product_id"}
+               "ho id": "product_id", "product id": "product_id", "id": "product_id",
+               "rate": "landing_cost", "cost": "landing_cost", "lcost": "landing_cost"}
     df.columns = [str(c).strip().lower().replace('_', ' ') for c in df.columns]
     df = df.rename(columns={c: col_map[c] for c in df.columns if c in col_map})
 
     if "product_name" not in df.columns or "quantity" not in df.columns:
-        raise HTTPException(400, f"Required: Product Name, Qty. Your columns: {list(df.columns)}")
+        raise HTTPException(400, f"Required: Product Name + Qty. Your columns: {list(df.columns)}")
 
-    # Group by sub_category
+    # Pre-load product master for sub_category + landing_cost lookup
+    all_products = {}
+    for p in (await db.execute(select(Product))).scalars().all():
+        all_products[p.product_id] = p
+        all_products[p.product_name.lower()] = p
+
+    # Group by sub_category (auto-detected from Product Master)
     groups = {}
+    unmatched = 0
     for _, row in df.iterrows():
         pname = str(row.get("product_name", "")).strip()
         if not pname or pname == "nan": continue
-        subcat = str(row.get("sub_category", "General")).strip()
-        if subcat == "nan": subcat = "General"
-        if subcat not in groups: groups[subcat] = []
         pid = str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None
         if pid and pid.endswith(".0"): pid = pid[:-2]
         if pid in ("", "nan", "None"): pid = None
+
+        # Lookup from Product Master
+        prod = all_products.get(pid) if pid else all_products.get(pname.lower())
+        subcat = prod.sub_category if prod and prod.sub_category else "Uncategorized"
         lcost = float(row.get("landing_cost", 0)) if pd.notna(row.get("landing_cost")) else 0
+        if lcost == 0 and prod:
+            lcost = float(prod.landing_cost or prod.ptr or 0)
+        if not prod:
+            unmatched += 1
+
         qty = float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0
-        groups[subcat].append({"product_id": pid, "product_name": pname, "quantity": qty, "landing_cost": lcost})
+        if subcat not in groups: groups[subcat] = []
+        groups[subcat].append({"product_id": pid or (prod.product_id if prod else None),
+                               "product_name": pname, "quantity": qty, "landing_cost": lcost})
 
     created_pos = []
     for subcat, items in groups.items():
         total_qty = sum(it["quantity"] for it in items)
         total_value = sum(round(it["quantity"] * it["landing_cost"], 2) for it in items)
         po = PurchaseOrder(
-            po_number=_gen_po_number(), supplier_name=supplier_name,
+            po_number=_gen_po_number(), supplier_name="",
             po_type="subcategory_upload", sub_category=subcat,
             status="draft", total_qty=total_qty, total_value=round(total_value, 2),
             created_by=user["user_id"],
@@ -609,7 +624,84 @@ async def upload_po_by_subcategory(
                 is_registered=bool(it["product_id"]), quantity=it["quantity"],
                 landing_cost=it["landing_cost"], estimated_value=round(it["quantity"] * it["landing_cost"], 2),
             ))
-        created_pos.append({"po_number": po.po_number, "sub_category": subcat, "items": len(items), "value": round(total_value, 2)})
+        created_pos.append({"po_id": po.id, "po_number": po.po_number, "sub_category": subcat,
+                            "items": len(items), "value": round(total_value, 2)})
 
+    await _log(db, user, f"Uploaded PO Excel: {len(created_pos)} POs from {len(df)} rows", "purchase_order")
     await db.commit()
-    return {"message": f"Created {len(created_pos)} POs by sub-category", "purchase_orders": created_pos}
+    return {"message": f"Created {len(created_pos)} POs by sub-category", "purchase_orders": created_pos,
+            "unmatched_products": unmatched}
+
+
+# ─── PO PDF Generation ──────────────────────────────────────
+
+@router.get("/po/{po_id}/pdf")
+async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    """Generate PO PDF with letterhead."""
+    po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
+    if not po:
+        raise HTTPException(404, "PO not found")
+    items = (await db.execute(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po_id))).scalars().all()
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    # Generate HTML for PDF
+    items_html = ""
+    for i, it in enumerate(items):
+        items_html += f"""<tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;">{i+1}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;">{it.product_id or '-'}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:500;">{it.product_name}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right;">{it.quantity}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right;">{it.landing_cost:.2f}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right;font-weight:600;">{it.estimated_value:.2f}</td>
+        </tr>"""
+
+    html = f"""<!DOCTYPE html><html><head><style>
+        @page {{ margin: 0; size: A4; }}
+        body {{ font-family: 'Helvetica', sans-serif; margin: 0; padding: 0; }}
+        .letterhead {{ width: 100%; height: 160px; background: url('/letterhead.jpeg') center top no-repeat; background-size: 100% auto; }}
+        .content {{ padding: 20px 40px; }}
+        .po-title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 10px 0; }}
+        .info-row {{ display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; color: #475569; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+        th {{ background: #f1f5f9; padding: 8px; text-align: left; font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; }}
+        .total-row {{ background: #f0f9ff; font-weight: 700; font-size: 14px; }}
+        .footer {{ position: fixed; bottom: 0; width: 100%; height: 50px; background: #475569; display: flex; align-items: center; justify-content: center; }}
+        .footer span {{ color: white; font-size: 13px; font-weight: 600; }}
+    </style></head><body>
+    <div class="letterhead"></div>
+    <div class="content">
+        <div class="po-title">PURCHASE ORDER</div>
+        <div style="display:flex;justify-content:space-between;">
+            <div>
+                <div class="info-row"><b>PO Number:</b>&nbsp;{po.po_number}</div>
+                <div class="info-row"><b>Date:</b>&nbsp;{po.created_at.strftime('%d %b %Y') if po.created_at else '-'}</div>
+                <div class="info-row"><b>Supplier:</b>&nbsp;{po.supplier_name or 'To be assigned'}</div>
+            </div>
+            <div style="text-align:right;">
+                <div class="info-row"><b>Sub Category:</b>&nbsp;{po.sub_category or '-'}</div>
+                <div class="info-row"><b>Status:</b>&nbsp;{po.status.upper()}</div>
+                <div class="info-row"><b>Store:</b>&nbsp;{smap.get(po.store_id, 'Head Office')}</div>
+            </div>
+        </div>
+        <table>
+            <thead><tr>
+                <th style="width:40px;">#</th><th>Product ID</th><th>Product Name</th>
+                <th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Value</th>
+            </tr></thead>
+            <tbody>{items_html}
+            <tr class="total-row">
+                <td colspan="3" style="padding:10px 8px;">TOTAL</td>
+                <td style="padding:10px 8px;text-align:right;">{po.total_qty}</td>
+                <td style="padding:10px 8px;"></td>
+                <td style="padding:10px 8px;text-align:right;">INR {po.total_value:,.2f}</td>
+            </tr></tbody>
+        </table>
+        <div style="margin-top:40px;font-size:11px;color:#94a3b8;">
+            <p>Authorized Signature: _______________________</p>
+        </div>
+    </div>
+    <div class="footer"><span>www.starlex.in</span></div>
+    </body></html>"""
+
+    return {"html": html, "po_number": po.po_number}
