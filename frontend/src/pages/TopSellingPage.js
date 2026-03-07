@@ -11,7 +11,6 @@ import { Skeleton } from '../components/ui/skeleton';
 import { downloadExcel } from '../lib/api';
 import { toast } from 'sonner';
 import { TrendingUp, Search, Download, ChevronLeft, ChevronRight, Package } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function TopSellingPage() {
   const { user } = useAuth();
@@ -25,7 +24,7 @@ export default function TopSellingPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('revenue');
-  const limit = 50;
+  const limit = 100;
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
   useEffect(() => {
@@ -112,24 +111,6 @@ export default function TopSellingPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Chart */}
-      {!loading && chartData.length > 0 && (
-        <Card className="border-slate-200 shadow-sm rounded-sm">
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-heading font-semibold">Top 10 by Revenue</CardTitle></CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="name" tick={{ fontSize: 9, fontFamily: 'Public Sans', fill: '#94A3B8' }} />
-                <YAxis tick={{ fontSize: 10, fontFamily: 'Public Sans', fill: '#94A3B8' }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Bar dataKey="revenue" fill="#10B981" radius={[3, 3, 0, 0]} name="Revenue (INR)" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Table */}
       <Card className="border-slate-200 shadow-sm rounded-sm">
