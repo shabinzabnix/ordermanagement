@@ -276,7 +276,7 @@ export default function POManagementPage() {
           <Card className="border-slate-200 shadow-sm rounded-sm">
             <div className="overflow-auto max-h-[calc(100vh-320px)]">
               <Table><TableHeader><TableRow className="border-b-2 border-slate-100">
-                {['PO #', 'Supplier', 'Type', 'Store', 'Qty', 'Value', 'Status', 'Fulfillment', 'Actions'].map(h => (
+                {['PO #', 'Supplier', 'Type', 'Store', 'Qty', 'Value', 'Status', 'Created By', 'Actions'].map(h => (
                   <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Qty', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}</TableRow></TableHeader>
                 <TableBody>
@@ -291,7 +291,7 @@ export default function POManagementPage() {
                       <TableCell className="text-right text-[12px] tabular-nums">{po.total_qty}</TableCell>
                       <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {po.total_value?.toLocaleString('en-IN')}</TableCell>
                       <TableCell><Badge className={`text-[9px] rounded-sm ${sBadge(po.status)}`}>{po.status}</Badge></TableCell>
-                      <TableCell><Badge className={`text-[9px] rounded-sm ${fBadge(po.fulfillment_status)}`}>{po.fulfillment_status}</Badge></TableCell>
+                      <TableCell className="text-[11px] font-body text-slate-600">{po.created_by || '-'}</TableCell>
                       <TableCell onClick={e => e.stopPropagation()}>
                         <Button size="sm" variant="outline" className="h-5 px-2 rounded-sm text-[9px]" onClick={() => openPoDetail(po.id)}>View</Button>
                       </TableCell>

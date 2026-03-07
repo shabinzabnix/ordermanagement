@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, and_
 from database import get_db
 from models import (
-    Product, Store, HOStockBatch, StoreStockBatch,
+    Product, Store, User, HOStockBatch, StoreStockBatch,
     InterStoreTransfer, PurchaseRequest, UploadHistory,
     UploadType, TransferStatus, PurchaseStatus,
 )
@@ -424,6 +424,15 @@ async def get_transfers(
     if sids:
         smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
 
+    # User names
+    uids = set()
+    for t in transfers:
+        if t.requested_by: uids.add(t.requested_by)
+        if t.approved_by: uids.add(t.approved_by)
+    umap = {}
+    if uids:
+        umap = {u.id: u.full_name for u in (await db.execute(select(User).where(User.id.in_(uids)))).scalars().all()}
+
     return {
         "transfers": [
             {"id": t.id, "requesting_store_id": t.requesting_store_id,
@@ -433,6 +442,8 @@ async def get_transfers(
              "batch": t.batch, "quantity": t.quantity,
              "status": t.status.value if isinstance(t.status, TransferStatus) else t.status,
              "rejection_reason": t.rejection_reason,
+             "requested_by": umap.get(t.requested_by, ""),
+             "approved_by": umap.get(t.approved_by, "") if t.approved_by else None,
              "created_at": t.created_at.isoformat() if t.created_at else None}
             for t in transfers
         ]

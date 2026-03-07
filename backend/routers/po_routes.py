@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from database import get_db
 from models import (
-    Product, Store, StoreStockBatch, SalesRecord, PurchaseRecord,
+    Product, Store, User, StoreStockBatch, SalesRecord, PurchaseRecord,
     PurchaseOrder, PurchaseOrderItem, StoreRequest, StoreRequestItem,
     AuditLog, POComment, POCategoryRule, RequestComment,
 )
@@ -16,6 +16,11 @@ from io import BytesIO
 import uuid
 
 router = APIRouter()
+
+
+async def _get_user_map(db):
+    """Load all users as id->name map."""
+    return {u.id: u.full_name for u in (await db.execute(select(User))).scalars().all()}
 
 
 async def _log(db, user, action, etype=None, eid=None):
@@ -243,6 +248,7 @@ async def list_store_requests(
     reqs = (await db.execute(query.order_by(StoreRequest.created_at.desc()).offset((page-1)*limit).limit(limit))).scalars().all()
 
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    umap = await _get_user_map(db)
     result = []
     for r in reqs:
         items = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.request_id == r.id))).scalars().all()
@@ -252,6 +258,7 @@ async def list_store_requests(
             "customer_mobile": r.customer_mobile, "status": r.status,
             "total_items": r.total_items, "total_value": r.total_value,
             "po_id": r.po_id, "ho_remarks": r.ho_remarks,
+            "requested_by": umap.get(r.requested_by, ""),
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "items": [{
                 "id": it.id, "product_id": it.product_id, "product_name": it.product_name,
@@ -384,6 +391,7 @@ async def list_purchase_orders(
     pos = (await db.execute(query.order_by(PurchaseOrder.created_at.desc()).offset((page-1)*limit).limit(limit))).scalars().all()
 
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    umap = await _get_user_map(db)
     return {
         "orders": [{
             "id": p.id, "po_number": p.po_number, "store_name": smap.get(p.store_id, "HO"),
@@ -391,6 +399,8 @@ async def list_purchase_orders(
             "sub_category": p.sub_category, "status": p.status,
             "total_qty": p.total_qty, "total_value": p.total_value,
             "fulfillment_status": p.fulfillment_status,
+            "created_by": umap.get(p.created_by, ""),
+            "approved_by": umap.get(p.approved_by, "") if p.approved_by else None,
             "created_at": p.created_at.isoformat() if p.created_at else None,
         } for p in pos],
         "total": total,
@@ -454,6 +464,7 @@ async def purchase_review(
         for r in (await db.execute(select(StoreRequest).where(StoreRequest.id.in_(req_ids)))).scalars().all():
             req_map[r.id] = r
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    umap = await _get_user_map(db)
     now = datetime.now(timezone.utc)
 
     result = []
@@ -496,6 +507,7 @@ async def purchase_review(
             "customer_name": req.customer_name if req else None,
             "customer_mobile": req.customer_mobile if req else None,
             "request_reason": req.request_reason if req else "",
+            "requested_by": umap.get(req.requested_by, "") if req else "",
             "product_id": it.product_id, "product_name": it.product_name,
             "quantity": it.quantity, "landing_cost": it.landing_cost,
             "po_category": it.po_category, "item_status": it.item_status,

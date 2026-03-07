@@ -270,7 +270,7 @@ export default function TransfersPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['ID', 'Product', 'From', 'To', 'Qty', 'Status', 'Date', 'Actions'].map(h => (
+                {['ID', 'Product', 'From', 'To', 'Qty', 'Status', 'Requested By', 'Date', 'Actions'].map(h => (
                   <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3">{h}</TableHead>
                 ))}
               </TableRow>
@@ -289,6 +289,7 @@ export default function TransfersPage() {
                   <TableCell className="text-[12px] font-body text-slate-500">{t.requesting_store_name}</TableCell>
                   <TableCell className="text-[12px] tabular-nums">{t.quantity}</TableCell>
                   <TableCell><Badge className={`text-[10px] rounded-sm ${statusColor(t.status)}`}>{t.status}</Badge></TableCell>
+                  <TableCell className="text-[11px] font-body text-slate-600">{t.requested_by || '-'}</TableCell>
                   <TableCell className="text-[11px] text-slate-400">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</TableCell>
                   <TableCell>
                     {t.status === 'pending' && (

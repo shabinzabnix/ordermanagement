@@ -245,6 +245,7 @@ export default function StoreRequestPage() {
                     <div className="flex gap-3 text-[11px] font-body text-slate-500 flex-wrap">
                       <span>Sales 30d: <b className="text-slate-700">{it.sales_30d||0}</b></span>
                       <span>Reason: <Badge className={`text-[8px] rounded-sm ${reasonBadge(it.request_reason)}`}>{it.request_reason?.replace('_',' ')}</Badge></span>
+                      {it.requested_by && <span>By: <b className="text-slate-700">{it.requested_by}</b></span>}
                       {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name}</b> ({it.customer_mobile})</span>}
                       {it.tat_type && <span>TAT: <b className="text-sky-700">{it.tat_type==='same_day'?'Same Day':it.tat_type==='next_day'?'Next Day':`${it.tat_days}d`}</b></span>}
                     </div>
