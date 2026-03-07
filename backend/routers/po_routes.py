@@ -44,6 +44,31 @@ async def get_supplier_list(
     if search:
         sl = search.lower()
         supplier_list = [s for s in supplier_list if sl in s.lower()]
+
+@router.get("/po/subcategory-data")
+async def get_subcategory_data(
+    sub_category: str = Query(...),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Get products + suppliers for a specific sub-category."""
+    products = (await db.execute(
+        select(Product).where(Product.sub_category == sub_category).order_by(Product.product_name)
+    )).scalars().all()
+
+    suppliers = set()
+    for p in products:
+        for s in [p.primary_supplier, p.secondary_supplier, p.least_price_supplier, p.most_qty_supplier]:
+            if s and str(s).strip():
+                suppliers.add(str(s).strip())
+
+    return {
+        "products": [{"product_id": p.product_id, "product_name": p.product_name, "landing_cost": p.landing_cost or 0,
+                       "mrp": p.mrp or 0, "primary_supplier": p.primary_supplier or ""} for p in products],
+        "suppliers": sorted(suppliers),
+        "total_products": len(products),
+    }
+
+
     return {"suppliers": supplier_list[:100], "total": len(supplier_list)}
 
 
