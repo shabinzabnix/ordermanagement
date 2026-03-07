@@ -124,6 +124,7 @@ export default function UserManagementPage() {
                     <SelectContent>
                       <SelectItem value="ADMIN">Admin</SelectItem>
                       <SelectItem value="HO_STAFF">HO Staff</SelectItem>
+                      <SelectItem value="STORE_MANAGER">Store Manager</SelectItem>
                       <SelectItem value="STORE_STAFF">Store Staff</SelectItem>
                       <SelectItem value="CRM_STAFF">CRM Staff</SelectItem>
                       <SelectItem value="DIRECTOR">Director</SelectItem>
@@ -131,7 +132,7 @@ export default function UserManagementPage() {
                   </Select>
                 </div>
               </div>
-              {(form.role === 'STORE_STAFF' || form.role === 'CRM_STAFF') && (
+              {(form.role === 'STORE_STAFF' || form.role === 'STORE_MANAGER' || form.role === 'CRM_STAFF') && (
                 <div className="space-y-1.5">
                   <Label className="font-body text-xs">Assigned Store</Label>
                   <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})}>

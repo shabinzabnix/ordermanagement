@@ -106,10 +106,20 @@ export default function CustomerProfilePage() {
   const [pForm, setPForm] = useState({ store_id: '', medicine_name: '', quantity: '', days_of_medication: '', purchase_date: '', dosage: '', timing: '', food_relation: '' });
   const [cForm, setCForm] = useState({ call_result: '', remarks: '' });
   const [saving, setSaving] = useState(false);
+  const [storeStaff, setStoreStaff] = useState([]);
 
   const loadProfile = () => { api.get(`/crm/customers/${id}`).then(r => setData(r.data)).catch(() => toast.error('Failed')).finally(() => setLoading(false)); };
-  useEffect(() => { loadProfile(); api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, [id]);
+  useEffect(() => {
+    loadProfile();
+    api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {});
+    api.get('/crm/store-staff').then(r => setStoreStaff(r.data.staff)).catch(() => {});
+  }, [id]);
   useEffect(() => { if (user?.role === 'STORE_STAFF' && user?.store_id) setPForm(f => ({ ...f, store_id: String(user.store_id) })); }, [user]);
+
+  const handleAssignStaff = async (staffId) => {
+    try { await api.put(`/crm/customers/${id}/assign-staff`, { staff_id: parseInt(staffId) }); toast.success('Staff assigned'); loadProfile(); }
+    catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
+  };
 
   const handlePurchase = async (e) => {
     e.preventDefault(); setSaving(true);
@@ -208,6 +218,27 @@ export default function CustomerProfilePage() {
             </form></DialogContent>
         </Dialog>
       </div>
+
+      {/* Staff Assignment (for Store Manager / Admin) */}
+      {(c.customer_type === 'rc' || c.customer_type === 'RC' || c.customer_type === 'chronic' || c.customer_type === 'CHRONIC') && (
+        <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-sm px-4 py-2.5">
+          <User className="w-4 h-4 text-slate-400" />
+          <span className="text-[12px] font-body text-slate-600">Assigned Staff:</span>
+          {c.assigned_staff_name ? (
+            <Badge className="text-[11px] rounded-sm bg-sky-100 text-sky-700 font-medium">{c.assigned_staff_name}</Badge>
+          ) : (
+            <span className="text-[11px] text-slate-400 italic">Not assigned</span>
+          )}
+          {['ADMIN', 'HO_STAFF', 'STORE_MANAGER'].includes(user?.role) && storeStaff.length > 0 && (
+            <Select value={c.assigned_staff_id ? String(c.assigned_staff_id) : ''} onValueChange={handleAssignStaff}>
+              <SelectTrigger className="w-[180px] h-8 rounded-sm text-xs" data-testid="assign-staff-select"><SelectValue placeholder="Assign staff..." /></SelectTrigger>
+              <SelectContent>
+                {storeStaff.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name} ({s.role.replace('_', ' ')})</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-3 md:grid-cols-6 gap-3">

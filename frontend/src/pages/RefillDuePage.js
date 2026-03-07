@@ -34,7 +34,7 @@ export default function RefillDuePage() {
     if (category !== 'all') params.category = category;
     if (storeFilter !== 'all') params.store_id = storeFilter;
     if (search) params.search = search;
-    api.get('/crm/refill-due', { params }).then(r => { setItems(r.data.items); setTotal(r.data.total); }).catch(() => {});
+    api.get('/crm/refill-due-enhanced', { params }).then(r => { setItems(r.data.items); setTotal(r.data.total); }).catch(() => {});
   }, [category, storeFilter, search]);
 
   const handleCall = async (e) => {
@@ -90,14 +90,14 @@ export default function RefillDuePage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Customer', 'Mobile', 'Store', 'Medicine', 'Last Purchase', 'Due Date', 'Status', 'Actions'].map(h => (
-                  <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3">{h}</TableHead>
+                {['Customer', 'Mobile', 'Store', 'Medicine', 'Last Purchase', 'Due Date', 'In Stock', 'Required', 'Assigned', 'Status', 'Actions'].map(h => (
+                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['In Stock', 'Required'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-16"><CalendarClock className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No refills due</p></TableCell></TableRow>
+                <TableRow><TableCell colSpan={11} className="text-center py-16"><CalendarClock className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No refills due</p></TableCell></TableRow>
               ) : items.map(d => (
                 <TableRow key={d.id} className="hover:bg-slate-50/50" data-testid={`refill-row-${d.id}`}>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => navigate(`/crm/customer/${d.customer_id}`)}>{d.customer_name}</TableCell>
@@ -106,6 +106,13 @@ export default function RefillDuePage() {
                   <TableCell className="font-body text-[13px] text-slate-700">{d.medicine_name}</TableCell>
                   <TableCell className="text-[11px] text-slate-400">{d.purchase_date ? new Date(d.purchase_date).toLocaleDateString() : '-'}</TableCell>
                   <TableCell className="text-[11px] text-slate-600 font-medium">{d.next_due_date ? new Date(d.next_due_date).toLocaleDateString() : '-'}</TableCell>
+                  <TableCell className="text-right text-[12px] tabular-nums">
+                    <span className={d.in_stock > 0 ? 'text-emerald-700 font-medium' : 'text-slate-400'}>{d.in_stock ?? '-'}</span>
+                  </TableCell>
+                  <TableCell className="text-right text-[12px] tabular-nums">
+                    {d.required > 0 ? <span className="text-red-600 font-medium">{d.required}</span> : <span className="text-emerald-600">0</span>}
+                  </TableCell>
+                  <TableCell className="text-[11px] text-slate-500">{d.assigned_staff || <span className="text-slate-300">-</span>}</TableCell>
                   <TableCell><Badge className={`text-[10px] rounded-sm ${dueBadge(d)}`}>
                     {d.overdue ? `${Math.abs(d.days_until)}d overdue` : d.days_until === 0 ? 'Due today' : `${d.days_until}d left`}
                   </Badge></TableCell>

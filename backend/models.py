@@ -7,6 +7,7 @@ import enum
 class UserRole(str, enum.Enum):
     ADMIN = "ADMIN"
     HO_STAFF = "HO_STAFF"
+    STORE_MANAGER = "STORE_MANAGER"
     STORE_STAFF = "STORE_STAFF"
     CRM_STAFF = "CRM_STAFF"
     DIRECTOR = "DIRECTOR"
@@ -231,6 +232,7 @@ class CRMCustomer(Base):
     clv_value = Column(Float, default=0)
     clv_tier = Column(String(20), default="unknown")
     chronic_tags = Column(Text, nullable=True)
+    assigned_staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     registration_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

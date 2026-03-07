@@ -75,6 +75,10 @@ async def startup():
             await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'DIRECTOR'"))
         except Exception:
             pass
+        try:
+            await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'STORE_MANAGER'"))
+        except Exception:
+            pass
     async with engine.connect() as conn:
         await conn.execution_options(isolation_level="AUTOCOMMIT")
         try:
@@ -126,6 +130,8 @@ async def startup():
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_crm_customer_store ON crm_customers(assigned_store_id)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_transfer_status ON inter_store_transfers(status)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ho_stock_expiry ON ho_stock_batches(expiry_date) WHERE expiry_date IS NOT NULL"))
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS assigned_staff_id INTEGER REFERENCES users(id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_crm_assigned_staff ON crm_customers(assigned_staff_id) WHERE assigned_staff_id IS NOT NULL"))
         except Exception:
             pass
     # Ensure new tables exist

@@ -4,7 +4,7 @@ from sqlalchemy import select, func, and_, or_
 from database import get_db
 from models import (
     CRMCustomer, MedicinePurchase, CRMCallLog, CRMTask, SalesRecord,
-    Store, CustomerType, CallResult, AuditLog,
+    Store, CustomerType, CallResult, AuditLog, User, StoreStockBatch,
 )
 from auth import get_current_user, require_roles
 from pydantic import BaseModel
@@ -23,8 +23,8 @@ async def _log(db, user, action, etype=None, eid=None):
 
 
 def _store_filter(user):
-    """Returns store_id if user is store_staff, else None."""
-    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+    """Returns store_id if user is store_staff or store_manager, else None."""
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         return user["store_id"]
     return None
 
@@ -343,6 +343,12 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
             })
     medicine_calendar.sort(key=lambda x: x["days_until"])
 
+    # Get assigned staff name
+    assigned_staff_name = ""
+    if c.assigned_staff_id:
+        staff = (await db.execute(select(User).where(User.id == c.assigned_staff_id))).scalar_one_or_none()
+        if staff: assigned_staff_name = staff.full_name
+
     return {
         "customer": {
             "id": c.id, "mobile_number": c.mobile_number, "customer_name": c.customer_name,
@@ -354,6 +360,8 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
             "clv_tier": c.clv_tier or "unknown",
             "adherence_score": c.adherence_score or "unknown",
             "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
+            "assigned_staff_id": c.assigned_staff_id,
+            "assigned_staff_name": assigned_staff_name,
         },
         "medicine_calendar": medicine_calendar,
         "invoices": invoice_list[:50],
@@ -1430,3 +1438,311 @@ async def customer_purchase_history(
         "total_invoices": len(invoice_list),
         "total_items": sum(inv["item_count"] for inv in invoice_list),
     }
+
+
+# ─── Store CRM Dashboard ────────────────────────────────────
+
+@router.get("/crm/store-crm-dashboard")
+async def store_crm_dashboard(
+    date_from: str = Query(None), date_to: str = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Parse date filters
+    d_from = today_start - timedelta(days=7)
+    d_to = now
+    if date_from:
+        try: d_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+        except: pass
+    if date_to:
+        try: d_to = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
+        except: pass
+
+    # KPIs
+    cust_q = select(func.count(CRMCustomer.id))
+    rc_q = select(func.count(CRMCustomer.id)).where(CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]))
+    if sf:
+        cust_q = cust_q.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+        rc_q = rc_q.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+    total_customers = (await db.execute(cust_q)).scalar() or 0
+    rc_customers = (await db.execute(rc_q)).scalar() or 0
+
+    due_q = select(func.count(MedicinePurchase.id)).where(MedicinePurchase.status == "active")
+    if sf: due_q = due_q.where(MedicinePurchase.store_id == sf)
+    overdue = (await db.execute(due_q.where(MedicinePurchase.next_due_date < today_start))).scalar() or 0
+    due_today = (await db.execute(due_q.where(and_(MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=1))))).scalar() or 0
+    due_7d = (await db.execute(due_q.where(and_(MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=7))))).scalar() or 0
+
+    # New customers in date range
+    nc_q = select(CRMCustomer).where(CRMCustomer.created_at >= d_from, CRMCustomer.created_at < d_to)
+    if sf: nc_q = nc_q.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+    new_customers_list = (await db.execute(nc_q.order_by(CRMCustomer.created_at.desc()).limit(50))).scalars().all()
+    new_customers = [{
+        "id": c.id, "name": c.customer_name, "mobile": c.mobile_number,
+        "type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+        "date": c.created_at.isoformat() if c.created_at else None,
+    } for c in new_customers_list]
+
+    # RC customer recent purchases (from MedicinePurchase)
+    rc_cids_q = select(CRMCustomer.id).where(CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]))
+    if sf: rc_cids_q = rc_cids_q.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+    rc_cids = [r[0] for r in (await db.execute(rc_cids_q)).all()]
+
+    rc_purchases = []
+    if rc_cids:
+        rp_q = select(MedicinePurchase).where(
+            MedicinePurchase.customer_id.in_(rc_cids),
+            MedicinePurchase.purchase_date >= d_from, MedicinePurchase.purchase_date < d_to,
+        ).order_by(MedicinePurchase.purchase_date.desc()).limit(50)
+        if sf: rp_q = rp_q.where(MedicinePurchase.store_id == sf)
+        rp_items = (await db.execute(rp_q)).scalars().all()
+        rp_cmap = {}
+        rp_cids = set(p.customer_id for p in rp_items)
+        if rp_cids:
+            for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(rp_cids)))).scalars().all():
+                rp_cmap[c.id] = c.customer_name
+        rc_purchases = [{
+            "id": p.id, "customer_id": p.customer_id, "customer_name": rp_cmap.get(p.customer_id, ""),
+            "medicine": p.medicine_name, "quantity": p.quantity, "dosage": p.dosage, "timing": p.timing,
+            "date": p.purchase_date.isoformat() if p.purchase_date else None,
+            "next_due": p.next_due_date.isoformat() if p.next_due_date else None,
+        } for p in rp_items]
+
+    # Upcoming RC purchases (by due date)
+    upcoming_q = select(MedicinePurchase).where(
+        MedicinePurchase.status == "active",
+        MedicinePurchase.next_due_date >= today_start,
+        MedicinePurchase.next_due_date < today_start + timedelta(days=14),
+    )
+    if sf: upcoming_q = upcoming_q.where(MedicinePurchase.store_id == sf)
+    if rc_cids: upcoming_q = upcoming_q.where(MedicinePurchase.customer_id.in_(rc_cids))
+    upcoming_items = (await db.execute(upcoming_q.order_by(MedicinePurchase.next_due_date))).scalars().all()
+    up_cids = set(p.customer_id for p in upcoming_items)
+    up_cmap = {}
+    if up_cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(up_cids)))).scalars().all():
+            up_cmap[c.id] = {"name": c.customer_name, "mobile": c.mobile_number}
+    upcoming = [{
+        "id": p.id, "customer_id": p.customer_id,
+        "customer_name": up_cmap.get(p.customer_id, {}).get("name", ""),
+        "mobile": up_cmap.get(p.customer_id, {}).get("mobile", ""),
+        "medicine": p.medicine_name, "quantity": p.quantity,
+        "due_date": p.next_due_date.isoformat() if p.next_due_date else None,
+        "days_until": (p.next_due_date - now).days if p.next_due_date else 0,
+    } for p in upcoming_items]
+
+    return {
+        "kpis": {
+            "total_customers": total_customers, "rc_customers": rc_customers,
+            "overdue": overdue, "due_today": due_today, "due_7days": due_7d,
+            "new_in_range": len(new_customers),
+        },
+        "new_customers": new_customers,
+        "rc_purchases": rc_purchases,
+        "upcoming_purchases": upcoming,
+    }
+
+
+# ─── Assign RC Customer to Staff ─────────────────────────────
+
+class AssignStaffReq(BaseModel):
+    staff_id: int
+
+
+@router.put("/crm/customers/{customer_id}/assign-staff")
+async def assign_customer_to_staff(
+    customer_id: int, data: AssignStaffReq,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_MANAGER")),
+):
+    c = (await db.execute(select(CRMCustomer).where(CRMCustomer.id == customer_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "Customer not found")
+    staff = (await db.execute(select(User).where(User.id == data.staff_id))).scalar_one_or_none()
+    if not staff:
+        raise HTTPException(404, "Staff member not found")
+    c.assigned_staff_id = data.staff_id
+    await _log(db, user, f"Assigned customer {c.customer_name} to staff {staff.full_name}", "crm_assignment", customer_id)
+    await db.commit()
+    return {"message": f"Customer assigned to {staff.full_name}"}
+
+
+# ─── Store Staff List (for assignment dropdown) ──────────────
+
+@router.get("/crm/store-staff")
+async def get_store_staff(
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    sid = sf or store_id
+    q = select(User).where(User.is_active == True)
+    if sid:
+        q = q.where(User.store_id == sid)
+    q = q.where(User.role.in_(["STORE_STAFF", "STORE_MANAGER"]))
+    staff = (await db.execute(q.order_by(User.full_name))).scalars().all()
+    return {"staff": [{"id": s.id, "name": s.full_name, "email": s.email, "role": s.role.value if hasattr(s.role, 'value') else s.role} for s in staff]}
+
+
+# ─── Staff Performance Dashboard ─────────────────────────────
+
+@router.get("/crm/staff-performance")
+async def staff_performance(
+    store_id: int = Query(None), days: int = Query(30),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    sid = sf or store_id
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    now = datetime.now(timezone.utc)
+
+    # Get store staff
+    q = select(User).where(User.is_active == True, User.role.in_(["STORE_STAFF", "STORE_MANAGER"]))
+    if sid: q = q.where(User.store_id == sid)
+    staff_list = (await db.execute(q.order_by(User.full_name))).scalars().all()
+
+    results = []
+    for s in staff_list:
+        # Assigned RC customers
+        assigned = (await db.execute(
+            select(func.count(CRMCustomer.id)).where(CRMCustomer.assigned_staff_id == s.id)
+        )).scalar() or 0
+
+        # Calls made in period
+        calls = (await db.execute(
+            select(func.count(CRMCallLog.id)).where(CRMCallLog.created_by == s.id, CRMCallLog.created_at >= cutoff)
+        )).scalar() or 0
+
+        # Confirmed calls (conversion)
+        confirmed = (await db.execute(
+            select(func.count(CRMCallLog.id)).where(
+                CRMCallLog.created_by == s.id, CRMCallLog.created_at >= cutoff,
+                CRMCallLog.call_result == CallResult.CONFIRMED,
+            )
+        )).scalar() or 0
+
+        # Overdue refills under their watch
+        overdue_count = 0
+        assigned_cids = [r[0] for r in (await db.execute(
+            select(CRMCustomer.id).where(CRMCustomer.assigned_staff_id == s.id)
+        )).all()]
+        if assigned_cids:
+            overdue_count = (await db.execute(
+                select(func.count(MedicinePurchase.id)).where(
+                    MedicinePurchase.customer_id.in_(assigned_cids),
+                    MedicinePurchase.status == "active",
+                    MedicinePurchase.next_due_date < now,
+                )
+            )).scalar() or 0
+
+        # Tasks completed
+        tasks_done = (await db.execute(
+            select(func.count(CRMTask.id)).where(CRMTask.assigned_to == s.id, CRMTask.status == "completed")
+        )).scalar() or 0
+
+        conversion_rate = round(confirmed / calls * 100, 1) if calls > 0 else 0
+
+        results.append({
+            "staff_id": s.id, "name": s.full_name, "email": s.email,
+            "role": s.role.value if hasattr(s.role, 'value') else s.role,
+            "assigned_customers": assigned, "calls_made": calls,
+            "confirmed_calls": confirmed, "conversion_rate": conversion_rate,
+            "overdue_refills": overdue_count, "tasks_completed": tasks_done,
+        })
+
+    results.sort(key=lambda x: -x["assigned_customers"])
+    return {"staff": results, "period_days": days}
+
+
+# ─── Enhanced Refill Due with Stock Info ──────────────────────
+
+@router.get("/crm/refill-due-enhanced")
+async def refill_due_enhanced(
+    category: str = Query("all"),
+    store_id: int = Query(None),
+    search: str = Query(None),
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    target_store = sf or (int(store_id) if store_id else None)
+
+    query = select(MedicinePurchase).where(MedicinePurchase.status == "active")
+    if sf:
+        query = query.where(MedicinePurchase.store_id == sf)
+    elif store_id:
+        query = query.where(MedicinePurchase.store_id == int(store_id))
+
+    if category == "overdue":
+        query = query.where(MedicinePurchase.next_due_date < today_start)
+    elif category == "today":
+        query = query.where(and_(MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=1)))
+    elif category == "3days":
+        query = query.where(and_(MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=3)))
+    elif category == "7days":
+        query = query.where(and_(MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=7)))
+
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar()
+    items = (await db.execute(query.order_by(MedicinePurchase.next_due_date).offset((page - 1) * limit).limit(limit))).scalars().all()
+
+    cids = set(i.customer_id for i in items)
+    sids = set(i.store_id for i in items)
+    cmap, smap = {}, {}
+    if cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(cids)))).scalars().all():
+            cmap[c.id] = {"name": c.customer_name, "mobile": c.mobile_number, "assigned_staff_id": c.assigned_staff_id}
+    if sids:
+        smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
+
+    # Get stock info for medicines at the target store
+    stock_map = {}
+    if target_store:
+        medicine_names = set(i.medicine_name for i in items)
+        if medicine_names:
+            # Match by product name in store stock
+            for mn in medicine_names:
+                stock_q = select(func.sum(StoreStockBatch.closing_stock)).where(
+                    StoreStockBatch.store_id == target_store,
+                    StoreStockBatch.product_name.ilike(f"%{mn}%"),
+                )
+                stock_val = (await db.execute(stock_q)).scalar() or 0
+                stock_map[mn] = float(stock_val)
+
+    # Staff name map
+    staff_ids = set(ci.get("assigned_staff_id") for ci in cmap.values() if ci.get("assigned_staff_id"))
+    staff_map = {}
+    if staff_ids:
+        for u in (await db.execute(select(User).where(User.id.in_(staff_ids)))).scalars().all():
+            staff_map[u.id] = u.full_name
+
+    result = []
+    for i in items:
+        ci = cmap.get(i.customer_id, {})
+        if search:
+            s_lower = search.lower()
+            if s_lower not in ci.get("name", "").lower() and s_lower not in ci.get("mobile", "").lower() and s_lower not in i.medicine_name.lower():
+                continue
+        days_until = (i.next_due_date - now).days if i.next_due_date else 0
+        in_stock = stock_map.get(i.medicine_name, 0)
+        required = max(0, (i.quantity or 0) - in_stock)
+        staff_id = ci.get("assigned_staff_id")
+        result.append({
+            "id": i.id, "customer_id": i.customer_id,
+            "customer_name": ci.get("name", ""), "mobile_number": ci.get("mobile", ""),
+            "store_id": i.store_id, "store_name": smap.get(i.store_id, ""),
+            "medicine_name": i.medicine_name, "quantity": i.quantity,
+            "days_of_medication": i.days_of_medication,
+            "purchase_date": i.purchase_date.isoformat() if i.purchase_date else None,
+            "next_due_date": i.next_due_date.isoformat() if i.next_due_date else None,
+            "days_until": days_until, "overdue": days_until < 0,
+            "in_stock": in_stock, "required": required,
+            "assigned_staff": staff_map.get(staff_id, "") if staff_id else "",
+            "assigned_staff_id": staff_id,
+        })
+
+    return {"items": result, "total": total, "page": page, "limit": limit}
