@@ -657,12 +657,12 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
     items_html = ""
     for i, it in enumerate(items):
         items_html += f"""<tr>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;">{i+1}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;">{it.product_id or '-'}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:500;">{it.product_name}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right;">{it.quantity}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right;">{it.landing_cost:.2f}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;text-align:right;font-weight:600;">{it.estimated_value:.2f}</td>
+            <td>{i+1}</td>
+            <td>{it.product_id or '-'}</td>
+            <td style="font-weight:500;">{it.product_name}</td>
+            <td style="text-align:right;">{it.quantity:.0f}</td>
+            <td style="text-align:right;">{it.landing_cost:.2f}</td>
+            <td style="text-align:right;font-weight:600;">{it.estimated_value:.2f}</td>
         </tr>"""
 
     html = f"""<!DOCTYPE html><html><head><style>
@@ -671,16 +671,16 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
         .page {{ position: relative; width: 210mm; min-height: 297mm; }}
         .letterhead {{ position: absolute; top: 0; left: 0; width: 100%; z-index: 0; }}
         .letterhead img {{ width: 100%; display: block; }}
-        .content {{ position: relative; z-index: 1; padding: 180px 40px 60px 40px; }}
-        .po-title {{ font-size: 18px; font-weight: 700; color: #0f172a; margin: 5px 0 10px 0; text-align: center; text-decoration: underline; }}
-        .info-grid {{ display: flex; justify-content: space-between; margin-bottom: 10px; }}
-        .info-item {{ font-size: 11px; color: #475569; margin-bottom: 3px; }}
+        .content {{ position: relative; z-index: 1; padding: 160px 40px 100px 40px; }}
+        .po-title {{ font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; text-align: center; text-decoration: underline; }}
+        .info-grid {{ display: flex; justify-content: space-between; margin-bottom: 8px; }}
+        .info-item {{ font-size: 10px; color: #475569; margin-bottom: 2px; }}
         .info-item b {{ color: #1e293b; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-        th {{ background: #f1f5f9; padding: 6px 8px; text-align: left; font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; border: 1px solid #e2e8f0; }}
-        td {{ border: 1px solid #e2e8f0; }}
-        .total-row {{ background: #f0f9ff; font-weight: 700; font-size: 13px; }}
-        .sign-area {{ margin-top: 30px; display: flex; justify-content: space-between; font-size: 11px; color: #64748b; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 8px; background: rgba(255,255,255,0.95); }}
+        th {{ background: #f1f5f9; padding: 5px 6px; text-align: left; font-size: 9px; font-weight: 600; color: #64748b; text-transform: uppercase; border: 1px solid #e2e8f0; }}
+        td {{ border: 1px solid #e2e8f0; padding: 4px 6px; font-size: 11px; }}
+        .total-row {{ background: #f0f9ff; font-weight: 700; font-size: 12px; }}
+        .sign-area {{ margin-top: 20px; display: flex; justify-content: space-between; font-size: 10px; color: #64748b; }}
     </style></head><body>
     <div class="page">
         <div class="letterhead">{'<img src="data:image/jpeg;base64,' + letterhead_b64 + '" />' if letterhead_b64 else ''}</div>
@@ -705,10 +705,10 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
                 </tr></thead>
                 <tbody>{items_html}
                 <tr class="total-row">
-                    <td colspan="3" style="padding:8px;border:1px solid #e2e8f0;">TOTAL</td>
-                    <td style="padding:8px;text-align:right;border:1px solid #e2e8f0;">{po.total_qty:.0f}</td>
-                    <td style="padding:8px;border:1px solid #e2e8f0;"></td>
-                    <td style="padding:8px;text-align:right;border:1px solid #e2e8f0;">INR {po.total_value:,.2f}</td>
+                    <td colspan="3" style="padding:6px;border:1px solid #e2e8f0;"><b>TOTAL</b></td>
+                    <td style="padding:6px;text-align:right;border:1px solid #e2e8f0;"><b>{po.total_qty:.0f}</b></td>
+                    <td style="padding:6px;border:1px solid #e2e8f0;"></td>
+                    <td style="padding:6px;text-align:right;border:1px solid #e2e8f0;"><b>INR {po.total_value:,.2f}</b></td>
                 </tr></tbody>
             </table>
             <div class="sign-area">
