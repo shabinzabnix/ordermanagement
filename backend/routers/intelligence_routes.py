@@ -940,7 +940,7 @@ PURCHASE_COLUMNS = {
     "product name": "product_name", "name": "product_name", "product": "product_name", "item name": "product_name",
     "ho id": "product_id", "product id": "product_id", "item code": "product_id",
     "quantity": "quantity", "qty": "quantity",
-    "total": "total_amount", "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount", "net": "total_amount",
+    "total": "total_amount", "total amount": "total_amount", "amount": "total_amount",
 }
 PURCHASE_REQUIRED = ["product_name", "supplier_name"]
 
