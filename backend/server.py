@@ -76,6 +76,10 @@ async def startup():
             await conn.execute(text("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS fulfillment_updated_at TIMESTAMP WITH TIME ZONE"))
             await conn.execute(text("ALTER TABLE sales_records ADD COLUMN IF NOT EXISTS quantity FLOAT DEFAULT 0"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_services TEXT"))
+            await conn.execute(text("ALTER TABLE store_request_items ADD COLUMN IF NOT EXISTS is_registered BOOLEAN DEFAULT TRUE"))
+            await conn.execute(text("ALTER TABLE store_request_items ADD COLUMN IF NOT EXISTS has_prescription BOOLEAN DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE store_request_items ADD COLUMN IF NOT EXISTS doctor_name VARCHAR(255)"))
+            await conn.execute(text("ALTER TABLE store_request_items ADD COLUMN IF NOT EXISTS clinic_location VARCHAR(500)"))
             # Performance indexes
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(customer_id, product_name)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_store_date ON sales_records(store_id, invoice_date)"))
