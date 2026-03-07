@@ -101,13 +101,6 @@ async def upload_ho_stock(
 
     await db.execute(delete(HOStockBatch))
 
-    upload = UploadHistory(
-        file_name=file.filename, upload_type=UploadType.HO_STOCK,
-        uploaded_by=user["user_id"], total_records=len(df_mapped),
-    )
-    db.add(upload)
-    await db.flush()
-
     success, failed, errors = 0, 0, []
     for idx, row in df_mapped.iterrows():
         try:
@@ -125,17 +118,20 @@ async def upload_ho_stock(
                 closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
                 landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
                 expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None,
-                upload_id=upload.id,
             ))
             success += 1
         except Exception as e:
             errors.append(f"Row {idx+2}: {str(e)}")
             failed += 1
 
-    upload.success_records = success
-    upload.failed_records = failed
-    upload.error_details = json.dumps(errors) if errors else None
     await db.commit()
+    try:
+        db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.HO_STOCK, uploaded_by=user["user_id"],
+            total_records=len(df_mapped), success_records=success, failed_records=failed,
+            error_details=json.dumps(errors) if errors else None))
+        await db.commit()
+    except Exception:
+        await db.rollback()
     return {"message": "HO stock upload complete", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20]}
 
 
@@ -193,13 +189,6 @@ async def upload_store_stock(
 
     await db.execute(delete(StoreStockBatch).where(StoreStockBatch.store_id == store_id))
 
-    upload = UploadHistory(
-        file_name=file.filename, upload_type=UploadType.STORE_STOCK, store_id=store_id,
-        uploaded_by=user["user_id"], total_records=len(df_mapped),
-    )
-    db.add(upload)
-    await db.flush()
-
     success, failed, errors = 0, 0, []
     for idx, row in df_mapped.iterrows():
         try:
@@ -227,17 +216,20 @@ async def upload_store_stock(
                 closing_stock=closing_stock, closing_stock_strips=closing_stock_strips,
                 cost_value=float(row.get("cost_value", 0)) if pd.notna(row.get("cost_value")) else 0,
                 expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None,
-                upload_id=upload.id,
             ))
             success += 1
         except Exception as e:
             errors.append(f"Row {idx+2}: {str(e)}")
             failed += 1
 
-    upload.success_records = success
-    upload.failed_records = failed
-    upload.error_details = json.dumps(errors) if errors else None
     await db.commit()
+    try:
+        db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.STORE_STOCK, store_id=store_id, uploaded_by=user["user_id"],
+            total_records=len(df_mapped), success_records=success, failed_records=failed,
+            error_details=json.dumps(errors) if errors else None))
+        await db.commit()
+    except Exception:
+        await db.rollback()
     return {"message": "Store stock upload complete", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20]}
 
 
