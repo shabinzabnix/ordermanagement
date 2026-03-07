@@ -34,6 +34,7 @@ export default function POManagementPage() {
   const [editItems, setEditItems] = useState([]);
   const [editSupplier, setEditSupplier] = useState('');
   const [editRemarks, setEditRemarks] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const openPoDetail = async (poId) => {
     try {
