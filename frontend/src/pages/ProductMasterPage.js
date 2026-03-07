@@ -18,8 +18,10 @@ export default function ProductMasterPage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [subCategory, setSubCategory] = useState('');
+  const [supplier, setSupplier] = useState('');
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
+  const [supplierList, setSupplierList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -32,16 +34,18 @@ export default function ProductMasterPage() {
       if (search) params.search = search;
       if (category) params.category = category;
       if (subCategory) params.sub_category = subCategory;
+      if (supplier) params.supplier = supplier;
       const res = await api.get('/products', { params });
       setProducts(res.data.products);
       setTotal(res.data.total);
     } catch { toast.error('Failed to load products'); }
     finally { setLoading(false); }
-  }, [page, search, category, subCategory]);
+  }, [page, search, category, subCategory, supplier]);
 
   useEffect(() => {
     api.get('/products/categories').then(r => setCategories(r.data.categories)).catch(() => {});
     api.get('/products/sub-categories').then(r => setSubCategories(r.data.sub_categories)).catch(() => {});
+    api.get('/po/suppliers').then(r => setSupplierList(r.data.suppliers)).catch(() => {});
   }, []);
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
@@ -129,6 +133,15 @@ export default function ProductMasterPage() {
               <SelectContent>
                 <SelectItem value="all">All Sub Categories</SelectItem>
                 {subCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={supplier || 'all'} onValueChange={v => { setSupplier(v === 'all' ? '' : v); setPage(1); }}>
+              <SelectTrigger data-testid="supplier-filter" className="w-[200px] font-body text-sm rounded-sm">
+                <SelectValue placeholder="All Suppliers" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[250px]">
+                <SelectItem value="all">All Suppliers</SelectItem>
+                {supplierList.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

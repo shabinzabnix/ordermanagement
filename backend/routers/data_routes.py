@@ -72,6 +72,7 @@ async def get_products(
     search: str = Query(None),
     category: str = Query(None),
     sub_category: str = Query(None),
+    supplier: str = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -87,6 +88,11 @@ async def get_products(
         query = query.where(Product.category == category)
     if sub_category:
         query = query.where(Product.sub_category == sub_category)
+    if supplier:
+        query = query.where(
+            (Product.primary_supplier == supplier) | (Product.secondary_supplier == supplier) |
+            (Product.least_price_supplier == supplier) | (Product.most_qty_supplier == supplier)
+        )
 
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar()
