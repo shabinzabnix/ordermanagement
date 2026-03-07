@@ -61,8 +61,8 @@ export default function PurchaseUploadPage() {
       setPage(1); setSearch('');
       // Refresh
       api.get('/intel/purchase-records', { params: { store_id: selectedStore, page: 1, limit } }).then(r => { setRecords(r.data.records); setTotal(r.data.total); });
-      const params = { days: parseInt(period) }; if (selectedStore) params.store_id = selectedStore;
-      api.get('/intel/purchase-analytics', { params }).then(r => setAnalytics(r.data));
+      const rp = {}; if (selectedStore) rp.store_id = selectedStore; if (dateFrom) rp.date_from = dateFrom; if (dateTo) rp.date_to = dateTo;
+      api.get('/intel/purchase-analytics', { params: rp }).then(r => setAnalytics(r.data));
     } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
     finally { setUploading(false); e.target.value = ''; }
   };
