@@ -96,7 +96,14 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 53. Enhanced Store Performance Dashboard - CLV-per-store metrics: total CLV, avg CLV, high-value customer count, retention %, overdue medicines, sales revenue
 54. Database Indexing Optimization - 9 composite indexes added for: sales_records, medicine_purchases, store_stock_batches, crm_customers, inter_store_transfers, ho_stock_batches. Supports 50K+ products, 30+ stores, 100K+ customers
 
-## P0 - Remaining (Phase 3)
+## What's Been Implemented (Phase 9 - Customer Profile Enhancement - March 2026)
+55. Walk-in to RC Customer Conversion - one-click conversion from customer profile page
+56. Medication Schedule Manager - detailed medication tracking with dosage, timing (morning/lunch/dinner), food relation (before/after/with food)
+57. Medication Detail Editing - edit dosage, timing, food relation for any active medicine, auto-recalculates next due date
+58. Stop Medicine functionality - deactivate medicines from calendar
+59. Enhanced Medicine Calendar - visual indicators for dosage, timing icons (sun/coffee/moon), food relation badges
+
+## P0 - Remaining
 - Email notifications (SendGrid/Resend) for transfers, purchases, refill reminders
 - SMS notifications via Twilio for RC customers
 - Weekly dead stock report emails to store managers
@@ -105,13 +112,9 @@ Enterprise-grade inventory intelligence platform for Sahakar Hyper Pharmacy Netw
 ## P1 - Enhancements
 - Mobile-responsive optimization
 - Product edit/delete from UI
-- Transfer quantity validation against actual stock
-- Role-based data filtering (store staff sees only their store)
-- Dashboard charts with Recharts
 
 ## P2 - Future
-- Demand prediction / AI forecasting
-- Auto reorder suggestions
+- AI-powered demand prediction / forecasting (replace rule-based)
 - WhatsApp integration for customer reminders
 - Redis caching for high-traffic endpoints
 - Celery background workers for large uploads (10K+ rows)

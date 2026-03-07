@@ -81,7 +81,7 @@ export default function CustomerProfilePage() {
           <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">{c.customer_name}</h2>
           <p className="text-sm font-body text-slate-500 mt-0.5">{c.mobile_number} | {c.store_name}</p>
         </div>
-        <Badge className={`text-xs rounded-sm ${typeBadge[c.customer_type] || 'bg-slate-100 text-slate-600'}`}>{c.customer_type?.replace('_', ' ')}</Badge>
+        <Badge className={`text-xs rounded-sm px-2.5 py-0.5 font-semibold uppercase ${typeBadge[c.customer_type] || 'bg-slate-100 text-slate-600'}`}>{c.customer_type === 'rc' ? 'RC Customer' : c.customer_type?.replace('_', ' ')}</Badge>
         {c.clv_value > 0 && <Badge className="text-xs rounded-sm bg-emerald-50 text-emerald-700">CLV: INR {c.clv_value.toLocaleString('en-IN')}</Badge>}
         {c.chronic_tags?.map(t => <Badge key={t} className="text-[10px] rounded-sm bg-violet-100 text-violet-700">{t.replace('_', ' ')}</Badge>)}
         {/* Convert to RC */}
