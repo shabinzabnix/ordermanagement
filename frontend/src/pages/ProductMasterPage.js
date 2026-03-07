@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,7 +21,10 @@ export default function ProductMasterPage() {
   const [supplier, setSupplier] = useState('');
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
-  const [supplierList, setSupplierList] = useState([]);
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierSugg, setSupplierSugg] = useState([]);
+  const [showSupplierSugg, setShowSupplierSugg] = useState(false);
+  const supRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -45,7 +48,19 @@ export default function ProductMasterPage() {
   useEffect(() => {
     api.get('/products/categories').then(r => setCategories(r.data.categories)).catch(() => {});
     api.get('/products/sub-categories').then(r => setSubCategories(r.data.sub_categories)).catch(() => {});
-    api.get('/po/suppliers').then(r => setSupplierList(r.data.suppliers)).catch(() => {});
+  }, []);
+
+  // Supplier search
+  useEffect(() => {
+    if (supplierSearch.length < 1) { setSupplierSugg([]); return; }
+    const t = setTimeout(() => {
+      api.get('/po/suppliers', { params: { search: supplierSearch } }).then(r => { setSupplierSugg(r.data.suppliers); setShowSupplierSugg(true); }).catch(() => {});
+    }, 200);
+    return () => clearTimeout(t);
+  }, [supplierSearch]);
+  useEffect(() => {
+    const h = (e) => { if (supRef.current && !supRef.current.contains(e.target)) setShowSupplierSugg(false); };
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
   }, []);
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
@@ -135,15 +150,22 @@ export default function ProductMasterPage() {
                 {subCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Select value={supplier || 'all'} onValueChange={v => { setSupplier(v === 'all' ? '' : v); setPage(1); }}>
-              <SelectTrigger data-testid="supplier-filter" className="w-[200px] font-body text-sm rounded-sm">
-                <SelectValue placeholder="All Suppliers" />
-              </SelectTrigger>
-              <SelectContent className="max-h-[250px]">
-                <SelectItem value="all">All Suppliers</SelectItem>
-                {supplierList.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <div className="relative w-[200px]" ref={supRef}>
+              <Input placeholder="Search supplier..." value={supplierSearch} data-testid="supplier-filter"
+                onChange={e => { setSupplierSearch(e.target.value); if (!e.target.value) { setSupplier(''); setPage(1); } }}
+                onFocus={() => supplierSugg.length > 0 && setShowSupplierSugg(true)}
+                className="font-body text-sm rounded-sm" autoComplete="off" />
+              {supplier && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                onClick={() => { setSupplier(''); setSupplierSearch(''); setPage(1); }}>x</button>}
+              {showSupplierSugg && supplierSugg.length > 0 && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[200px] overflow-auto">
+                  {supplierSugg.map(s => (
+                    <button key={s} type="button" className={`w-full text-left px-3 py-1.5 text-[12px] font-body hover:bg-sky-50 border-b border-slate-50 ${supplier === s ? 'bg-sky-50 font-medium' : ''}`}
+                      onClick={() => { setSupplier(s); setSupplierSearch(s); setShowSupplierSugg(false); setPage(1); }}>{s}</button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
