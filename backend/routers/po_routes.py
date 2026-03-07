@@ -374,18 +374,86 @@ async def get_po_detail(po_id: int, db: AsyncSession = Depends(get_db), user: di
         raise HTTPException(404, "PO not found")
     items = (await db.execute(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po_id))).scalars().all()
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    # Fetch stock for each item across all stores
+    items_with_stock = []
+    for it in items:
+        store_stock = []
+        if it.product_id:
+            ss_q = (await db.execute(
+                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock"))
+                .where(StoreStockBatch.ho_product_id == it.product_id)
+                .group_by(StoreStockBatch.store_id)
+            )).all()
+            store_stock = [{"store": smap.get(r[0], ""), "stock": round(float(r[1] or 0), 0)} for r in ss_q if float(r[1] or 0) > 0]
+        items_with_stock.append({
+            "id": it.id, "product_id": it.product_id, "product_name": it.product_name,
+            "is_registered": it.is_registered, "quantity": it.quantity,
+            "landing_cost": it.landing_cost, "estimated_value": it.estimated_value,
+            "store_stock": store_stock, "total_stock": sum(s["stock"] for s in store_stock),
+        })
+
     return {
         "po": {
-            "id": po.id, "po_number": po.po_number, "store_name": smap.get(po.store_id, "HO"),
+            "id": po.id, "po_number": po.po_number, "store_id": po.store_id,
+            "store_name": smap.get(po.store_id, "HO"),
             "supplier_name": po.supplier_name, "po_type": po.po_type, "status": po.status,
             "total_qty": po.total_qty, "total_value": po.total_value,
             "remarks": po.remarks, "fulfillment_status": po.fulfillment_status,
+            "created_at": po.created_at.isoformat() if po.created_at else None,
         },
-        "items": [{"id": it.id, "product_id": it.product_id, "product_name": it.product_name,
-                    "is_registered": it.is_registered, "quantity": it.quantity,
-                    "landing_cost": it.landing_cost, "estimated_value": it.estimated_value}
-                   for it in items],
+        "items": items_with_stock,
     }
+
+
+class UpdatePOReq(BaseModel):
+    supplier_name: Optional[str] = None
+    remarks: Optional[str] = None
+    items: Optional[List[POItemReq]] = None
+
+
+@router.put("/po/{po_id}/update")
+async def update_po(po_id: int, data: UpdatePOReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
+    po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
+    if not po:
+        raise HTTPException(404, "PO not found")
+    if po.status not in ("draft",):
+        raise HTTPException(400, "Only draft POs can be modified")
+    if data.supplier_name:
+        po.supplier_name = data.supplier_name
+    if data.remarks is not None:
+        po.remarks = data.remarks
+    if data.items is not None:
+        # Delete existing items and replace
+        await db.execute(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po_id))
+        from sqlalchemy import delete
+        await db.execute(delete(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po_id))
+        total_qty = 0; total_value = 0
+        for it in data.items:
+            ev = round(it.quantity * it.landing_cost, 2)
+            total_qty += it.quantity; total_value += ev
+            db.add(PurchaseOrderItem(po_id=po_id, product_id=it.product_id, product_name=it.product_name,
+                is_registered=it.is_registered, quantity=it.quantity, landing_cost=it.landing_cost, estimated_value=ev))
+        po.total_qty = total_qty; po.total_value = round(total_value, 2)
+    po.updated_at = datetime.now(timezone.utc)
+    await _log(db, user, f"Updated PO {po.po_number}", "purchase_order", po_id)
+    await db.commit()
+    return {"message": "PO updated"}
+
+
+@router.delete("/po/{po_id}")
+async def delete_po(po_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
+    po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
+    if not po:
+        raise HTTPException(404, "PO not found")
+    if po.status not in ("draft", "rejected"):
+        raise HTTPException(400, "Only draft or rejected POs can be deleted")
+    from sqlalchemy import delete
+    await db.execute(delete(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po_id))
+    await db.delete(po)
+    await _log(db, user, f"Deleted PO {po.po_number}", "purchase_order", po_id)
+    await db.commit()
+    return {"message": "PO deleted"}
 
 
 @router.put("/po/{po_id}/approve")

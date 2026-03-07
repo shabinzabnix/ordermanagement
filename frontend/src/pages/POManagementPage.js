@@ -29,7 +29,42 @@ export default function POManagementPage() {
   const [manualName, setManualName] = useState('');
   const [manualQty, setManualQty] = useState('');
   const [manualCost, setManualCost] = useState('');
-  const [saving, setSaving] = useState(false);
+  // PO Detail popup
+  const [poDetail, setPoDetail] = useState(null);
+  const [editItems, setEditItems] = useState([]);
+  const [editSupplier, setEditSupplier] = useState('');
+  const [editRemarks, setEditRemarks] = useState('');
+
+  const openPoDetail = async (poId) => {
+    try {
+      const res = await api.get(`/po/${poId}`);
+      setPoDetail(res.data);
+      setEditItems(res.data.items.map(it => ({ ...it })));
+      setEditSupplier(res.data.po.supplier_name);
+      setEditRemarks(res.data.po.remarks || '');
+    } catch { toast.error('Failed to load PO'); }
+  };
+
+  const savePoEdit = async () => {
+    try {
+      await api.put(`/po/${poDetail.po.id}/update`, {
+        supplier_name: editSupplier, remarks: editRemarks,
+        items: editItems.map(it => ({ product_id: it.product_id, product_name: it.product_name, is_registered: it.is_registered, quantity: it.quantity, landing_cost: it.landing_cost })),
+      });
+      toast.success('PO updated'); setPoDetail(null); loadData();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
+  };
+
+  const deletePo = async (poId) => {
+    try { await api.delete(`/po/${poId}`); toast.success('PO deleted'); setPoDetail(null); loadData(); }
+    catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
+  };
+
+  const editQty = (idx, val) => { const n = [...editItems]; n[idx].quantity = parseFloat(val) || 0; n[idx].estimated_value = round2(n[idx].quantity * n[idx].landing_cost); setEditItems(n); };
+  const editCost = (idx, val) => { const n = [...editItems]; n[idx].landing_cost = parseFloat(val) || 0; n[idx].estimated_value = round2(n[idx].quantity * n[idx].landing_cost); setEditItems(n); };
+  const removeEditItem = (idx) => setEditItems(editItems.filter((_, i) => i !== idx));
+  const round2 = (v) => Math.round(v * 100) / 100;
+  const editTotal = editItems.reduce((s, i) => s + (i.quantity || 0) * (i.landing_cost || 0), 0);
   // Suppliers + Sub-cat
   const [suppliers, setSuppliers] = useState([]);
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -239,7 +274,7 @@ export default function POManagementPage() {
                   {orders.length === 0 ? (
                     <TableRow><TableCell colSpan={9} className="text-center py-12"><FileText className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-xs text-slate-400">No purchase orders</p></TableCell></TableRow>
                   ) : orders.map(po => (
-                    <TableRow key={po.id} className="hover:bg-slate-50/50">
+                    <TableRow key={po.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => openPoDetail(po.id)}>
                       <TableCell className="font-mono text-[11px] text-sky-700 font-medium">{po.po_number}</TableCell>
                       <TableCell className="text-[12px]">{po.supplier_name}</TableCell>
                       <TableCell><Badge variant="secondary" className="text-[9px] rounded-sm">{po.po_type?.replace('_', ' ')}</Badge></TableCell>
@@ -248,19 +283,8 @@ export default function POManagementPage() {
                       <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {po.total_value?.toLocaleString('en-IN')}</TableCell>
                       <TableCell><Badge className={`text-[9px] rounded-sm ${sBadge(po.status)}`}>{po.status}</Badge></TableCell>
                       <TableCell><Badge className={`text-[9px] rounded-sm ${fBadge(po.fulfillment_status)}`}>{po.fulfillment_status}</Badge></TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {po.status === 'draft' && <>
-                            <Button size="sm" variant="outline" className="h-5 w-5 p-0 rounded-sm text-emerald-600" onClick={() => handleAction(po.id, 'approve')}><Check className="w-3 h-3" /></Button>
-                            <Button size="sm" variant="outline" className="h-5 w-5 p-0 rounded-sm text-red-600" onClick={() => handleAction(po.id, 'reject')}><X className="w-3 h-3" /></Button>
-                          </>}
-                          {po.status === 'approved' && po.fulfillment_status !== 'received' && (
-                            <Select value="" onValueChange={v => handleFulfillment(po.id, v)}>
-                              <SelectTrigger className="h-5 w-[65px] text-[9px] rounded-sm px-1"><SelectValue placeholder="Track" /></SelectTrigger>
-                              <SelectContent><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="received">Received</SelectItem><SelectItem value="verified">Verified</SelectItem></SelectContent>
-                            </Select>
-                          )}
-                        </div>
+                      <TableCell onClick={e => e.stopPropagation()}>
+                        <Button size="sm" variant="outline" className="h-5 px-2 rounded-sm text-[9px]" onClick={() => openPoDetail(po.id)}>View</Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -433,6 +457,106 @@ export default function POManagementPage() {
               {saving ? 'Creating...' : `Create PO (INR ${poTotal.toFixed(2)})`}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* PO Detail Popup */}
+      <Dialog open={!!poDetail} onOpenChange={v => { if (!v) setPoDetail(null); }}>
+        <DialogContent className="rounded-sm max-w-3xl max-h-[85vh] overflow-auto">
+          {poDetail && (<>
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-3">
+                <span>{poDetail.po.po_number}</span>
+                <Badge className={`text-[10px] rounded-sm ${sBadge(poDetail.po.status)}`}>{poDetail.po.status}</Badge>
+                <Badge className={`text-[10px] rounded-sm ${fBadge(poDetail.po.fulfillment_status)}`}>{poDetail.po.fulfillment_status}</Badge>
+              </DialogTitle>
+            </DialogHeader>
+            {/* PO Header */}
+            <div className="grid grid-cols-3 gap-3 text-[12px] font-body">
+              <div><span className="text-slate-400">Store:</span> <span className="font-medium">{poDetail.po.store_name}</span></div>
+              <div><span className="text-slate-400">Type:</span> <span className="font-medium">{poDetail.po.po_type?.replace('_', ' ')}</span></div>
+              <div><span className="text-slate-400">Created:</span> <span>{poDetail.po.created_at ? new Date(poDetail.po.created_at).toLocaleDateString() : '-'}</span></div>
+            </div>
+            {/* Editable fields (only for draft) */}
+            {poDetail.po.status === 'draft' ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1"><Label className="font-body text-xs">Supplier</Label>
+                  <Input value={editSupplier} onChange={e => setEditSupplier(e.target.value)} className="rounded-sm" /></div>
+                <div className="space-y-1"><Label className="font-body text-xs">Remarks</Label>
+                  <Input value={editRemarks} onChange={e => setEditRemarks(e.target.value)} className="rounded-sm" /></div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 text-[12px] font-body">
+                <div><span className="text-slate-400">Supplier:</span> <span className="font-medium">{poDetail.po.supplier_name}</span></div>
+                <div><span className="text-slate-400">Remarks:</span> <span>{poDetail.po.remarks || '-'}</span></div>
+              </div>
+            )}
+            {/* Items Table with Stock */}
+            <Card className="border-slate-200 rounded-sm">
+              <div className="max-h-[350px] overflow-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b border-slate-100">
+                    {['Product', 'ID', 'Stock (All Stores)', poDetail.po.status === 'draft' ? 'Qty' : 'Qty', poDetail.po.status === 'draft' ? 'L.Cost' : 'L.Cost', 'Value', poDetail.po.status === 'draft' ? '' : ''].filter(Boolean).map(h => (
+                      <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty', 'L.Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                    ))}
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {(poDetail.po.status === 'draft' ? editItems : poDetail.items).map((it, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="text-[12px] font-medium text-slate-800 py-1.5 max-w-[200px] truncate">{it.product_name}</TableCell>
+                        <TableCell className="font-mono text-[10px] text-slate-400">{it.product_id || '-'}</TableCell>
+                        <TableCell className="py-1">
+                          <div className="flex gap-0.5 flex-wrap">{it.store_stock?.length > 0
+                            ? it.store_stock.map((s, j) => <Badge key={j} variant="secondary" className="text-[7px] rounded-sm px-1">{s.store}:{s.stock}</Badge>)
+                            : <span className="text-[9px] text-red-400">No stock</span>}
+                          </div>
+                        </TableCell>
+                        {poDetail.po.status === 'draft' ? (
+                          <>
+                            <TableCell className="text-right py-1"><Input type="number" min={1} value={it.quantity} onChange={e => editQty(i, e.target.value)} className="w-[60px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
+                            <TableCell className="text-right py-1"><Input type="number" value={it.landing_cost} onChange={e => editCost(i, e.target.value)} className="w-[70px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
+                            <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {round2(it.quantity * it.landing_cost).toLocaleString('en-IN')}</TableCell>
+                            <TableCell><Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400" onClick={() => removeEditItem(i)}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                          </>
+                        ) : (
+                          <>
+                            <TableCell className="text-right text-[12px] tabular-nums">{it.quantity}</TableCell>
+                            <TableCell className="text-right text-[12px] tabular-nums">{it.landing_cost?.toFixed(2)}</TableCell>
+                            <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {it.estimated_value?.toLocaleString('en-IN')}</TableCell>
+                          </>
+                        )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex justify-between items-center px-4 py-2 bg-sky-50 border-t border-sky-100">
+                <span className="text-[12px] font-body text-sky-800">{(poDetail.po.status === 'draft' ? editItems : poDetail.items).length} items</span>
+                <span className="text-lg font-heading font-bold text-sky-700 tabular-nums">INR {poDetail.po.status === 'draft' ? editTotal.toFixed(2) : poDetail.po.total_value?.toLocaleString('en-IN')}</span>
+              </div>
+            </Card>
+            {/* Action Buttons */}
+            <div className="flex gap-2 justify-end flex-wrap">
+              {poDetail.po.status === 'draft' && (<>
+                <Button variant="outline" className="rounded-sm font-body text-xs text-red-600 hover:bg-red-50" onClick={() => deletePo(poDetail.po.id)}>
+                  <Trash2 className="w-3 h-3 mr-1" /> Delete PO
+                </Button>
+                <Button variant="outline" className="rounded-sm font-body text-xs" onClick={savePoEdit}>Save Changes</Button>
+                <Button className="bg-emerald-500 hover:bg-emerald-600 rounded-sm font-body text-xs" onClick={() => { handleAction(poDetail.po.id, 'approve'); setPoDetail(null); }}>
+                  <Check className="w-3 h-3 mr-1" /> Approve
+                </Button>
+                <Button variant="outline" className="rounded-sm font-body text-xs text-red-600" onClick={() => { handleAction(poDetail.po.id, 'reject'); setPoDetail(null); }}>
+                  <X className="w-3 h-3 mr-1" /> Reject
+                </Button>
+              </>)}
+              {poDetail.po.status === 'approved' && poDetail.po.fulfillment_status !== 'received' && (
+                <Select value="" onValueChange={v => { handleFulfillment(poDetail.po.id, v); setPoDetail(null); }}>
+                  <SelectTrigger className="w-[130px] rounded-sm text-xs"><SelectValue placeholder="Update Status" /></SelectTrigger>
+                  <SelectContent><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="received">Received</SelectItem><SelectItem value="verified">Verified</SelectItem></SelectContent>
+                </Select>
+              )}
+            </div>
+          </>)}
         </DialogContent>
       </Dialog>
     </div>
