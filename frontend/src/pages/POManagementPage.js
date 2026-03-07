@@ -11,7 +11,7 @@ import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
-import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2 } from 'lucide-react';
+import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2, Settings } from 'lucide-react';
 
 export default function POManagementPage() {
   const [orders, setOrders] = useState([]);
@@ -143,6 +143,19 @@ export default function POManagementPage() {
   }, [supplierSearch]);
   useEffect(() => { api.get('/po/suppliers').then(r => setSuppliers(r.data.suppliers)).catch(() => {}); }, []);
   useEffect(() => { api.get('/products/sub-categories').then(r => setSubCategories(r.data.sub_categories || [])).catch(() => {}); }, []);
+
+  // Category rules
+  const [rules, setRules] = useState([]);
+  const [ruleDialog, setRuleDialog] = useState(false);
+  const [ruleForm, setRuleForm] = useState({ po_category: '', sub_categories: [] });
+  const loadRules = () => { api.get('/po/category-rules').then(r => setRules(r.data.rules)).catch(() => {}); };
+  useEffect(() => { loadRules(); }, []);
+  const saveRule = async () => {
+    if (!ruleForm.po_category || ruleForm.sub_categories.length === 0) return;
+    try { await api.post('/po/category-rules', ruleForm); toast.success('Rule saved'); setRuleDialog(false); setRuleForm({ po_category: '', sub_categories: [] }); loadRules(); loadData(); } catch { toast.error('Failed'); }
+  };
+  const deleteRule = async (id) => { try { await api.delete(`/po/category-rules/${id}`); toast.success('Deleted'); loadRules(); loadData(); } catch {} };
+  const toggleRuleSubCat = (sc) => setRuleForm(f => ({ ...f, sub_categories: f.sub_categories.includes(sc) ? f.sub_categories.filter(s => s !== sc) : [...f.sub_categories, sc] }));
 
   // Load products + suppliers when sub-category selected in PO form
   useEffect(() => {
@@ -311,6 +324,20 @@ export default function POManagementPage() {
 
         {/* Emergency PO Review Tab */}
         <TabsContent value="emergency">
+          {/* Current Rules + Settings */}
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex gap-1.5 flex-wrap">
+              {rules.map(r => (
+                <Badge key={r.id} className={`text-[10px] rounded-sm px-2 py-1 ${{
+                  'BRAND-RX':'bg-blue-50 text-blue-700','GEN-RX':'bg-violet-50 text-violet-700','OTC':'bg-emerald-50 text-emerald-700','OTX':'bg-amber-50 text-amber-700',
+                }[r.po_category]||'bg-slate-100 text-slate-600'}`}>{r.po_category}: {r.sub_categories?.length} sub-cat</Badge>
+              ))}
+              {rules.length === 0 && <span className="text-[11px] text-amber-600 font-body">No category rules set. Click Settings to configure.</span>}
+            </div>
+            <Button variant="outline" className="rounded-sm font-body text-xs" onClick={() => setRuleDialog(true)}>
+              <Settings className="w-3.5 h-3.5 mr-1" /> Category Settings
+            </Button>
+          </div>
           <Card className="border-slate-200 shadow-sm rounded-sm">
             <CardContent className="p-3 flex gap-3 flex-wrap items-end">
               <div className="flex gap-1.5">
@@ -354,6 +381,7 @@ export default function POManagementPage() {
                             'OTC': 'bg-emerald-50 text-emerald-700', 'OTX': 'bg-amber-50 text-amber-700',
                           }[it.po_category] || 'bg-slate-100 text-slate-600'}`}>{it.po_category}</Badge>
                           <span className="font-mono text-[10px] text-slate-400">{it.product_id}</span>
+                          {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm">{it.product_info.sub_category}</Badge>}
                         </div>
                         <Badge className={`text-[9px] rounded-sm ${{approved:'bg-emerald-50 text-emerald-700',ordered:'bg-sky-50 text-sky-700',rejected:'bg-red-50 text-red-700'}[it.item_status]||'bg-amber-50 text-amber-700'}`}>{it.item_status}</Badge>
                       </div>
@@ -728,6 +756,48 @@ export default function POManagementPage() {
               )}
             </div>
           </>)}
+        </DialogContent>
+      </Dialog>
+
+      {/* Category Rules Dialog */}
+      <Dialog open={ruleDialog} onOpenChange={setRuleDialog}>
+        <DialogContent className="rounded-sm max-w-xl max-h-[80vh] overflow-auto">
+          <DialogHeader><DialogTitle className="font-heading">Emergency PO Category Rules</DialogTitle></DialogHeader>
+          <p className="text-[11px] font-body text-slate-500">Select which sub-categories from Product Master should automatically route to Emergency PO when stores submit requests.</p>
+          {rules.length > 0 && (
+            <div className="space-y-2">
+              {rules.map(r => (
+                <div key={r.id} className="flex items-start justify-between p-2 border border-slate-200 rounded-sm">
+                  <div>
+                    <Badge className={`text-[10px] rounded-sm ${{
+                      'BRAND-RX':'bg-blue-50 text-blue-700','GEN-RX':'bg-violet-50 text-violet-700','OTC':'bg-emerald-50 text-emerald-700','OTX':'bg-amber-50 text-amber-700',
+                    }[r.po_category]||'bg-slate-100 text-slate-600'}`}>{r.po_category}</Badge>
+                    <div className="flex gap-1 flex-wrap mt-1">{r.sub_categories?.map(sc => <Badge key={sc} variant="secondary" className="text-[8px] rounded-sm">{sc}</Badge>)}</div>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400" onClick={() => deleteRule(r.id)}><Trash2 className="w-3 h-3" /></Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="space-y-3 border-t pt-3 border-slate-200">
+            <div className="space-y-1.5"><Label className="font-body text-xs">PO Category</Label>
+              <Select value={ruleForm.po_category} onValueChange={v => setRuleForm({...ruleForm, po_category: v})}>
+                <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select category" /></SelectTrigger>
+                <SelectContent><SelectItem value="BRAND-RX">BRAND-RX</SelectItem><SelectItem value="GEN-RX">GEN-RX</SelectItem><SelectItem value="OTC">OTC</SelectItem><SelectItem value="OTX">OTX</SelectItem></SelectContent>
+              </Select></div>
+            <div className="space-y-1.5"><Label className="font-body text-xs">Assign Sub-Categories ({ruleForm.sub_categories.length} selected)</Label>
+              <div className="max-h-[200px] overflow-auto border border-slate-200 rounded-sm p-2 grid grid-cols-2 gap-1">
+                {subCategories.map(sc => (
+                  <label key={sc} className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-50 p-1 rounded-sm text-[10px] font-body">
+                    <input type="checkbox" className="rounded" checked={ruleForm.sub_categories.includes(sc)} onChange={() => toggleRuleSubCat(sc)} />
+                    {sc}
+                  </label>
+                ))}
+              </div></div>
+          </div>
+          <DialogFooter>
+            <Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" onClick={saveRule} disabled={!ruleForm.po_category || ruleForm.sub_categories.length === 0}>Save Rule</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
