@@ -62,8 +62,10 @@ async def get_subcategory_data(
                 suppliers.add(str(s).strip())
 
     return {
-        "products": [{"product_id": p.product_id, "product_name": p.product_name, "landing_cost": p.landing_cost or 0,
-                       "mrp": p.mrp or 0, "primary_supplier": p.primary_supplier or ""} for p in products],
+        "products": [{"product_id": p.product_id, "product_name": p.product_name,
+                       "landing_cost": p.landing_cost or p.ptr or 0,
+                       "mrp": p.mrp or 0, "ptr": p.ptr or 0,
+                       "primary_supplier": p.primary_supplier or ""} for p in products],
         "suppliers": sorted(suppliers),
         "total_products": len(products),
     }
@@ -90,6 +92,9 @@ async def product_stock_info(
         return {"products": []}
 
     for p in prods:
+        # Use landing_cost, fallback to ptr if 0
+        lcost = p.landing_cost or p.ptr or 0
+
         # Stock per store
         ss_q = select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock")).where(
             StoreStockBatch.ho_product_id == p.product_id).group_by(StoreStockBatch.store_id)
@@ -100,7 +105,7 @@ async def product_stock_info(
 
         products.append({
             "product_id": p.product_id, "product_name": p.product_name,
-            "landing_cost": p.landing_cost or 0, "mrp": p.mrp or 0, "ptr": p.ptr or 0,
+            "landing_cost": lcost, "mrp": p.mrp or 0, "ptr": p.ptr or 0,
             "primary_supplier": p.primary_supplier or "",
             "store_stock": store_stock,
             "total_stock": sum(s["stock"] for s in store_stock),
@@ -144,12 +149,12 @@ async def create_store_request(
     total_value = 0
     items_data = []
     for item in data.items:
-        # Get landing cost from Product Master
+        # Get landing cost from Product Master (fallback to PTR)
         lcost = 0
         if item.product_id:
             prod = (await db.execute(select(Product).where(Product.product_id == item.product_id))).scalar_one_or_none()
             if prod:
-                lcost = float(prod.landing_cost or 0)
+                lcost = float(prod.landing_cost or prod.ptr or 0)
 
         est_value = round(lcost * item.quantity, 2)
         total_value += est_value

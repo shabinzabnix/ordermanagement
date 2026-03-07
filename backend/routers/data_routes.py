@@ -106,7 +106,7 @@ async def get_products(
                 "rep": p.rep,
                 "mrp": p.mrp or 0,
                 "ptr": p.ptr or 0,
-                "landing_cost": p.landing_cost or 0,
+                "landing_cost": p.landing_cost or p.ptr or 0,
             }
             for p in products
         ],
