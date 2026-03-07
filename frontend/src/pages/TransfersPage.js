@@ -222,15 +222,24 @@ export default function TransfersPage() {
                             <Input value={form.batch} onChange={e => setForm({...form, batch: e.target.value})} className="rounded-sm" placeholder="Optional" />
                           </div>
                           <div className="space-y-1.5">
-                            <Label className="font-body text-[10px] text-slate-500">Quantity * {maxQty > 0 && <span className="text-slate-400">(max: {maxQty})</span>}</Label>
+                            <Label className="font-body text-[10px] text-slate-500">Quantity * <span className="text-slate-400">(1 - {maxQty})</span></Label>
                             <Input type="number" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} required
+                              min={1} max={maxQty}
                               className={`rounded-sm ${qtyExceeds ? 'border-red-400 ring-1 ring-red-200' : ''}`} />
-                            {qtyExceeds && <p className="text-[10px] text-red-600">Exceeds available stock</p>}
+                            {qtyExceeds && <p className="text-[10px] text-red-600">Exceeds available stock ({maxQty} max)</p>}
+                            {form.quantity && parseFloat(form.quantity) < 1 && <p className="text-[10px] text-red-600">Minimum quantity is 1</p>}
                           </div>
                         </div>
+                        {/* Transfer Value */}
+                        {form.quantity && parseFloat(form.quantity) >= 1 && selectedSourceStock.length > 0 && (
+                          <div className="bg-sky-50 border border-sky-200 rounded-sm p-3 flex items-center justify-between">
+                            <span className="text-[12px] font-body text-sky-800">Transfer Value ({form.quantity} units x MRP {selectedSourceStock[0]?.mrp || 0})</span>
+                            <span className="text-lg font-heading font-bold text-sky-700 tabular-nums">INR {(parseFloat(form.quantity) * (selectedSourceStock[0]?.mrp || 0)).toLocaleString('en-IN')}</span>
+                          </div>
+                        )}
                         <DialogFooter>
                           <Button type="submit" className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs"
-                            disabled={saving || !form.source_store_id || !form.requesting_store_id || !form.quantity || qtyExceeds}>
+                            disabled={saving || !form.source_store_id || !form.requesting_store_id || !form.quantity || qtyExceeds || parseFloat(form.quantity) < 1}>
                             {saving ? 'Creating...' : 'Submit Transfer Request'}
                           </Button>
                         </DialogFooter>
