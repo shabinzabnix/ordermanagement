@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { toast } from 'sonner';
 import { Upload, Search, Warehouse, Download } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
+import { UploadProgress } from '../components/UploadProgress';
 
 export default function HOStockUploadPage() {
   const [stocks, setStocks] = useState([]);
@@ -14,6 +15,7 @@ export default function HOStockUploadPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ phase: 'idle', percent: 0 });
 
   const loadStock = async () => {
     setLoading(true);
@@ -31,14 +33,24 @@ export default function HOStockUploadPage() {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
+    setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData();
     fd.append('file', file);
     try {
-      const res = await api.post('/stock/ho/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.post('/stock/ho/upload', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (evt) => {
+          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
+          setUploadProgress({ phase: 'uploading', percent: pct });
+          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+        },
+      });
+      setUploadProgress({ phase: 'done', percent: 100 });
       toast.success(`HO Stock: ${res.data.success}/${res.data.total} records processed`);
       if (res.data.failed > 0) toast.warning(`${res.data.failed} records failed`);
       loadStock();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 
@@ -62,6 +74,8 @@ export default function HOStockUploadPage() {
           </Button>
         </div>
       </div>
+
+      <UploadProgress phase={uploadProgress.phase} percent={uploadProgress.percent} />
 
       <Card className="border-slate-200 shadow-sm rounded-sm">
         <CardContent className="p-3">

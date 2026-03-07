@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 import { Upload, FileSpreadsheet, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { UploadProgress } from '../components/UploadProgress';
 
 export default function SalesUploadPage() {
   const { user } = useAuth();
@@ -18,6 +19,7 @@ export default function SalesUploadPage() {
   const [selectedStore, setSelectedStore] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState({ phase: 'idle', percent: 0 });
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [pendingOnly, setPendingOnly] = useState(true);
@@ -41,13 +43,23 @@ export default function SalesUploadPage() {
     const file = e.target.files[0];
     if (!file || !selectedStore) { toast.error('Select a store first'); return; }
     setUploading(true); setUploadResult(null);
+    setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData(); fd.append('file', file);
     try {
-      const res = await api.post(`/crm/sales-upload?store_id=${selectedStore}`, fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
+      const res = await api.post(`/crm/sales-upload?store_id=${selectedStore}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000,
+        onUploadProgress: (evt) => {
+          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
+          setUploadProgress({ phase: 'uploading', percent: pct });
+          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+        },
+      });
+      setUploadProgress({ phase: 'done', percent: 100 });
       setUploadResult(res.data);
       toast.success(`Imported: ${res.data.new_records} new records, ${res.data.skipped_duplicate} duplicates skipped, ${res.data.new_customers} new customers`);
       loadRecords();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 
@@ -90,6 +102,7 @@ export default function SalesUploadPage() {
               </div>
             </div>
             <p className="text-[11px] font-body text-slate-400">Required columns: Patient Name, Mobile Number, Product Name. Optional: Date of Invoice, Entry Number, Product ID, Total Amount</p>
+            <UploadProgress phase={uploadProgress.phase} percent={uploadProgress.percent} />
           </CardContent>
         </Card>
 

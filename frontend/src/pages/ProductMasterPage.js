@@ -10,6 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 import { Upload, Search, ChevronLeft, ChevronRight, Package, Download } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
+import { UploadProgress } from '../components/UploadProgress';
 
 export default function ProductMasterPage() {
   const [products, setProducts] = useState([]);
@@ -28,6 +29,7 @@ export default function ProductMasterPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ phase: 'idle', percent: 0 });
   const limit = 50;
 
   const loadProducts = useCallback(async () => {
@@ -68,10 +70,19 @@ export default function ProductMasterPage() {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
+    setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData();
     fd.append('file', file);
     try {
-      const res = await api.post('/products/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.post('/products/upload', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (evt) => {
+          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
+          setUploadProgress({ phase: 'uploading', percent: pct });
+          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+        },
+      });
+      setUploadProgress({ phase: 'done', percent: 100 });
       toast.success(`Upload: ${res.data.success}/${res.data.total} records processed`);
       if (res.data.failed > 0) toast.warning(`${res.data.failed} records failed`);
       const matched = res.data.columns_matched || {};
@@ -86,7 +97,8 @@ export default function ProductMasterPage() {
       setUploadOpen(false);
       loadProducts();
       api.get('/products/categories').then(r => setCategories(r.data.categories)).catch(() => {});
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 
@@ -120,6 +132,7 @@ export default function ProductMasterPage() {
                 <p className="text-[11px] text-slate-400 mt-1">.xlsx or .xls</p>
               </label>
             </div>
+            <UploadProgress phase={uploadProgress.phase} percent={uploadProgress.percent} />
           </DialogContent>
         </Dialog>
       </div>

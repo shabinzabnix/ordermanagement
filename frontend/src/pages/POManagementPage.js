@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
 import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2, Settings } from 'lucide-react';
+import { UploadProgress } from '../components/UploadProgress';
 
 export default function POManagementPage() {
   const [orders, setOrders] = useState([]);
@@ -43,6 +44,7 @@ export default function POManagementPage() {
   const [editRemarks, setEditRemarks] = useState('');
   const [saving, setSaving] = useState(false);
   const [newComment, setNewComment] = useState('');
+  const [subcatUploadProgress, setSubcatUploadProgress] = useState({ phase: 'idle', percent: 0 });
 
   const openPoDetail = async (poId) => {
     try {
@@ -236,12 +238,22 @@ export default function POManagementPage() {
 
   const handleSubcatUpload = async (e) => {
     const file = e.target.files[0]; if (!file) return;
+    setSubcatUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData(); fd.append('file', file);
     try {
-      const res = await api.post('/po/upload-subcategory', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
+      const res = await api.post('/po/upload-subcategory', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000,
+        onUploadProgress: (evt) => {
+          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
+          setSubcatUploadProgress({ phase: 'uploading', percent: pct });
+          if (pct >= 100) setSubcatUploadProgress({ phase: 'processing', percent: 100 });
+        },
+      });
+      setSubcatUploadProgress({ phase: 'done', percent: 100 });
       toast.success(`${res.data.purchase_orders?.length} POs created by sub-category`);
       loadData();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+      setTimeout(() => setSubcatUploadProgress({ phase: 'idle', percent: 0 }), 3000);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setSubcatUploadProgress({ phase: 'idle', percent: 0 }); }
     e.target.value = '';
   };
 
@@ -313,6 +325,7 @@ export default function POManagementPage() {
                 <input type="file" accept=".xlsx,.xls" onChange={handleSubcatUpload} className="hidden" id="subcat-upload" />
                 <label htmlFor="subcat-upload"><Button asChild className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs"><span><Upload className="w-3.5 h-3.5 mr-1.5" /> Upload Excel</span></Button></label>
               </div>
+              <UploadProgress phase={subcatUploadProgress.phase} percent={subcatUploadProgress.percent} />
             </CardContent>
           </Card>
         </TabsContent>

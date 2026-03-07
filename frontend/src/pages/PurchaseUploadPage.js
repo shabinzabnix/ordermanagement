@@ -11,6 +11,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { downloadExcel } from '../lib/api';
 import { toast } from 'sonner';
 import { Upload, Search, Download, CheckCircle, ShoppingBag, Truck, ChevronLeft, ChevronRight, Package } from 'lucide-react';
+import { UploadProgress } from '../components/UploadProgress';
 
 export default function PurchaseUploadPage() {
   const { user } = useAuth();
@@ -18,6 +19,7 @@ export default function PurchaseUploadPage() {
   const [selectedStore, setSelectedStore] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState({ phase: 'idle', percent: 0 });
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -53,17 +55,26 @@ export default function PurchaseUploadPage() {
     const file = e.target.files[0];
     if (!file || !selectedStore) { toast.error('Select a store first'); return; }
     setUploading(true); setUploadResult(null);
+    setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData(); fd.append('file', file);
     try {
-      const res = await api.post(`/intel/purchase-upload?store_id=${selectedStore}`, fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
+      const res = await api.post(`/intel/purchase-upload?store_id=${selectedStore}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000,
+        onUploadProgress: (evt) => {
+          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
+          setUploadProgress({ phase: 'uploading', percent: pct });
+          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+        },
+      });
+      setUploadProgress({ phase: 'done', percent: 100 });
       setUploadResult(res.data);
       toast.success(`Imported: ${res.data.new_records} new, ${res.data.skipped_duplicate} duplicates skipped`);
       setPage(1); setSearch('');
-      // Refresh
       api.get('/intel/purchase-records', { params: { store_id: selectedStore, page: 1, limit } }).then(r => { setRecords(r.data.records); setTotal(r.data.total); });
       const rp = {}; if (selectedStore) rp.store_id = selectedStore; if (dateFrom) rp.date_from = dateFrom; if (dateTo) rp.date_to = dateTo;
       api.get('/intel/purchase-analytics', { params: rp }).then(r => setAnalytics(r.data));
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 
@@ -108,6 +119,7 @@ export default function PurchaseUploadPage() {
             </Badge>
           )}
         </CardContent>
+        <UploadProgress phase={uploadProgress.phase} percent={uploadProgress.percent} />
       </Card>
 
       {/* Analytics KPIs */}

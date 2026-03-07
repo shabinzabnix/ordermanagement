@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import { Upload, Search, Archive, Download } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
+import { UploadProgress } from '../components/UploadProgress';
 
 export default function StoreStockUploadPage() {
   const { user } = useAuth();
@@ -19,6 +20,7 @@ export default function StoreStockUploadPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ phase: 'idle', percent: 0 });
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
   // Auto-select store for store_staff
@@ -43,16 +45,26 @@ export default function StoreStockUploadPage() {
     const file = e.target.files[0];
     if (!file || !selectedStore) { toast.error('Select a store first'); return; }
     setUploading(true);
+    setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData();
     fd.append('file', file);
     try {
-      const res = await api.post(`/stock/store/upload?store_id=${selectedStore}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.post(`/stock/store/upload?store_id=${selectedStore}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (evt) => {
+          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
+          setUploadProgress({ phase: 'uploading', percent: pct });
+          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+        },
+      });
+      setUploadProgress({ phase: 'done', percent: 100 });
       toast.success(`Store Stock: ${res.data.success}/${res.data.total} records processed`);
       if (res.data.failed > 0) toast.warning(`${res.data.failed} records failed`);
       const params = { page: 1, limit: 100 };
       if (search) params.search = search;
       api.get(`/stock/store/${selectedStore}`, { params }).then(r => { setStocks(r.data.stocks); setTotal(r.data.total); });
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 
@@ -78,6 +90,8 @@ export default function StoreStockUploadPage() {
           )}
         </div>
       </div>
+
+      <UploadProgress phase={uploadProgress.phase} percent={uploadProgress.percent} />
 
       <Card className="border-slate-200 shadow-sm rounded-sm">
         <CardContent className="p-3">
