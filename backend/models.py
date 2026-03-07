@@ -38,6 +38,7 @@ class User(Base):
     full_name = Column(String(255), nullable=False)
     role = Column(SQLEnum(UserRole), nullable=False)
     store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    allowed_services = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

@@ -15,32 +15,32 @@ import {
 } from '../components/ui/dropdown-menu';
 
 const navItems = [
-  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
-  { label: 'Store Dash', path: '/store-dashboard', icon: Building2, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
-  { label: 'Top Selling', path: '/top-selling', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
-  { label: 'Purchase Upload', path: '/purchase-report', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
-  { label: 'Intelligence', path: '/intel', icon: Brain, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Forecast', path: '/intel/forecast', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Expiry Risk', path: '/intel/expiry', icon: ShieldAlert, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Suppliers', path: '/intel/suppliers', icon: Truck, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Products', path: '/products', icon: Package, roles: ['ADMIN'] },
-  { label: 'Stores', path: '/stores', icon: Building2, roles: ['ADMIN'] },
-  { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Store Stock', path: '/store-stock', icon: Archive, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
-  { label: 'Consolidated', path: '/consolidated', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Scorecard', path: '/scorecard', icon: Trophy, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['ADMIN', 'HO_STAFF'] },
-  { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
-  { label: 'Purchases', path: '/purchases', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'] },
-  { label: 'CRM', path: '/crm', icon: Heart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
-  { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'] },
-  { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
-  { label: 'CRM Reports', path: '/crm/reports', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'] },
-  { label: 'History', path: '/crm/history', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
-  { label: 'Customers', path: '/crm/customers', icon: Users, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'] },
-  { label: 'Users', path: '/users', icon: Users, roles: ['ADMIN'] },
-  { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['ADMIN'] },
-  { label: 'Uploads', path: '/uploads', icon: FileUp, roles: ['ADMIN', 'HO_STAFF'] },
+  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'dashboard' },
+  { label: 'Store Dash', path: '/store-dashboard', icon: Building2, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'store_dashboard' },
+  { label: 'Top Selling', path: '/top-selling', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'], svc: 'top_selling' },
+  { label: 'Intelligence', path: '/intel', icon: Brain, roles: ['ADMIN', 'HO_STAFF'], svc: 'intelligence' },
+  { label: 'Forecast', path: '/intel/forecast', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF'], svc: 'forecast' },
+  { label: 'Expiry Risk', path: '/intel/expiry', icon: ShieldAlert, roles: ['ADMIN', 'HO_STAFF'], svc: 'expiry_risk' },
+  { label: 'Suppliers', path: '/intel/suppliers', icon: Truck, roles: ['ADMIN', 'HO_STAFF'], svc: 'suppliers' },
+  { label: 'Products', path: '/products', icon: Package, roles: ['ADMIN'], svc: 'products' },
+  { label: 'Stores', path: '/stores', icon: Building2, roles: ['ADMIN'], svc: 'stores' },
+  { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['ADMIN', 'HO_STAFF'], svc: 'ho_stock' },
+  { label: 'Store Stock', path: '/store-stock', icon: Archive, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'store_stock' },
+  { label: 'Consolidated', path: '/consolidated', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF'], svc: 'consolidated' },
+  { label: 'Scorecard', path: '/scorecard', icon: Trophy, roles: ['ADMIN', 'HO_STAFF'], svc: 'scorecard' },
+  { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['ADMIN', 'HO_STAFF'], svc: 'aging' },
+  { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'transfers' },
+  { label: 'Purchases', path: '/purchases', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'purchases' },
+  { label: 'Purchase Upload', path: '/purchase-report', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'purchase_upload' },
+  { label: 'CRM', path: '/crm', icon: Heart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'], svc: 'crm' },
+  { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'], svc: 'sales_upload' },
+  { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'], svc: 'refill_due' },
+  { label: 'CRM Reports', path: '/crm/reports', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'], svc: 'crm_reports' },
+  { label: 'History', path: '/crm/history', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'], svc: 'crm_history' },
+  { label: 'Customers', path: '/crm/customers', icon: Users, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'], svc: 'crm_customers' },
+  { label: 'Users', path: '/users', icon: Users, roles: ['ADMIN'], svc: 'users' },
+  { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['ADMIN'], svc: 'audit_log' },
+  { label: 'Uploads', path: '/uploads', icon: FileUp, roles: ['ADMIN', 'HO_STAFF'], svc: 'uploads' },
 ];
 
 export default function DashboardLayout({ children }) {
@@ -49,7 +49,12 @@ export default function DashboardLayout({ children }) {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
 
-  const filteredNav = navItems.filter(item => item.roles.includes(user?.role));
+  const userServices = user?.allowed_services ? user.allowed_services.split(',') : null;
+  const filteredNav = navItems.filter(item => {
+    if (!item.roles.includes(user?.role)) return false;
+    if (userServices && !userServices.includes(item.svc)) return false;
+    return true;
+  });
 
   const handleLogout = () => {
     logout();

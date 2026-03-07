@@ -34,6 +34,7 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
             "full_name": user.full_name,
             "role": role_val,
             "store_id": user.store_id,
+            "allowed_services": user.allowed_services,
         },
     }
 
@@ -54,4 +55,5 @@ async def get_me(
         "full_name": user.full_name,
         "role": role_val,
         "store_id": user.store_id,
+        "allowed_services": user.allowed_services,
     }

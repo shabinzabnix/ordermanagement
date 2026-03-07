@@ -325,6 +325,7 @@ class UserCreate(BaseModel):
     full_name: str
     role: str
     store_id: Optional[int] = None
+    allowed_services: Optional[str] = None
 
 
 @router.get("/users")
@@ -342,6 +343,7 @@ async def get_users(
                 "full_name": u.full_name,
                 "role": u.role.value if isinstance(u.role, UserRole) else u.role,
                 "store_id": u.store_id,
+                "allowed_services": u.allowed_services,
                 "is_active": u.is_active,
             }
             for u in users
@@ -364,6 +366,7 @@ async def create_user(
         full_name=data.full_name,
         role=UserRole(data.role.upper()),
         store_id=data.store_id,
+        allowed_services=data.allowed_services,
         is_active=True,
     )
     db.add(new_user)
