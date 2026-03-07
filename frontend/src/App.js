@@ -34,6 +34,7 @@ import TopSellingPage from '@/pages/TopSellingPage';
 import PurchaseUploadPage from '@/pages/PurchaseUploadPage';
 import StoreRequestPage from '@/pages/StoreRequestPage';
 import POManagementPage from '@/pages/POManagementPage';
+import PurchaseReviewPage from '@/pages/PurchaseReviewPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -71,6 +72,7 @@ function AppRoutes() {
       <Route path="/purchase-report" element={<ProtectedRoute><PurchaseUploadPage /></ProtectedRoute>} />
       <Route path="/store-request" element={<ProtectedRoute><StoreRequestPage /></ProtectedRoute>} />
       <Route path="/po-management" element={<ProtectedRoute><POManagementPage /></ProtectedRoute>} />
+      <Route path="/purchase-review" element={<ProtectedRoute><PurchaseReviewPage /></ProtectedRoute>} />
       <Route path="/intel" element={<ProtectedRoute><IntelligenceDashboardPage /></ProtectedRoute>} />
       <Route path="/intel/forecast" element={<ProtectedRoute><DemandForecastPage /></ProtectedRoute>} />
       <Route path="/intel/expiry" element={<ProtectedRoute><ExpiryRiskPage /></ProtectedRoute>} />

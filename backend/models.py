@@ -375,12 +375,23 @@ class StoreRequestItem(Base):
     has_prescription = Column(Boolean, default=False)
     doctor_name = Column(String(255), nullable=True)
     clinic_location = Column(String(500), nullable=True)
+    po_category = Column(String(50), nullable=True)
+    selected_supplier = Column(String(500), nullable=True)
+    item_status = Column(String(30), default="pending")
 
 class POComment(Base):
     __tablename__ = "po_comments"
     id = Column(Integer, primary_key=True, autoincrement=True)
     po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False, index=True)
     user_name = Column(String(255))
+
+class POCategoryRule(Base):
+    __tablename__ = "po_category_rules"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    po_category = Column(String(50), nullable=False)
+    sub_categories = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
     message = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

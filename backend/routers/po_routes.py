@@ -5,7 +5,7 @@ from database import get_db
 from models import (
     Product, Store, StoreStockBatch, SalesRecord, PurchaseRecord,
     PurchaseOrder, PurchaseOrderItem, StoreRequest, StoreRequestItem,
-    AuditLog, POComment,
+    AuditLog, POComment, POCategoryRule,
 )
 from auth import get_current_user, require_roles
 from pydantic import BaseModel
@@ -145,16 +145,25 @@ async def create_store_request(
     if not data.items:
         raise HTTPException(400, "At least one product required")
 
+    # Load PO category rules for auto-classification
+    category_rules = {}
+    for rule in (await db.execute(select(POCategoryRule))).scalars().all():
+        for sc in rule.sub_categories.split(","):
+            category_rules[sc.strip()] = rule.po_category
+
     # Calculate values and check stock/pending for each item
     total_value = 0
     items_data = []
     for item in data.items:
-        # Get landing cost from Product Master (fallback to PTR)
+        # Get landing cost + sub_category from Product Master
         lcost = 0
+        po_cat = None
         if item.product_id:
             prod = (await db.execute(select(Product).where(Product.product_id == item.product_id))).scalar_one_or_none()
             if prod:
                 lcost = float(prod.landing_cost or prod.ptr or 0)
+                if prod.sub_category and prod.sub_category in category_rules:
+                    po_cat = category_rules[prod.sub_category]
 
         est_value = round(lcost * item.quantity, 2)
         total_value += est_value
@@ -186,6 +195,7 @@ async def create_store_request(
             "pending_orders": pending,
             "has_prescription": item.has_prescription,
             "doctor_name": item.doctor_name, "clinic_location": item.clinic_location,
+            "po_category": po_cat,
         })
 
     req = StoreRequest(
@@ -206,6 +216,7 @@ async def create_store_request(
             pending_orders=it["pending_orders"],
             has_prescription=it["has_prescription"],
             doctor_name=it["doctor_name"], clinic_location=it["clinic_location"],
+            po_category=it["po_category"],
         ))
 
     await _log(db, user, f"Created store request: {len(items_data)} items, INR {total_value}", "store_request", req.id)
@@ -716,3 +727,110 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
     </body></html>"""
 
     return {"html": html, "po_number": po.po_number}
+
+
+# ─── PO Category Rules Management ───────────────────────────
+
+@router.get("/po/category-rules")
+async def get_category_rules(db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    rules = (await db.execute(select(POCategoryRule).order_by(POCategoryRule.po_category))).scalars().all()
+    return {"rules": [{"id": r.id, "po_category": r.po_category, "sub_categories": r.sub_categories.split(",") if r.sub_categories else []} for r in rules]}
+
+
+class CategoryRuleReq(BaseModel):
+    po_category: str
+    sub_categories: List[str]
+
+
+@router.post("/po/category-rules")
+async def save_category_rule(data: CategoryRuleReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
+    existing = (await db.execute(select(POCategoryRule).where(POCategoryRule.po_category == data.po_category))).scalar_one_or_none()
+    if existing:
+        existing.sub_categories = ",".join(data.sub_categories)
+    else:
+        db.add(POCategoryRule(po_category=data.po_category, sub_categories=",".join(data.sub_categories)))
+    await db.commit()
+    return {"message": f"Rule saved for {data.po_category}"}
+
+
+@router.delete("/po/category-rules/{rule_id}")
+async def delete_category_rule(rule_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
+    r = (await db.execute(select(POCategoryRule).where(POCategoryRule.id == rule_id))).scalar_one_or_none()
+    if r:
+        await db.delete(r)
+        await db.commit()
+    return {"message": "Rule deleted"}
+
+
+# ─── Purchase Review (for PO category items) ────────────────
+
+@router.get("/po/purchase-review")
+async def purchase_review(
+    po_category: str = Query(None),
+    status: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """Get all store request items that have a PO category, with supplier options."""
+    query = select(StoreRequestItem).where(StoreRequestItem.po_category.isnot(None))
+    if po_category and po_category != "all":
+        query = query.where(StoreRequestItem.po_category == po_category)
+    if status and status != "all":
+        query = query.where(StoreRequestItem.item_status == status)
+
+    items = (await db.execute(query.order_by(StoreRequestItem.id.desc()))).scalars().all()
+
+    # Get request info and product suppliers
+    req_ids = set(it.request_id for it in items)
+    req_map = {}
+    if req_ids:
+        for r in (await db.execute(select(StoreRequest).where(StoreRequest.id.in_(req_ids)))).scalars().all():
+            req_map[r.id] = r
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    result = []
+    for it in items:
+        req = req_map.get(it.request_id)
+        # Get suppliers from Product Master
+        suppliers = {}
+        if it.product_id:
+            prod = (await db.execute(select(Product).where(Product.product_id == it.product_id))).scalar_one_or_none()
+            if prod:
+                if prod.primary_supplier: suppliers["primary"] = prod.primary_supplier
+                if prod.secondary_supplier: suppliers["secondary"] = prod.secondary_supplier
+                if prod.least_price_supplier: suppliers["least_price"] = prod.least_price_supplier
+                if prod.most_qty_supplier: suppliers["most_qty"] = prod.most_qty_supplier
+
+        result.append({
+            "id": it.id, "request_id": it.request_id,
+            "store_name": smap.get(req.store_id, "") if req else "",
+            "product_id": it.product_id, "product_name": it.product_name,
+            "quantity": it.quantity, "landing_cost": it.landing_cost,
+            "po_category": it.po_category, "item_status": it.item_status,
+            "selected_supplier": it.selected_supplier,
+            "suppliers": suppliers,
+            "request_reason": req.request_reason if req else "",
+        })
+
+    return {"items": result, "total": len(result)}
+
+
+class UpdateItemReq(BaseModel):
+    item_ids: List[int]
+    supplier: Optional[str] = None
+    status: Optional[str] = None
+
+
+@router.put("/po/purchase-review/update")
+async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
+    """Bulk update supplier or status for selected items."""
+    for iid in data.item_ids:
+        it = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.id == iid))).scalar_one_or_none()
+        if it:
+            if data.supplier:
+                it.selected_supplier = data.supplier
+            if data.status:
+                it.item_status = data.status
+    await _log(db, user, f"Updated {len(data.item_ids)} review items: supplier={data.supplier}, status={data.status}", "purchase_review")
+    await db.commit()
+    return {"message": f"Updated {len(data.item_ids)} items"}
