@@ -42,6 +42,7 @@ export default function StoreRequestPage() {
   const [chatOpen, setChatOpen] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatMsg, setChatMsg] = useState('');
+  const [allComments, setAllComments] = useState([]);
   // HO review
   const [allItems, setAllItems] = useState([]);
   const [reviewFilter, setReviewFilter] = useState('all');
@@ -53,6 +54,7 @@ export default function StoreRequestPage() {
   const loadData = () => {
     api.get('/po/store-requests').then(r => setRequests(r.data.requests)).catch(() => {});
     api.get('/po/purchase-review?po_category=all').then(r => setAllItems(r.data.items)).catch(() => {});
+    api.get('/po/all-comments?limit=50').then(r => setAllComments(r.data.comments)).catch(() => {});
   };
 
   useEffect(() => {
@@ -114,6 +116,7 @@ export default function StoreRequestPage() {
     if (!chatMsg.trim() || !chatOpen) return;
     try { await api.post('/po/request-comment', { item_id: chatOpen, message: chatMsg }); setChatMsg('');
       const r = await api.get(`/po/request-comments/${chatOpen}`); setChatMessages(r.data.comments);
+      api.get('/po/all-comments?limit=50').then(r => setAllComments(r.data.comments)).catch(() => {});
     } catch { toast.error('Failed'); }
   };
 
@@ -135,6 +138,9 @@ export default function StoreRequestPage() {
         <TabsList className="rounded-sm">
           <TabsTrigger value="new" className="rounded-sm text-xs font-body">New Request</TabsTrigger>
           <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Requests ({allItems.length})</TabsTrigger>
+          <TabsTrigger value="messages" className="rounded-sm text-xs font-body">
+            Messages {allComments.length > 0 && <Badge className="ml-1 text-[8px] rounded-full bg-sky-500 text-white px-1.5">{allComments.length}</Badge>}
+          </TabsTrigger>
         </TabsList>
 
         {/* Requests - Individual Products */}
@@ -284,6 +290,52 @@ export default function StoreRequestPage() {
           </div>
         </TabsContent>
 
+
+        {/* Messages Panel */}
+        <TabsContent value="messages">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <CardHeader className="pb-2 border-b border-slate-100">
+              <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
+                <MessageCircle className="w-4 h-4 text-sky-500" /> All Communications ({allComments.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="max-h-[calc(100vh-280px)] overflow-auto">
+                {allComments.length === 0 ? (
+                  <div className="text-center py-16"><MessageCircle className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No messages yet</p></div>
+                ) : allComments.map(m => {
+                  const isMe = m.user_name === user?.full_name;
+                  return (
+                    <div key={m.id} className={`flex gap-3 px-4 py-3 border-b border-slate-50 hover:bg-slate-50/50 ${isMe ? 'bg-sky-50/20' : ''}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-[11px] font-bold ${
+                        m.user_role === 'STORE_STAFF' ? 'bg-emerald-100 text-emerald-700' :
+                        m.user_role === 'CRM_STAFF' ? 'bg-rose-100 text-rose-700' :
+                        m.user_role === 'HO_STAFF' ? 'bg-sky-100 text-sky-700' :
+                        'bg-violet-100 text-violet-700'}`}>
+                        {m.user_name?.[0]?.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-body font-semibold text-slate-800">{m.user_name}</span>
+                          <Badge className={`text-[7px] rounded-sm px-1 ${
+                            m.user_role === 'STORE_STAFF' ? 'bg-emerald-50 text-emerald-600' :
+                            m.user_role === 'CRM_STAFF' ? 'bg-rose-50 text-rose-600' :
+                            m.user_role === 'HO_STAFF' ? 'bg-sky-50 text-sky-600' :
+                            'bg-violet-50 text-violet-600'}`}>{m.user_role?.replace('_',' ')}</Badge>
+                          <span className="text-[9px] text-slate-400">{m.created_at ? new Date(m.created_at).toLocaleString() : ''}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <Badge variant="secondary" className="text-[8px] rounded-sm px-1 shrink-0">{m.product_name?.slice(0,30)}</Badge>
+                        </div>
+                        <p className="text-[12px] font-body text-slate-700 mt-1">{m.message}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* New Request Form */}
         <TabsContent value="new">

@@ -557,6 +557,24 @@ async def get_request_comments(item_id: int, db: AsyncSession = Depends(get_db),
                            "created_at": c.created_at.isoformat() if c.created_at else None} for c in comments]}
 
 
+@router.get("/po/all-comments")
+async def get_all_comments(
+    limit: int = Query(50),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    comments = (await db.execute(select(RequestComment).order_by(RequestComment.created_at.desc()).limit(limit))).scalars().all()
+    # Get product names for each item
+    item_ids = set(c.item_id for c in comments)
+    item_map = {}
+    if item_ids:
+        for it in (await db.execute(select(StoreRequestItem).where(StoreRequestItem.id.in_(item_ids)))).scalars().all():
+            item_map[it.id] = it.product_name
+    return {"comments": [{"id": c.id, "item_id": c.item_id, "product_name": item_map.get(c.item_id, ""),
+                           "user_name": c.user_name, "user_role": c.user_role, "message": c.message,
+                           "created_at": c.created_at.isoformat() if c.created_at else None} for c in comments]}
+
+
+
 
 
 @router.get("/po/{po_id}")
