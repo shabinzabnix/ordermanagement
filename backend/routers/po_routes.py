@@ -772,9 +772,11 @@ async def purchase_review(
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
     """Get all store request items with PO category — full details per product."""
-    query = select(StoreRequestItem).where(StoreRequestItem.po_category.isnot(None))
+    query = select(StoreRequestItem)
     if po_category and po_category != "all":
         query = query.where(StoreRequestItem.po_category == po_category)
+    elif po_category != "all":
+        pass  # show all
     if status and status != "all":
         query = query.where(StoreRequestItem.item_status == status)
 
