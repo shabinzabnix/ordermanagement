@@ -1,0 +1,316 @@
+import { useState, useEffect, useRef } from 'react';
+import api from '../lib/api';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Badge } from '../components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { toast } from 'sonner';
+import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2 } from 'lucide-react';
+
+export default function POManagementPage() {
+  const [orders, setOrders] = useState([]);
+  const [storeRequests, setStoreRequests] = useState([]);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [detailDialog, setDetailDialog] = useState(null);
+  const [stockInfo, setStockInfo] = useState(null);
+  // Create PO form
+  const [createOpen, setCreateOpen] = useState(false);
+  const [poForm, setPoForm] = useState({ supplier_name: '', remarks: '', request_id: null });
+  const [poItems, setPoItems] = useState([]);
+  const [poSearch, setPoSearch] = useState('');
+  const [poSugg, setPoSugg] = useState([]);
+  const [showPoSugg, setShowPoSugg] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualQty, setManualQty] = useState('');
+  const [manualCost, setManualCost] = useState('');
+  const [saving, setSaving] = useState(false);
+  // Sub-cat upload
+  const [uploadSupplier, setUploadSupplier] = useState('');
+  const sugRef = useRef(null);
+
+  const loadData = () => {
+    api.get('/po/list', { params: statusFilter !== 'all' ? { status: statusFilter } : {} }).then(r => setOrders(r.data.orders)).catch(() => {});
+    api.get('/po/store-requests', { params: { status: 'pending' } }).then(r => setStoreRequests(r.data.requests)).catch(() => {});
+  };
+  useEffect(() => { loadData(); }, [statusFilter]);
+
+  useEffect(() => {
+    if (poSearch.length < 2) { setPoSugg([]); return; }
+    const t = setTimeout(() => { api.get('/products', { params: { search: poSearch, limit: 15 } }).then(r => { setPoSugg(r.data.products); setShowPoSugg(true); }).catch(() => {}); }, 300);
+    return () => clearTimeout(t);
+  }, [poSearch]);
+  useEffect(() => {
+    const h = (e) => { if (sugRef.current && !sugRef.current.contains(e.target)) setShowPoSugg(false); };
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const addPoProduct = (p) => {
+    setPoItems([...poItems, { product_id: p.product_id, product_name: p.product_name, is_registered: true, quantity: 1, landing_cost: p.landing_cost || 0 }]);
+    setPoSearch(''); setShowPoSugg(false);
+  };
+  const addManualProduct = () => {
+    if (!manualName) return;
+    setPoItems([...poItems, { product_id: null, product_name: manualName, is_registered: false, quantity: parseFloat(manualQty) || 1, landing_cost: parseFloat(manualCost) || 0 }]);
+    setManualName(''); setManualQty(''); setManualCost('');
+  };
+  const updatePoItem = (idx, field, val) => { const n = [...poItems]; n[idx][field] = field === 'product_name' ? val : parseFloat(val) || 0; setPoItems(n); };
+  const poTotal = poItems.reduce((s, i) => s + i.quantity * i.landing_cost, 0);
+
+  const handleCreatePO = async () => {
+    if (!poForm.supplier_name || poItems.length === 0) { toast.error('Supplier and items required'); return; }
+    setSaving(true);
+    try {
+      const res = await api.post('/po/create', { ...poForm, items: poItems });
+      toast.success(`PO ${res.data.po_number} created: INR ${res.data.total_value.toLocaleString('en-IN')}`);
+      setCreateOpen(false); setPoForm({ supplier_name: '', remarks: '', request_id: null }); setPoItems([]);
+      loadData();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
+    finally { setSaving(false); }
+  };
+
+  const handleAction = async (poId, action) => {
+    try {
+      await api.put(`/po/${poId}/${action}`);
+      toast.success(`PO ${action}d`); loadData();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
+  };
+
+  const handleFulfillment = async (poId, status) => {
+    try { await api.put(`/po/${poId}/fulfillment?status=${status}`); toast.success(`Updated: ${status}`); loadData(); }
+    catch { toast.error('Failed'); }
+  };
+
+  const viewRequestStock = async (reqId) => {
+    try { const res = await api.get(`/po/store-requests/${reqId}/stock-info`); setStockInfo(res.data); }
+    catch { toast.error('Failed to load'); }
+  };
+
+  const createPOFromRequest = (req) => {
+    setPoForm({ supplier_name: '', remarks: `From store request #${req.id}`, request_id: req.id });
+    setPoItems(req.items.map(it => ({ product_id: it.product_id, product_name: it.product_name, is_registered: !!it.product_id, quantity: it.quantity, landing_cost: it.landing_cost })));
+    setCreateOpen(true);
+  };
+
+  const handleSubcatUpload = async (e) => {
+    const file = e.target.files[0]; if (!file || !uploadSupplier) { toast.error('Select supplier first'); return; }
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      const res = await api.post(`/po/upload-subcategory?supplier_name=${encodeURIComponent(uploadSupplier)}`, fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 });
+      toast.success(`${res.data.purchase_orders?.length} POs created by sub-category`);
+      loadData();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
+    e.target.value = '';
+  };
+
+  const sBadge = (s) => ({ draft: 'bg-slate-100 text-slate-600', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-red-50 text-red-700', po_created: 'bg-sky-50 text-sky-700' }[s] || 'bg-amber-50 text-amber-700');
+  const fBadge = (s) => ({ received: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', verified: 'bg-violet-50 text-violet-700' }[s] || 'bg-slate-100 text-slate-500');
+
+  return (
+    <div data-testid="po-management-page" className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Purchase Orders</h2>
+          <p className="text-sm font-body text-slate-500 mt-0.5">Manage POs, store requests & sub-category orders</p>
+        </div>
+        <Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" onClick={() => { setPoForm({ supplier_name: '', remarks: '', request_id: null }); setPoItems([]); setCreateOpen(true); }}>
+          <Plus className="w-3.5 h-3.5 mr-1.5" /> Create PO
+        </Button>
+      </div>
+
+      <Tabs defaultValue="requests" className="space-y-4">
+        <TabsList className="rounded-sm">
+          <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Store Requests ({storeRequests.length})</TabsTrigger>
+          <TabsTrigger value="orders" className="rounded-sm text-xs font-body">Purchase Orders ({orders.length})</TabsTrigger>
+          <TabsTrigger value="upload" className="rounded-sm text-xs font-body">Sub-Category Upload</TabsTrigger>
+        </TabsList>
+
+        {/* Store Requests Tab */}
+        <TabsContent value="requests">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
+              <Table><TableHeader><TableRow className="border-b-2 border-slate-100">
+                {['#', 'Store', 'Reason', 'Customer', 'Items', 'Value', 'Status', 'Actions'].map(h => (
+                  <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3">{h}</TableHead>
+                ))}</TableRow></TableHeader>
+                <TableBody>
+                  {storeRequests.length === 0 ? (
+                    <TableRow><TableCell colSpan={8} className="text-center py-12"><Package className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-xs text-slate-400">No pending requests</p></TableCell></TableRow>
+                  ) : storeRequests.map(r => (
+                    <TableRow key={r.id} className="hover:bg-slate-50/50">
+                      <TableCell className="font-mono text-[11px]">#{r.id}</TableCell>
+                      <TableCell className="text-[12px]">{r.store_name}</TableCell>
+                      <TableCell><Badge className={`text-[9px] rounded-sm ${sBadge(r.request_reason === 'emergency_purchase' ? 'rejected' : 'draft')}`}>{r.request_reason?.replace('_', ' ')}</Badge></TableCell>
+                      <TableCell className="text-[11px]">{r.customer_name ? `${r.customer_name} (${r.customer_mobile})` : '-'}</TableCell>
+                      <TableCell className="text-[12px] tabular-nums">{r.total_items}</TableCell>
+                      <TableCell className="text-[12px] tabular-nums font-medium">INR {r.total_value?.toLocaleString('en-IN')}</TableCell>
+                      <TableCell><Badge className={`text-[9px] rounded-sm ${sBadge(r.status)}`}>{r.status}</Badge></TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" className="h-5 px-1.5 rounded-sm text-[9px]" onClick={() => viewRequestStock(r.id)}>Stock Info</Button>
+                          <Button size="sm" variant="outline" className="h-5 px-1.5 rounded-sm text-[9px] text-sky-600" onClick={() => createPOFromRequest(r)}>Create PO</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+          {stockInfo && (
+            <Card className="border-sky-200 bg-sky-50/30 shadow-sm rounded-sm mt-3">
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold">Stock & Sales Info - Request #{stockInfo.request_id} ({stockInfo.store_name})</CardTitle></CardHeader>
+              <CardContent>{stockInfo.products?.map((p, i) => (
+                <div key={i} className="mb-3 p-3 bg-white rounded-sm border border-slate-200">
+                  <p className="text-[13px] font-body font-medium text-slate-800">{p.product_name} <span className="text-slate-400 text-[10px]">({p.product_id})</span> — Requested: {p.requested_qty}</p>
+                  <div className="flex gap-4 mt-1 text-[11px] font-body">
+                    <span className="text-sky-700">Sales 30d: {p.sales_30d}</span>
+                    <span className="text-sky-600">Sales 90d: {p.sales_90d}</span>
+                  </div>
+                  {p.store_stock?.length > 0 && (
+                    <div className="mt-1 flex gap-2 flex-wrap">{p.store_stock.map((s, j) => (
+                      <Badge key={j} variant="secondary" className="text-[9px] rounded-sm">{s.store}: {s.stock}</Badge>
+                    ))}</div>
+                  )}
+                  {(!p.store_stock || p.store_stock.length === 0) && <p className="text-[10px] text-red-500 mt-1">No stock in any store</p>}
+                </div>
+              ))}</CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* Purchase Orders Tab */}
+        <TabsContent value="orders">
+          <div className="flex gap-1.5 mb-3">{['all', 'draft', 'approved', 'rejected'].map(s => (
+            <Button key={s} variant={statusFilter === s ? 'default' : 'outline'} size="sm"
+              className={`rounded-sm font-body text-xs capitalize ${statusFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
+              onClick={() => setStatusFilter(s)}>{s}</Button>
+          ))}</div>
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <div className="overflow-auto max-h-[calc(100vh-320px)]">
+              <Table><TableHeader><TableRow className="border-b-2 border-slate-100">
+                {['PO #', 'Supplier', 'Type', 'Store', 'Qty', 'Value', 'Status', 'Fulfillment', 'Actions'].map(h => (
+                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Qty', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                ))}</TableRow></TableHeader>
+                <TableBody>
+                  {orders.length === 0 ? (
+                    <TableRow><TableCell colSpan={9} className="text-center py-12"><FileText className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-xs text-slate-400">No purchase orders</p></TableCell></TableRow>
+                  ) : orders.map(po => (
+                    <TableRow key={po.id} className="hover:bg-slate-50/50">
+                      <TableCell className="font-mono text-[11px] text-sky-700 font-medium">{po.po_number}</TableCell>
+                      <TableCell className="text-[12px]">{po.supplier_name}</TableCell>
+                      <TableCell><Badge variant="secondary" className="text-[9px] rounded-sm">{po.po_type?.replace('_', ' ')}</Badge></TableCell>
+                      <TableCell className="text-[12px]">{po.store_name}</TableCell>
+                      <TableCell className="text-right text-[12px] tabular-nums">{po.total_qty}</TableCell>
+                      <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {po.total_value?.toLocaleString('en-IN')}</TableCell>
+                      <TableCell><Badge className={`text-[9px] rounded-sm ${sBadge(po.status)}`}>{po.status}</Badge></TableCell>
+                      <TableCell><Badge className={`text-[9px] rounded-sm ${fBadge(po.fulfillment_status)}`}>{po.fulfillment_status}</Badge></TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          {po.status === 'draft' && <>
+                            <Button size="sm" variant="outline" className="h-5 w-5 p-0 rounded-sm text-emerald-600" onClick={() => handleAction(po.id, 'approve')}><Check className="w-3 h-3" /></Button>
+                            <Button size="sm" variant="outline" className="h-5 w-5 p-0 rounded-sm text-red-600" onClick={() => handleAction(po.id, 'reject')}><X className="w-3 h-3" /></Button>
+                          </>}
+                          {po.status === 'approved' && po.fulfillment_status !== 'received' && (
+                            <Select value="" onValueChange={v => handleFulfillment(po.id, v)}>
+                              <SelectTrigger className="h-5 w-[65px] text-[9px] rounded-sm px-1"><SelectValue placeholder="Track" /></SelectTrigger>
+                              <SelectContent><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="received">Received</SelectItem><SelectItem value="verified">Verified</SelectItem></SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* Sub-Category Upload Tab */}
+        <TabsContent value="upload">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold flex items-center gap-2"><Upload className="w-4 h-4 text-sky-500" /> Upload PO by Sub-Category</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-[11px] font-body text-slate-500">Excel format: Sub Category, Product Name, Qty, Rate (optional: HO ID). Creates separate POs per sub-category.</p>
+              <div className="flex gap-3">
+                <Input placeholder="Supplier name *" value={uploadSupplier} onChange={e => setUploadSupplier(e.target.value)} className="w-[250px] rounded-sm" />
+                <input type="file" accept=".xlsx,.xls" onChange={handleSubcatUpload} disabled={!uploadSupplier} className="hidden" id="subcat-upload" />
+                <label htmlFor="subcat-upload"><Button asChild className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" disabled={!uploadSupplier}><span><Upload className="w-3.5 h-3.5 mr-1.5" /> Upload</span></Button></label>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Create PO Dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="rounded-sm max-w-2xl max-h-[85vh] overflow-auto">
+          <DialogHeader><DialogTitle className="font-heading">Create Purchase Order</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5"><Label className="font-body text-xs">Supplier *</Label>
+                <Input value={poForm.supplier_name} onChange={e => setPoForm({...poForm, supplier_name: e.target.value})} className="rounded-sm" placeholder="Supplier name" /></div>
+              <div className="space-y-1.5"><Label className="font-body text-xs">Remarks</Label>
+                <Input value={poForm.remarks} onChange={e => setPoForm({...poForm, remarks: e.target.value})} className="rounded-sm" /></div>
+            </div>
+            {/* Search product */}
+            <div ref={sugRef} className="space-y-1.5">
+              <Label className="font-body text-xs">Add Registered Product</Label>
+              <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                <Input placeholder="Search product..." value={poSearch} onChange={e => setPoSearch(e.target.value)} className="pl-9 rounded-sm" autoComplete="off" />
+                {showPoSugg && poSugg.length > 0 && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[150px] overflow-auto">
+                    {poSugg.map(p => (<button key={p.product_id} type="button" className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-50"
+                      onClick={() => addPoProduct(p)}><span className="text-[12px] font-medium">{p.product_name}</span> <span className="text-[10px] text-slate-400">L.Cost: {p.landing_cost}</span></button>))}
+                  </div>)}
+              </div>
+            </div>
+            {/* Manual product */}
+            <div className="flex gap-2 items-end">
+              <div className="flex-1 space-y-1"><Label className="font-body text-[10px] text-slate-400">Non-Registered Product</Label>
+                <Input placeholder="Product name" value={manualName} onChange={e => setManualName(e.target.value)} className="rounded-sm text-sm" /></div>
+              <Input placeholder="Qty" type="number" value={manualQty} onChange={e => setManualQty(e.target.value)} className="w-[70px] rounded-sm text-sm" />
+              <Input placeholder="Cost" type="number" value={manualCost} onChange={e => setManualCost(e.target.value)} className="w-[80px] rounded-sm text-sm" />
+              <Button variant="outline" size="sm" className="rounded-sm text-xs" onClick={addManualProduct} disabled={!manualName}><Plus className="w-3 h-3" /></Button>
+            </div>
+            {/* Items */}
+            {poItems.length > 0 && (
+              <Card className="border-slate-200 rounded-sm">
+                <Table><TableHeader><TableRow className="border-b border-slate-100">
+                  {['Product', 'Registered', 'Qty', 'Cost', 'Value', ''].map(h => (
+                    <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty', 'Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                  ))}</TableRow></TableHeader>
+                  <TableBody>{poItems.map((it, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="text-[12px] font-medium py-1.5">{it.product_name}</TableCell>
+                      <TableCell>{it.is_registered ? <Badge className="text-[8px] rounded-sm bg-emerald-50 text-emerald-700">Yes</Badge> : <Badge className="text-[8px] rounded-sm bg-amber-50 text-amber-700">Manual</Badge>}</TableCell>
+                      <TableCell className="text-right py-1.5"><Input type="number" min={1} value={it.quantity} onChange={e => updatePoItem(i, 'quantity', e.target.value)} className="w-[60px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
+                      <TableCell className="text-right py-1.5"><Input type="number" value={it.landing_cost} onChange={e => updatePoItem(i, 'landing_cost', e.target.value)} className="w-[70px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
+                      <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {(it.quantity * it.landing_cost).toFixed(2)}</TableCell>
+                      <TableCell><Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400" onClick={() => setPoItems(poItems.filter((_, j) => j !== i))}><Trash2 className="w-3 h-3" /></Button></TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </Table>
+                <div className="flex justify-between items-center px-4 py-2 bg-sky-50 border-t border-sky-100">
+                  <span className="text-[12px] font-body text-sky-800">{poItems.length} items</span>
+                  <span className="text-lg font-heading font-bold text-sky-700 tabular-nums">INR {poTotal.toFixed(2)}</span>
+                </div>
+              </Card>
+            )}
+          </div>
+          <DialogFooter>
+            <Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" onClick={handleCreatePO}
+              disabled={saving || !poForm.supplier_name || poItems.length === 0}>
+              {saving ? 'Creating...' : `Create PO (INR ${poTotal.toFixed(2)})`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

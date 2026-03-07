@@ -31,6 +31,8 @@ const navItems = [
   { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['ADMIN', 'HO_STAFF'], svc: 'aging' },
   { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'transfers' },
   { label: 'Purchases', path: '/purchases', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'purchases' },
+  { label: 'Store Request', path: '/store-request', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'purchases' },
+  { label: 'PO Manager', path: '/po-management', icon: FileUp, roles: ['ADMIN', 'HO_STAFF'], svc: 'purchases' },
   { label: 'Purchase Upload', path: '/purchase-report', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF'], svc: 'purchase_upload' },
   { label: 'CRM', path: '/crm', icon: Heart, roles: ['ADMIN', 'HO_STAFF', 'STORE_STAFF', 'CRM_STAFF'], svc: 'crm' },
   { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'CRM_STAFF'], svc: 'sales_upload' },

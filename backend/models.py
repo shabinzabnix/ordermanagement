@@ -308,3 +308,66 @@ class PurchaseRecord(Base):
     total_amount = Column(Float, default=0)
     upload_batch_id = Column(String(100))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PurchaseOrder(Base):
+    __tablename__ = "purchase_orders"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    po_number = Column(String(50), unique=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    supplier_name = Column(String(500))
+    po_type = Column(String(30), default="manual")
+    sub_category = Column(String(255), nullable=True)
+    status = Column(String(30), default="draft")
+    total_qty = Column(Float, default=0)
+    total_value = Column(Float, default=0)
+    remarks = Column(Text, nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    fulfillment_status = Column(String(30), default="pending")
+    received_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PurchaseOrderItem(Base):
+    __tablename__ = "purchase_order_items"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False, index=True)
+    product_id = Column(String(100), nullable=True)
+    product_name = Column(String(500), nullable=False)
+    is_registered = Column(Boolean, default=True)
+    quantity = Column(Float, default=0)
+    landing_cost = Column(Float, default=0)
+    estimated_value = Column(Float, default=0)
+
+
+class StoreRequest(Base):
+    __tablename__ = "store_requests"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    request_reason = Column(String(50), default="stock_refill")
+    customer_name = Column(String(255), nullable=True)
+    customer_mobile = Column(String(50), nullable=True)
+    status = Column(String(30), default="pending")
+    total_items = Column(Integer, default=0)
+    total_value = Column(Float, default=0)
+    ho_remarks = Column(Text, nullable=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=True)
+    requested_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class StoreRequestItem(Base):
+    __tablename__ = "store_request_items"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(Integer, ForeignKey("store_requests.id"), nullable=False, index=True)
+    product_id = Column(String(100), nullable=True)
+    product_name = Column(String(500), nullable=False)
+    quantity = Column(Float, default=0)
+    landing_cost = Column(Float, default=0)
+    estimated_value = Column(Float, default=0)
+    current_store_stock = Column(Float, default=0)
+    pending_orders = Column(Integer, default=0)
