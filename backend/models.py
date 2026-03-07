@@ -373,6 +373,8 @@ class StoreRequestItem(Base):
     current_store_stock = Column(Float, default=0)
     pending_orders = Column(Integer, default=0)
     has_prescription = Column(Boolean, default=False)
+    doctor_name = Column(String(255), nullable=True)
+    clinic_location = Column(String(500), nullable=True)
 
 class POComment(Base):
     __tablename__ = "po_comments"
