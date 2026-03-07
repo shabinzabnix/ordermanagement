@@ -632,6 +632,110 @@ async def enhanced_store_performance(
     return {"stores": results}
 
 
+# ─── Top Selling Products ───────────────────────────────────
+
+@router.get("/intel/top-selling")
+async def top_selling_products(
+    store_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    search: str = Query(None),
+    sort_by: str = Query("revenue"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc)
+    d_from = now - timedelta(days=30)
+    d_to = now + timedelta(days=1)
+    if date_from:
+        try: d_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+        except: pass
+    if date_to:
+        try: d_to = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
+        except: pass
+
+    # Store staff sees only their store
+    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+        store_id = user["store_id"]
+
+    from sqlalchemy import cast, Date
+    base_filter = and_(SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to)
+    if store_id:
+        base_filter = and_(base_filter, SalesRecord.store_id == store_id)
+
+    query = (
+        select(
+            SalesRecord.product_name,
+            SalesRecord.product_id,
+            func.sum(SalesRecord.quantity).label("total_qty"),
+            func.count(SalesRecord.id).label("invoice_count"),
+            func.sum(SalesRecord.total_amount).label("total_amount"),
+            func.count(func.distinct(SalesRecord.store_id)).label("store_count"),
+        )
+        .where(base_filter)
+        .group_by(SalesRecord.product_name, SalesRecord.product_id)
+    )
+
+    if search:
+        query = query.having(SalesRecord.product_name.ilike(f"%{search}%"))
+
+    if sort_by == "qty":
+        query = query.order_by(func.sum(SalesRecord.quantity).desc())
+    elif sort_by == "invoices":
+        query = query.order_by(func.count(SalesRecord.id).desc())
+    else:
+        query = query.order_by(func.sum(SalesRecord.total_amount).desc())
+
+    # Count total
+    count_q = select(func.count()).select_from(
+        select(SalesRecord.product_name).where(base_filter).group_by(SalesRecord.product_name, SalesRecord.product_id).subquery()
+    )
+    total = (await db.execute(count_q)).scalar() or 0
+
+    rows = (await db.execute(query.offset((page - 1) * limit).limit(limit))).all()
+
+    products = []
+    for r in rows:
+        qty = float(r[2] or 0)
+        cnt = int(r[3] or 0)
+        amt = float(r[4] or 0)
+        products.append({
+            "product_name": r[0], "product_id": r[1] or "",
+            "total_qty": round(qty, 0), "invoice_count": cnt,
+            "total_amount": round(amt, 2), "store_count": int(r[5] or 0),
+            "avg_price": round(amt / qty, 2) if qty > 0 else 0,
+        })
+
+    return {"products": products, "total": total, "page": page, "limit": limit}
+
+
+@router.get("/intel/export-top-selling")
+async def export_top_selling(
+    store_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    sort_by: str = Query("revenue"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    from routers.phase2_routes import _excel
+    data = await top_selling_products(store_id=store_id, date_from=date_from, date_to=date_to,
+        sort_by=sort_by, page=1, limit=5000, db=db, user=user)
+    rows = [{"rank": i+1, "product": p["product_name"], "product_id": p["product_id"],
+             "qty": p["total_qty"], "invoices": p["invoice_count"],
+             "revenue": p["total_amount"], "avg_price": p["avg_price"], "stores": p["store_count"]}
+            for i, p in enumerate(data["products"])]
+    headers = [
+        {"label": "Rank", "key": "rank"}, {"label": "Product", "key": "product"},
+        {"label": "Product ID", "key": "product_id"}, {"label": "Qty Sold", "key": "qty"},
+        {"label": "Invoices", "key": "invoices"}, {"label": "Revenue", "key": "revenue"},
+        {"label": "Avg Price", "key": "avg_price"}, {"label": "Stores", "key": "stores"},
+    ]
+    return _excel(rows, headers, "top_selling_products.xlsx")
+
+
 # ─── Store-wise Dashboard ──────────────────────────────────
 
 @router.get("/intel/store-dashboard/{store_id}")

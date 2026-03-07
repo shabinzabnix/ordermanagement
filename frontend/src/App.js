@@ -30,6 +30,7 @@ import SupplierIntelPage from '@/pages/SupplierIntelPage';
 import StoreDashboardPage from '@/pages/StoreDashboardPage';
 import PurchaseHistoryPage from '@/pages/PurchaseHistoryPage';
 import StoreCustomerListPage from '@/pages/StoreCustomerListPage';
+import TopSellingPage from '@/pages/TopSellingPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -63,6 +64,7 @@ function AppRoutes() {
       <Route path="/crm-login" element={user ? <Navigate to="/crm" replace /> : <CRMLoginPage />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/store-dashboard" element={<ProtectedRoute><StoreDashboardPage /></ProtectedRoute>} />
+      <Route path="/top-selling" element={<ProtectedRoute><TopSellingPage /></ProtectedRoute>} />
       <Route path="/intel" element={<ProtectedRoute><IntelligenceDashboardPage /></ProtectedRoute>} />
       <Route path="/intel/forecast" element={<ProtectedRoute><DemandForecastPage /></ProtectedRoute>} />
       <Route path="/intel/expiry" element={<ProtectedRoute><ExpiryRiskPage /></ProtectedRoute>} />
