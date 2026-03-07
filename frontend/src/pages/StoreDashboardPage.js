@@ -8,7 +8,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Skeleton } from '../components/ui/skeleton';
-import { Building2, Warehouse, TrendingUp, Users, Package, Calendar } from 'lucide-react';
+import { Building2, Warehouse, TrendingUp, Users, Package, Calendar, ShoppingBag, Truck } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function StoreDashboardPage() {
@@ -61,8 +61,8 @@ export default function StoreDashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow className="border-b-2 border-slate-100">
-                  {['Store', 'Code', 'Stock Value', 'Stock Units', 'Sales Value (30d)', 'Invoices (30d)'].map(h => (
-                    <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['Stock Value','Stock Units','Sales Value (30d)','Invoices (30d)'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                  {['Store', 'Code', 'Stock Value', 'Stock Units', 'Sales (30d)', 'Invoices', 'Purchase (30d)'].map(h => (
+                    <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['Stock Value','Stock Units','Sales (30d)','Invoices','Purchase (30d)'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -75,6 +75,7 @@ export default function StoreDashboardPage() {
                     <TableCell className="text-right text-[12px] tabular-nums">{s.stock_units.toLocaleString()}</TableCell>
                     <TableCell className="text-right text-[12px] tabular-nums font-medium text-emerald-700">INR {s.sales_value.toLocaleString('en-IN')}</TableCell>
                     <TableCell className="text-right text-[12px] tabular-nums">{s.sales_count}</TableCell>
+                    <TableCell className="text-right text-[12px] tabular-nums font-medium text-sky-700">INR {(s.purchase_value || 0).toLocaleString('en-IN')}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -108,11 +109,12 @@ export default function StoreDashboardPage() {
       {/* Selected Store Detail */}
       {storeData && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             {[
               { l: 'Stock Value', v: `INR ${storeData.stock.value.toLocaleString('en-IN')}`, icon: Warehouse, bg: 'bg-sky-50', fg: 'text-sky-600' },
               { l: 'Stock Units', v: storeData.stock.units.toLocaleString(), icon: Package, bg: 'bg-blue-50', fg: 'text-blue-600' },
               { l: 'Sales Value', v: `INR ${storeData.sales.value.toLocaleString('en-IN')}`, icon: TrendingUp, bg: 'bg-emerald-50', fg: 'text-emerald-600' },
+              { l: 'Purchase Value', v: `INR ${(storeData.purchases?.value || 0).toLocaleString('en-IN')}`, icon: ShoppingBag, bg: 'bg-rose-50', fg: 'text-rose-600' },
               { l: 'Invoices', v: storeData.sales.count, icon: Calendar, bg: 'bg-amber-50', fg: 'text-amber-600' },
               { l: 'Customers', v: storeData.customer_count, icon: Users, bg: 'bg-violet-50', fg: 'text-violet-600' },
             ].map(k => (
@@ -167,6 +169,34 @@ export default function StoreDashboardPage() {
                         <TableCell className="text-right text-[12px] tabular-nums font-medium">{p.qty}</TableCell>
                         <TableCell className="text-right text-[12px] tabular-nums text-slate-500">{p.count}</TableCell>
                         <TableCell className="text-right text-[12px] tabular-nums font-medium text-emerald-700">INR {p.amount.toLocaleString('en-IN')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+          )}
+
+          {/* Top Suppliers */}
+          {storeData.top_suppliers?.length > 0 && (
+            <Card className="border-slate-200 shadow-sm rounded-sm">
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold flex items-center gap-2"><Truck className="w-4 h-4 text-slate-400" /> Top Suppliers (Purchases)</CardTitle></CardHeader>
+              <div className="overflow-auto max-h-[300px]">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-white z-10">
+                    <TableRow className="border-b-2 border-slate-100">
+                      {['#', 'Supplier', 'Qty Purchased', 'Amount'].map(h => (
+                        <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['Qty Purchased', 'Amount'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {storeData.top_suppliers.map((s, i) => (
+                      <TableRow key={i} className="hover:bg-slate-50/50">
+                        <TableCell className="text-[11px] text-slate-400 font-medium">{i + 1}</TableCell>
+                        <TableCell className="font-body text-[13px] font-medium text-slate-800">{s.supplier}</TableCell>
+                        <TableCell className="text-right text-[12px] tabular-nums">{s.qty.toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-[12px] tabular-nums font-medium text-sky-700">INR {s.amount.toLocaleString('en-IN')}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

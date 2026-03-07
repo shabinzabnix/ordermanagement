@@ -292,3 +292,18 @@ class SalesRecord(Base):
     medication_updated = Column(Boolean, default=False)
     upload_batch_id = Column(String(100))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PurchaseRecord(Base):
+    __tablename__ = "purchase_records"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    purchase_date = Column(DateTime(timezone=True), index=True)
+    entry_number = Column(String(100))
+    supplier_name = Column(String(500), index=True)
+    product_id = Column(String(100), index=True)
+    product_name = Column(String(500))
+    quantity = Column(Float, default=0)
+    total_amount = Column(Float, default=0)
+    upload_batch_id = Column(String(100))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

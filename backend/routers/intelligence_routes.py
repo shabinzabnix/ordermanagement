@@ -1,15 +1,18 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from database import get_db
 from models import (
     Product, Store, HOStockBatch, StoreStockBatch,
-    InterStoreTransfer, PurchaseRequest, SalesRecord,
+    InterStoreTransfer, PurchaseRequest, SalesRecord, PurchaseRecord,
     CRMCustomer, MedicinePurchase, CRMTask, CRMCallLog,
     TransferStatus, PurchaseStatus, CustomerType,
 )
 from auth import get_current_user, require_roles
 from datetime import datetime, timezone, timedelta
+import pandas as pd
+from io import BytesIO
+import uuid
 
 router = APIRouter()
 
@@ -125,6 +128,8 @@ async def intel_dashboard(
         "operations": {
             "pending_transfers": pending_transfers, "pending_purchases": pending_purchases,
             "redistribution_suggestions": redistribution_count,
+            "total_purchase_value": round(float((await db.execute(select(func.sum(PurchaseRecord.total_amount)))).scalar() or 0), 2),
+            "total_sales_value": round(float((await db.execute(select(func.sum(SalesRecord.total_amount)))).scalar() or 0), 2),
         },
     }
 
@@ -853,12 +858,34 @@ async def store_dashboard(
         )
     )).scalar() or 0
 
+    # Purchase data from PurchaseRecord
+    total_purchase_amount = float((await db.execute(
+        select(func.sum(PurchaseRecord.total_amount)).where(and_(
+            PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to,
+        ))
+    )).scalar() or 0)
+    total_purchase_count = (await db.execute(
+        select(func.count(func.distinct(PurchaseRecord.entry_number))).where(and_(
+            PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to,
+        ))
+    )).scalar() or 0
+
+    # Top suppliers by purchase amount
+    top_suppliers_q = (await db.execute(
+        select(PurchaseRecord.supplier_name, func.sum(PurchaseRecord.total_amount).label("amt"), func.sum(PurchaseRecord.quantity).label("qty"))
+        .where(and_(PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to))
+        .group_by(PurchaseRecord.supplier_name).order_by(func.sum(PurchaseRecord.total_amount).desc()).limit(20)
+    )).all()
+    top_suppliers = [{"supplier": str(r[0]), "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0)} for r in top_suppliers_q]
+
     return {
         "store": {"id": store.id, "name": store.store_name, "code": store.store_code, "location": store.location},
         "stock": {"value": round(stock_value, 2), "units": round(total_stock_units, 1), "sku_count": total_sku},
         "sales": {"count": total_sales_count, "value": round(total_sales_value, 2), "period_from": d_from.isoformat(), "period_to": d_to.isoformat()},
+        "purchases": {"count": total_purchase_count, "value": round(total_purchase_amount, 2)},
         "daily_sales": daily_sales,
         "top_products": top_products,
+        "top_suppliers": top_suppliers,
         "customer_count": customer_count,
     }
 
@@ -888,12 +915,294 @@ async def store_dashboard_summary(
             select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == s.id)
         )).scalar() or 0)
 
-        if stock_value > 0 or sales_value > 0:
+        purchase_value = float((await db.execute(
+            select(func.sum(PurchaseRecord.total_amount)).where(and_(PurchaseRecord.store_id == s.id, PurchaseRecord.purchase_date >= d30))
+        )).scalar() or 0)
+
+        if stock_value > 0 or sales_value > 0 or purchase_value > 0:
             result.append({
                 "store_id": s.id, "store_name": s.store_name, "store_code": s.store_code,
                 "stock_value": round(stock_value, 2), "stock_units": round(stock_units, 1),
                 "sales_value": round(sales_value, 2), "sales_count": sales_count,
+                "purchase_value": round(purchase_value, 2),
             })
 
     result.sort(key=lambda x: -x["sales_value"])
     return {"stores": result}
+
+
+# ─── Purchase Report Upload ────────────────────────────────
+
+PURCHASE_COLUMNS = {
+    "purchase date": "purchase_date", "date": "purchase_date", "invoice date": "purchase_date",
+    "entry no": "entry_number", "entry number": "entry_number", "invoice no": "entry_number", "invoice number": "entry_number", "bill no": "entry_number",
+    "supplier name": "supplier_name", "supplier": "supplier_name", "party name": "supplier_name", "company": "supplier_name",
+    "product name": "product_name", "name": "product_name", "product": "product_name", "item name": "product_name",
+    "ho id": "product_id", "product id": "product_id", "item code": "product_id",
+    "quantity": "quantity", "qty": "quantity",
+    "total": "total_amount", "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount", "net": "total_amount",
+}
+PURCHASE_REQUIRED = ["product_name", "supplier_name"]
+
+
+@router.post("/intel/purchase-upload")
+async def upload_purchase_report(
+    store_id: int = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "Only Excel files accepted")
+    content = await file.read()
+
+    # Auto-detect header row
+    df = None
+    for skip in [0, 1, 2, 3]:
+        try:
+            test_df = pd.read_excel(BytesIO(content), header=skip)
+            if test_df.empty:
+                continue
+            cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
+            if sum(1 for c in cols_lower if c in PURCHASE_COLUMNS) >= 3:
+                df = test_df
+                break
+        except Exception:
+            continue
+    if df is None:
+        try:
+            df = pd.read_excel(BytesIO(content))
+        except Exception as e:
+            raise HTTPException(400, f"Failed to read Excel: {str(e)}")
+    if df.empty:
+        raise HTTPException(400, "Excel file is empty")
+
+    # Map columns
+    original_cols = list(df.columns)
+    df.columns = [str(col).strip().lower().replace('_', ' ') for col in df.columns]
+    mapped = {}
+    for col in df.columns:
+        if col in PURCHASE_COLUMNS:
+            mapped[col] = PURCHASE_COLUMNS[col]
+    missing = [f for f in PURCHASE_REQUIRED if f not in set(mapped.values())]
+    if missing:
+        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your columns: {original_cols}")
+    df = df.rename(columns=mapped)
+
+    store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
+    if not store:
+        raise HTTPException(400, f"Store ID {store_id} does not exist")
+
+    # Load existing entries for dedup
+    existing = set()
+    for r in (await db.execute(select(PurchaseRecord.entry_number, PurchaseRecord.product_name).where(PurchaseRecord.store_id == store_id))).all():
+        if r[0]:
+            existing.add((str(r[0]).strip(), str(r[1] or "").strip()))
+
+    batch_id = str(uuid.uuid4())[:12]
+    success, skipped, failed = 0, 0, 0
+    records = []
+
+    for idx, row in df.iterrows():
+        try:
+            product = str(row.get("product_name", "")).strip()
+            supplier = str(row.get("supplier_name", "")).strip()
+            if not product or product == "nan" or not supplier or supplier == "nan":
+                failed += 1
+                continue
+
+            entry_num = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None
+            if entry_num in ("", "nan", "None"):
+                entry_num = None
+            if entry_num and (entry_num, product) in existing:
+                skipped += 1
+                continue
+
+            # Parse date
+            p_date = None
+            raw_date = row.get("purchase_date")
+            if pd.notna(raw_date):
+                try:
+                    if isinstance(raw_date, str):
+                        for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y"]:
+                            try:
+                                p_date = datetime.strptime(raw_date.strip(), fmt).replace(tzinfo=timezone.utc)
+                                break
+                            except ValueError:
+                                continue
+                    else:
+                        p_date = pd.Timestamp(raw_date).to_pydatetime().replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
+
+            pid = str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None
+            if pid and pid.endswith(".0"):
+                pid = pid[:-2]
+            if pid in ("", "nan", "None"):
+                pid = None
+
+            records.append(PurchaseRecord(
+                store_id=store_id, purchase_date=p_date or datetime.now(timezone.utc),
+                entry_number=entry_num, supplier_name=supplier,
+                product_id=pid, product_name=product,
+                quantity=float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0,
+                total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
+                upload_batch_id=batch_id,
+            ))
+            success += 1
+        except Exception as e:
+            failed += 1
+
+    for r in records:
+        db.add(r)
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(500, f"Failed to save: {str(e)[:200]}")
+
+    return {"message": "Purchase report uploaded", "total": len(df), "new_records": success, "skipped_duplicate": skipped, "failed": failed}
+
+
+@router.get("/intel/purchase-records")
+async def list_purchase_records(
+    store_id: int = Query(None),
+    supplier: str = Query(None),
+    search: str = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=99999),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc)
+    query = select(PurchaseRecord)
+    if store_id:
+        query = query.where(PurchaseRecord.store_id == store_id)
+    if supplier:
+        query = query.where(PurchaseRecord.supplier_name.ilike(f"%{supplier}%"))
+    if search:
+        query = query.where(PurchaseRecord.product_name.ilike(f"%{search}%"))
+    if date_from:
+        try:
+            query = query.where(PurchaseRecord.purchase_date >= datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc))
+        except: pass
+    if date_to:
+        try:
+            query = query.where(PurchaseRecord.purchase_date < datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1))
+        except: pass
+
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
+    records = (await db.execute(query.order_by(PurchaseRecord.purchase_date.desc()).offset((page - 1) * limit).limit(limit))).scalars().all()
+
+    sids = set(r.store_id for r in records)
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    return {
+        "records": [{
+            "id": r.id, "store_id": r.store_id, "store_name": smap.get(r.store_id, ""),
+            "purchase_date": r.purchase_date.isoformat() if r.purchase_date else None,
+            "entry_number": r.entry_number, "supplier_name": r.supplier_name,
+            "product_id": r.product_id, "product_name": r.product_name,
+            "quantity": r.quantity or 0, "total_amount": round(float(r.total_amount or 0), 2),
+        } for r in records],
+        "total": total, "page": page, "limit": limit,
+    }
+
+
+@router.get("/intel/purchase-analytics")
+async def purchase_analytics(
+    store_id: int = Query(None),
+    days: int = Query(30),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """Purchase analytics: supplier-wise, product-wise, store-wise spending."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    base = and_(PurchaseRecord.purchase_date >= cutoff)
+    if store_id:
+        base = and_(base, PurchaseRecord.store_id == store_id)
+
+    # Totals
+    total_amount = float((await db.execute(select(func.sum(PurchaseRecord.total_amount)).where(base))).scalar() or 0)
+    total_qty = float((await db.execute(select(func.sum(PurchaseRecord.quantity)).where(base))).scalar() or 0)
+    total_invoices = (await db.execute(select(func.count(func.distinct(PurchaseRecord.entry_number))).where(base))).scalar() or 0
+
+    # Supplier-wise
+    sup_q = (await db.execute(
+        select(PurchaseRecord.supplier_name, func.sum(PurchaseRecord.total_amount).label("amt"),
+               func.sum(PurchaseRecord.quantity).label("qty"), func.count(PurchaseRecord.id).label("cnt"))
+        .where(base).group_by(PurchaseRecord.supplier_name).order_by(func.sum(PurchaseRecord.total_amount).desc()).limit(50)
+    )).all()
+    suppliers = [{"supplier": r[0], "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0), "records": int(r[3] or 0)} for r in sup_q]
+
+    # Product-wise top purchases
+    prod_q = (await db.execute(
+        select(PurchaseRecord.product_name, PurchaseRecord.product_id,
+               func.sum(PurchaseRecord.total_amount).label("amt"), func.sum(PurchaseRecord.quantity).label("qty"))
+        .where(base).group_by(PurchaseRecord.product_name, PurchaseRecord.product_id)
+        .order_by(func.sum(PurchaseRecord.total_amount).desc()).limit(50)
+    )).all()
+    products = [{"product": r[0], "product_id": r[1] or "", "amount": round(float(r[2] or 0), 2), "qty": round(float(r[3] or 0), 0)} for r in prod_q]
+
+    # Store-wise
+    store_q = (await db.execute(
+        select(PurchaseRecord.store_id, func.sum(PurchaseRecord.total_amount).label("amt"),
+               func.sum(PurchaseRecord.quantity).label("qty"))
+        .where(PurchaseRecord.purchase_date >= cutoff)
+        .group_by(PurchaseRecord.store_id).order_by(func.sum(PurchaseRecord.total_amount).desc())
+    )).all()
+    store_spending = [{"store_id": r[0], "store_name": stores_map.get(r[0], ""), "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0)} for r in store_q]
+
+    # Sales vs Purchase comparison per product (matching by product_id)
+    sales_q = (await db.execute(
+        select(SalesRecord.product_id, func.sum(SalesRecord.quantity).label("sq"), func.sum(SalesRecord.total_amount).label("sa"))
+        .where(SalesRecord.invoice_date >= cutoff)
+        .group_by(SalesRecord.product_id)
+    )).all()
+    sales_map = {r[0]: {"qty": float(r[1] or 0), "amt": float(r[2] or 0)} for r in sales_q if r[0]}
+
+    comparison = []
+    for p in products[:30]:
+        pid = p["product_id"]
+        s = sales_map.get(pid, {"qty": 0, "amt": 0})
+        comparison.append({
+            "product": p["product"], "product_id": pid,
+            "purchase_qty": p["qty"], "purchase_amt": p["amount"],
+            "sales_qty": round(s["qty"], 0), "sales_amt": round(s["amt"], 2),
+        })
+
+    return {
+        "total_purchase_amount": round(total_amount, 2),
+        "total_purchase_qty": round(total_qty, 0),
+        "total_invoices": total_invoices,
+        "period_days": days,
+        "suppliers": suppliers,
+        "top_products": products,
+        "store_spending": store_spending,
+        "purchase_vs_sales": comparison,
+    }
+
+
+@router.get("/intel/export-purchase-records")
+async def export_purchase_records(
+    store_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    from routers.phase2_routes import _excel
+    data = await list_purchase_records(store_id=store_id, date_from=date_from, date_to=date_to, page=1, limit=99999, db=db, user=user)
+    rows = [{"date": r["purchase_date"][:10] if r["purchase_date"] else "", "entry": r["entry_number"] or "",
+             "store": r["store_name"], "supplier": r["supplier_name"], "product_id": r["product_id"] or "",
+             "product": r["product_name"], "qty": r["quantity"], "amount": r["total_amount"]}
+            for r in data["records"]]
+    headers = [{"label": "Date", "key": "date"}, {"label": "Entry No", "key": "entry"}, {"label": "Store", "key": "store"},
+               {"label": "Supplier", "key": "supplier"}, {"label": "Product ID", "key": "product_id"},
+               {"label": "Product", "key": "product"}, {"label": "Qty", "key": "qty"}, {"label": "Amount", "key": "amount"}]
+    return _excel(rows, headers, "purchase_records.xlsx")
