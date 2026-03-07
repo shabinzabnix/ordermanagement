@@ -104,7 +104,9 @@ export default function StoreRequestPage() {
   const reasonBadge = (r) => r === 'emergency_purchase' ? 'bg-red-50 text-red-700' : r === 'stock_refill' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700';
   const sBadge = (s) => ({ approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700' }[s] || 'bg-amber-50 text-amber-700');
 
-  const filteredItems = reviewFilter === 'all' ? allItems : allItems.filter(i => i.item_status === reviewFilter);
+  const filteredItems = reviewFilter === 'all' ? allItems : allItems.filter(i =>
+    i.item_status === reviewFilter || i.fulfillment_status === reviewFilter
+  );
   // Non-categorized items (no po_category) for normal requests view
   const normalRequests = requests;
 
@@ -113,22 +115,21 @@ export default function StoreRequestPage() {
       <div><h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Store Requests</h2>
         <p className="text-sm font-body text-slate-500 mt-0.5">{isHO ? 'Review and manage all store requests' : 'Request products from Head Office'}</p></div>
 
-      <Tabs defaultValue={isHO ? "review" : "new"}>
+      <Tabs defaultValue={isHO ? "requests" : "new"}>
         <TabsList className="rounded-sm">
           <TabsTrigger value="new" className="rounded-sm text-xs font-body">New Request</TabsTrigger>
-          <TabsTrigger value="review" className="rounded-sm text-xs font-body">Product Review ({allItems.length})</TabsTrigger>
-          <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Requests ({requests.length})</TabsTrigger>
+          <TabsTrigger value="requests" className="rounded-sm text-xs font-body">Requests ({allItems.length})</TabsTrigger>
         </TabsList>
 
-        {/* Product Review - Individual items with actions */}
-        <TabsContent value="review">
-            <div className="flex gap-1.5 mb-3">
-              {['all', 'pending', 'approved', 'ordered', 'rejected'].map(s => (
-                <Button key={s} variant={reviewFilter === s ? 'default' : 'outline'} size="sm"
-                  className={`rounded-sm font-body text-xs capitalize ${reviewFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
-                  onClick={() => setReviewFilter(s)}>{s}</Button>
-              ))}
-            </div>
+        {/* Requests - Individual Products */}
+        <TabsContent value="requests">
+          <div className="flex gap-1.5 mb-3">
+            {['all', 'pending', 'approved', 'rejected', 'order_placed', 'dispatched', 'received'].map(s => (
+              <Button key={s} variant={reviewFilter === s ? 'default' : 'outline'} size="sm"
+                className={`rounded-sm font-body text-xs capitalize ${reviewFilter === s ? 'bg-sky-500 hover:bg-sky-600' : ''}`}
+                onClick={() => setReviewFilter(s)}>{s.replace('_', ' ')}</Button>
+            ))}
+          </div>
             <div className="space-y-2">
               {filteredItems.length === 0 ? (
                 <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><Package className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No items</p></CardContent></Card>
@@ -180,139 +181,9 @@ export default function StoreRequestPage() {
                 </Card>
               ))}
             </div>
-          </TabsContent>
-
-        {/* Requests List - Individual Products */}
-        <TabsContent value="requests">
-          <div className="space-y-3">
-            {allItems.length === 0 ? (
-              <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><ShoppingCart className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No requests</p></CardContent></Card>
-            ) : allItems.map(it => (
-              <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm overflow-hidden ${
-                it.item_status === 'approved' ? 'border-l-4 border-l-emerald-500' :
-                it.item_status === 'ordered' ? 'border-l-4 border-l-sky-500' :
-                it.item_status === 'rejected' ? 'border-l-4 border-l-red-500' :
-                'border-l-4 border-l-amber-400'}`}>
-                <CardContent className="p-0">
-                  {/* Top Bar: Product Name + Status */}
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[14px] font-heading font-bold text-slate-900 truncate">{it.product_name}</span>
-                      <span className="font-mono text-[10px] text-slate-400 shrink-0">{it.product_id}</span>
-                      {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm shrink-0">{it.product_info.sub_category}</Badge>}
-                      {it.po_category && <Badge className={`text-[8px] rounded-sm shrink-0 ${{
-                        'BRAND-RX':'bg-blue-100 text-blue-700','GEN-RX':'bg-violet-100 text-violet-700','OTC':'bg-emerald-100 text-emerald-700','OTX':'bg-amber-100 text-amber-700',
-                      }[it.po_category]||'bg-slate-100'}`}>{it.po_category}</Badge>}
-                    </div>
-                    <Badge className={`text-[10px] rounded-sm px-2 py-0.5 font-medium ${sBadge(it.item_status)}`}>{it.item_status?.toUpperCase()}</Badge>
-                  </div>
-
-                  {/* Info Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-0 border-b border-slate-100">
-                    {[
-                      { l: 'Store', v: it.store_name },
-                      { l: 'Qty Requested', v: it.quantity },
-                      { l: 'L.Cost', v: `INR ${(it.landing_cost||0).toFixed(2)}` },
-                      { l: 'Est. Value', v: `INR ${(it.quantity*(it.landing_cost||0)).toFixed(2)}` },
-                    ].map(d => (
-                      <div key={d.l} className="px-4 py-2 border-r border-slate-100 last:border-r-0">
-                        <p className="text-[9px] font-body text-slate-400 uppercase">{d.l}</p>
-                        <p className="text-[13px] font-heading font-semibold text-slate-800">{d.v}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="px-4 py-2.5 space-y-2.5">
-                    {/* Extra Info */}
-                    <div className="flex gap-4 text-[11px] font-body text-slate-500 flex-wrap">
-                      <span>Sales 30d: <b className="text-slate-700">{it.sales_30d || 0}</b></span>
-                      <span>Reason: <Badge className={`text-[8px] rounded-sm ${reasonBadge(it.request_reason)}`}>{it.request_reason?.replace('_',' ')}</Badge></span>
-                      {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name}</b> ({it.customer_mobile})</span>}
-                      {it.tat_type && <span>TAT: <b className="text-sky-700">{it.tat_type === 'same_day' ? 'Same Day' : it.tat_type === 'next_day' ? 'Next Day' : `${it.tat_days} days`}</b></span>}
-                      {it.selected_supplier && <span>Supplier: <b className="text-emerald-700">{it.selected_supplier}</b></span>}
-                      {it.fulfillment_status && <span>Tracking: <Badge className={`text-[8px] rounded-sm ${it.fulfillment_status === 'received' ? 'bg-emerald-100 text-emerald-700' : it.fulfillment_status === 'dispatched' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{it.fulfillment_status.replace('_', ' ')}</Badge></span>}
-                    </div>
-
-                    {/* Stock Row */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-body text-slate-400 font-medium">STOCK:</span>
-                      {it.store_stock?.length > 0
-                        ? it.store_stock.map((s,j) => <Badge key={j} className="text-[9px] rounded-sm bg-sky-50 text-sky-700 px-1.5">{s.store}: {s.stock}</Badge>)
-                        : <Badge className="text-[9px] rounded-sm bg-red-50 text-red-600">No stock anywhere</Badge>}
-                    </div>
-
-                    {/* HO Actions */}
-                    {isHO && (
-                      <div className="flex flex-col gap-2.5 pt-2 border-t border-slate-100">
-                        {/* Supplier Selection */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-body text-slate-500 font-medium w-[60px] shrink-0">Supplier:</span>
-                          {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
-                            <Button key={type} variant="outline" size="sm"
-                              className={`h-6 px-2.5 rounded-sm text-[10px] transition-all ${it.selected_supplier===name ? 'bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600' : 'hover:border-sky-300'}`}
-                              onClick={() => updateItem(it.id, name)}>
-                              {name} <span className={`ml-1 ${it.selected_supplier===name ? 'text-emerald-100' : 'text-slate-400'}`}>({type})</span>
-                            </Button>
-                          ))}
-                        </div>
-
-                        {/* TAT Selection */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-body text-slate-500 font-medium w-[60px] shrink-0">TAT:</span>
-                          {['same_day', 'next_day'].map(t => (
-                            <Button key={t} size="sm" variant="outline"
-                              className={`h-6 px-2.5 rounded-sm text-[10px] ${it.tat_type===t ? 'bg-sky-500 text-white border-sky-500' : ''}`}
-                              onClick={() => { api.put('/po/purchase-review/update', { item_ids: [it.id], tat_type: t, tat_days: t === 'same_day' ? 0 : 1 }).then(() => loadData()); }}>
-                              {t === 'same_day' ? 'Same Day' : 'Next Day'}
-                            </Button>
-                          ))}
-                          <Input type="number" placeholder="days" className="w-[55px] h-6 text-[10px] rounded-sm text-center"
-                            defaultValue={it.tat_days > 1 ? it.tat_days : ''} onBlur={e => {const v=parseInt(e.target.value);if(v>1) api.put('/po/purchase-review/update', { item_ids: [it.id], tat_type: 'days', tat_days: v }).then(() => loadData());}} />
-                          <span className="text-[10px] text-slate-400">days</span>
-                          {it.tat_type && <Badge className="text-[9px] rounded-sm bg-sky-50 text-sky-700">{it.tat_type === 'same_day' ? 'Same Day' : it.tat_type === 'next_day' ? 'Next Day' : `${it.tat_days}d`}</Badge>}
-                        </div>
-
-                        {/* Communication */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-body text-slate-500 font-medium w-[60px] shrink-0">Remark:</span>
-                          <Input placeholder="Add communication / remark..." className="flex-1 h-6 text-[10px] rounded-sm"
-                            defaultValue={it.ho_remarks || ''} onBlur={e => { if (e.target.value) api.put('/po/purchase-review/update', { item_ids: [it.id], ho_remarks: e.target.value }).then(() => loadData()); }} />
-                        </div>
-                        {it.ho_remarks && <p className="text-[10px] font-body text-violet-600 italic ml-[68px]">{it.ho_remarks}</p>}
-
-                        {/* Status + Tracking */}
-                        <div className="flex items-center gap-2 bg-slate-50 rounded-sm p-2">
-                          <span className="text-[10px] font-body text-slate-500 font-medium">Status:</span>
-                          <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='approved'?'bg-emerald-500 text-white border-emerald-500':''}`}
-                            onClick={() => updateItem(it.id, null, 'approved')}>Approve</Button>
-                          <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='rejected'?'bg-red-500 text-white border-red-500':''}`}
-                            onClick={() => updateItem(it.id, null, 'rejected')}>Reject</Button>
-
-                          {/* Tracking after approval */}
-                          {(it.item_status === 'approved' || it.fulfillment_status) && (
-                            <div className="flex items-center gap-1 ml-3 pl-3 border-l border-slate-200">
-                              <span className="text-[10px] text-slate-500">Tracking:</span>
-                              {['order_placed', 'dispatched', 'received'].map(fs => (
-                                <Button key={fs} size="sm" variant="outline"
-                                  className={`h-6 px-2 rounded-sm text-[9px] ${it.fulfillment_status===fs ?
-                                    (fs==='received' ? 'bg-emerald-500 text-white border-emerald-500' : fs==='dispatched' ? 'bg-sky-500 text-white border-sky-500' : 'bg-amber-500 text-white border-amber-500') : ''}`}
-                                  onClick={() => { api.put('/po/purchase-review/update', { item_ids: [it.id], fulfillment_status: fs }).then(() => loadData()); }}>
-                                  {fs === 'order_placed' ? 'Order Placed' : fs === 'dispatched' ? 'Dispatched' : 'Received'}
-                                </Button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
         </TabsContent>
 
-        {/* New Request Form (Store Staff) */}
+        {/* New Request Form */}
         <TabsContent value="new">
           <Card className="border-slate-200 shadow-sm rounded-sm">
             <CardContent className="space-y-4 pt-4">
