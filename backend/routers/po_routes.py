@@ -396,6 +396,144 @@ async def list_purchase_orders(
     }
 
 
+@router.get("/po/category-rules")
+async def get_category_rules(db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    rules = (await db.execute(select(POCategoryRule).order_by(POCategoryRule.po_category))).scalars().all()
+    return {"rules": [{"id": r.id, "po_category": r.po_category, "sub_categories": r.sub_categories.split(",") if r.sub_categories else []} for r in rules]}
+
+
+class CategoryRuleReq(BaseModel):
+    po_category: str
+    sub_categories: List[str]
+
+
+@router.post("/po/category-rules")
+async def save_category_rule(data: CategoryRuleReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
+    existing = (await db.execute(select(POCategoryRule).where(POCategoryRule.po_category == data.po_category))).scalar_one_or_none()
+    if existing:
+        existing.sub_categories = ",".join(data.sub_categories)
+    else:
+        db.add(POCategoryRule(po_category=data.po_category, sub_categories=",".join(data.sub_categories)))
+    await db.commit()
+    return {"message": f"Rule saved for {data.po_category}"}
+
+
+@router.delete("/po/category-rules/{rule_id}")
+async def delete_category_rule(rule_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
+    r = (await db.execute(select(POCategoryRule).where(POCategoryRule.id == rule_id))).scalar_one_or_none()
+    if r:
+        await db.delete(r)
+        await db.commit()
+    return {"message": "Rule deleted"}
+
+
+# ─── Purchase Review (for PO category items) ────────────────
+
+@router.get("/po/purchase-review")
+async def purchase_review(
+    po_category: str = Query(None),
+    status: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    """Get all store request items with PO category — full details per product."""
+    query = select(StoreRequestItem)
+    if po_category and po_category != "all":
+        query = query.where(StoreRequestItem.po_category == po_category)
+    elif po_category != "all":
+        pass  # show all
+    if status and status != "all":
+        query = query.where(StoreRequestItem.item_status == status)
+
+    items = (await db.execute(query.order_by(StoreRequestItem.id.desc()))).scalars().all()
+
+    req_ids = set(it.request_id for it in items)
+    req_map = {}
+    if req_ids:
+        for r in (await db.execute(select(StoreRequest).where(StoreRequest.id.in_(req_ids)))).scalars().all():
+            req_map[r.id] = r
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    now = datetime.now(timezone.utc)
+
+    result = []
+    for it in items:
+        req = req_map.get(it.request_id)
+        # Suppliers from Product Master
+        suppliers = {}
+        prod_info = {}
+        if it.product_id:
+            prod = (await db.execute(select(Product).where(Product.product_id == it.product_id))).scalar_one_or_none()
+            if prod:
+                if prod.primary_supplier: suppliers["primary"] = prod.primary_supplier
+                if prod.secondary_supplier: suppliers["secondary"] = prod.secondary_supplier
+                if prod.least_price_supplier: suppliers["least_price"] = prod.least_price_supplier
+                if prod.most_qty_supplier: suppliers["most_qty"] = prod.most_qty_supplier
+                prod_info = {"category": prod.category, "sub_category": prod.sub_category, "mrp": prod.mrp or 0, "ptr": prod.ptr or 0}
+
+        # Stock across ALL stores
+        store_stock = []
+        if it.product_id:
+            ss_q = (await db.execute(
+                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock"))
+                .where(StoreStockBatch.ho_product_id == it.product_id)
+                .group_by(StoreStockBatch.store_id)
+            )).all()
+            store_stock = [{"store": smap.get(r[0], ""), "stock": round(float(r[1] or 0), 0)} for r in ss_q if float(r[1] or 0) > 0]
+
+        # Sales trend
+        sales_30d = 0
+        if it.product_id:
+            sales_30d = float((await db.execute(
+                select(func.sum(SalesRecord.quantity)).where(and_(
+                    SalesRecord.product_id == it.product_id, SalesRecord.invoice_date >= now - timedelta(days=30)
+                ))
+            )).scalar() or 0)
+
+        result.append({
+            "id": it.id, "request_id": it.request_id,
+            "store_name": smap.get(req.store_id, "") if req else "",
+            "customer_name": req.customer_name if req else None,
+            "customer_mobile": req.customer_mobile if req else None,
+            "request_reason": req.request_reason if req else "",
+            "product_id": it.product_id, "product_name": it.product_name,
+            "quantity": it.quantity, "landing_cost": it.landing_cost,
+            "po_category": it.po_category, "item_status": it.item_status,
+            "selected_supplier": it.selected_supplier,
+            "tat_days": it.tat_days, "ho_remarks": it.ho_remarks,
+            "suppliers": suppliers,
+            "store_stock": store_stock,
+            "total_network_stock": sum(s["stock"] for s in store_stock),
+            "sales_30d": round(sales_30d, 0),
+            "product_info": prod_info,
+            "created_at": req.created_at.isoformat() if req and req.created_at else None,
+        })
+
+    return {"items": result, "total": len(result)}
+
+
+class UpdateItemReq(BaseModel):
+    item_ids: List[int]
+    supplier: Optional[str] = None
+    status: Optional[str] = None
+    tat_days: Optional[int] = None
+    ho_remarks: Optional[str] = None
+
+
+@router.put("/po/purchase-review/update")
+async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
+    for iid in data.item_ids:
+        it = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.id == iid))).scalar_one_or_none()
+        if it:
+            if data.supplier: it.selected_supplier = data.supplier
+            if data.status: it.item_status = data.status
+            if data.tat_days is not None: it.tat_days = data.tat_days
+            if data.ho_remarks is not None: it.ho_remarks = data.ho_remarks
+    await _log(db, user, f"Updated {len(data.item_ids)} items: supplier={data.supplier}, status={data.status}, tat={data.tat_days}", "purchase_review")
+    await db.commit()
+    return {"message": f"Updated {len(data.item_ids)} items"}
+
+
+
 @router.get("/po/{po_id}")
 async def get_po_detail(po_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
@@ -730,139 +868,3 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
 
 
 # ─── PO Category Rules Management ───────────────────────────
-
-@router.get("/po/category-rules")
-async def get_category_rules(db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
-    rules = (await db.execute(select(POCategoryRule).order_by(POCategoryRule.po_category))).scalars().all()
-    return {"rules": [{"id": r.id, "po_category": r.po_category, "sub_categories": r.sub_categories.split(",") if r.sub_categories else []} for r in rules]}
-
-
-class CategoryRuleReq(BaseModel):
-    po_category: str
-    sub_categories: List[str]
-
-
-@router.post("/po/category-rules")
-async def save_category_rule(data: CategoryRuleReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
-    existing = (await db.execute(select(POCategoryRule).where(POCategoryRule.po_category == data.po_category))).scalar_one_or_none()
-    if existing:
-        existing.sub_categories = ",".join(data.sub_categories)
-    else:
-        db.add(POCategoryRule(po_category=data.po_category, sub_categories=",".join(data.sub_categories)))
-    await db.commit()
-    return {"message": f"Rule saved for {data.po_category}"}
-
-
-@router.delete("/po/category-rules/{rule_id}")
-async def delete_category_rule(rule_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
-    r = (await db.execute(select(POCategoryRule).where(POCategoryRule.id == rule_id))).scalar_one_or_none()
-    if r:
-        await db.delete(r)
-        await db.commit()
-    return {"message": "Rule deleted"}
-
-
-# ─── Purchase Review (for PO category items) ────────────────
-
-@router.get("/po/purchase-review")
-async def purchase_review(
-    po_category: str = Query(None),
-    status: str = Query(None),
-    db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
-):
-    """Get all store request items with PO category — full details per product."""
-    query = select(StoreRequestItem)
-    if po_category and po_category != "all":
-        query = query.where(StoreRequestItem.po_category == po_category)
-    elif po_category != "all":
-        pass  # show all
-    if status and status != "all":
-        query = query.where(StoreRequestItem.item_status == status)
-
-    items = (await db.execute(query.order_by(StoreRequestItem.id.desc()))).scalars().all()
-
-    req_ids = set(it.request_id for it in items)
-    req_map = {}
-    if req_ids:
-        for r in (await db.execute(select(StoreRequest).where(StoreRequest.id.in_(req_ids)))).scalars().all():
-            req_map[r.id] = r
-    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
-    now = datetime.now(timezone.utc)
-
-    result = []
-    for it in items:
-        req = req_map.get(it.request_id)
-        # Suppliers from Product Master
-        suppliers = {}
-        prod_info = {}
-        if it.product_id:
-            prod = (await db.execute(select(Product).where(Product.product_id == it.product_id))).scalar_one_or_none()
-            if prod:
-                if prod.primary_supplier: suppliers["primary"] = prod.primary_supplier
-                if prod.secondary_supplier: suppliers["secondary"] = prod.secondary_supplier
-                if prod.least_price_supplier: suppliers["least_price"] = prod.least_price_supplier
-                if prod.most_qty_supplier: suppliers["most_qty"] = prod.most_qty_supplier
-                prod_info = {"category": prod.category, "sub_category": prod.sub_category, "mrp": prod.mrp or 0, "ptr": prod.ptr or 0}
-
-        # Stock across ALL stores
-        store_stock = []
-        if it.product_id:
-            ss_q = (await db.execute(
-                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock"))
-                .where(StoreStockBatch.ho_product_id == it.product_id)
-                .group_by(StoreStockBatch.store_id)
-            )).all()
-            store_stock = [{"store": smap.get(r[0], ""), "stock": round(float(r[1] or 0), 0)} for r in ss_q if float(r[1] or 0) > 0]
-
-        # Sales trend
-        sales_30d = 0
-        if it.product_id:
-            sales_30d = float((await db.execute(
-                select(func.sum(SalesRecord.quantity)).where(and_(
-                    SalesRecord.product_id == it.product_id, SalesRecord.invoice_date >= now - timedelta(days=30)
-                ))
-            )).scalar() or 0)
-
-        result.append({
-            "id": it.id, "request_id": it.request_id,
-            "store_name": smap.get(req.store_id, "") if req else "",
-            "customer_name": req.customer_name if req else None,
-            "customer_mobile": req.customer_mobile if req else None,
-            "request_reason": req.request_reason if req else "",
-            "product_id": it.product_id, "product_name": it.product_name,
-            "quantity": it.quantity, "landing_cost": it.landing_cost,
-            "po_category": it.po_category, "item_status": it.item_status,
-            "selected_supplier": it.selected_supplier,
-            "tat_days": it.tat_days, "ho_remarks": it.ho_remarks,
-            "suppliers": suppliers,
-            "store_stock": store_stock,
-            "total_network_stock": sum(s["stock"] for s in store_stock),
-            "sales_30d": round(sales_30d, 0),
-            "product_info": prod_info,
-            "created_at": req.created_at.isoformat() if req and req.created_at else None,
-        })
-
-    return {"items": result, "total": len(result)}
-
-
-class UpdateItemReq(BaseModel):
-    item_ids: List[int]
-    supplier: Optional[str] = None
-    status: Optional[str] = None
-    tat_days: Optional[int] = None
-    ho_remarks: Optional[str] = None
-
-
-@router.put("/po/purchase-review/update")
-async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
-    for iid in data.item_ids:
-        it = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.id == iid))).scalar_one_or_none()
-        if it:
-            if data.supplier: it.selected_supplier = data.supplier
-            if data.status: it.item_status = data.status
-            if data.tat_days is not None: it.tat_days = data.tat_days
-            if data.ho_remarks is not None: it.ho_remarks = data.ho_remarks
-    await _log(db, user, f"Updated {len(data.item_ids)} items: supplier={data.supplier}, status={data.status}, tat={data.tat_days}", "purchase_review")
-    await db.commit()
-    return {"message": f"Updated {len(data.item_ids)} items"}
