@@ -113,6 +113,9 @@ async def startup():
             await conn.execute(text("ALTER TABLE store_request_items ADD COLUMN IF NOT EXISTS tat_type VARCHAR(20)"))
             await conn.execute(text("ALTER TABLE store_request_items ADD COLUMN IF NOT EXISTS fulfillment_status VARCHAR(30)"))
             await conn.execute(text("ALTER TABLE store_request_items ADD COLUMN IF NOT EXISTS received_qty FLOAT DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE medicine_purchases ADD COLUMN IF NOT EXISTS dosage VARCHAR(100)"))
+            await conn.execute(text("ALTER TABLE medicine_purchases ADD COLUMN IF NOT EXISTS timing VARCHAR(100)"))
+            await conn.execute(text("ALTER TABLE medicine_purchases ADD COLUMN IF NOT EXISTS food_relation VARCHAR(50)"))
             # Performance indexes
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_customer_product ON sales_records(customer_id, product_name)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_store_date ON sales_records(store_id, invoice_date)"))

@@ -12,7 +12,7 @@ import time
 
 class ComprehensiveAPITester:
     def __init__(self):
-        self.base_url = "https://sahakar-inventory-ai.preview.emergentagent.com/api"
+        self.base_url = "https://rx-med-tracker.preview.emergentagent.com/api"
         self.admin_token = None
         self.crm_token = None
         self.tests_run = 0

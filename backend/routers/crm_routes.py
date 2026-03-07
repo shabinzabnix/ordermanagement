@@ -339,6 +339,7 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
                 "next_due_date": p.next_due_date.isoformat() if p.next_due_date else None,
                 "days_until": days_until, "overdue": days_until < 0,
                 "store_name": smap.get(p.store_id, ""),
+                "dosage": p.dosage, "timing": p.timing, "food_relation": p.food_relation,
             })
     medicine_calendar.sort(key=lambda x: x["days_until"])
 
@@ -380,6 +381,9 @@ class PurchaseReq(BaseModel):
     quantity: float = 0
     days_of_medication: int = 0
     purchase_date: Optional[str] = None
+    dosage: Optional[str] = None
+    timing: Optional[str] = None
+    food_relation: Optional[str] = None
 
 
 @router.post("/crm/purchases")
@@ -415,6 +419,7 @@ async def add_purchase(data: PurchaseReq, db: AsyncSession = Depends(get_db), us
         medicine_name=data.medicine_name, quantity=data.quantity,
         days_of_medication=data.days_of_medication, purchase_date=pdate,
         next_due_date=next_due, status="active", created_by=user["user_id"],
+        dosage=data.dosage, timing=data.timing, food_relation=data.food_relation,
     )
     db.add(purchase)
 
@@ -444,6 +449,45 @@ async def stop_medicine(purchase_id: int, db: AsyncSession = Depends(get_db), us
     p.status = "stopped"
     await db.commit()
     return {"message": "Medicine marked as stopped"}
+
+
+
+class UpdateCustomerTypeReq(BaseModel):
+    customer_type: str
+
+
+@router.put("/crm/customers/{customer_id}/type")
+async def update_customer_type(customer_id: int, data: UpdateCustomerTypeReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    c = (await db.execute(select(CRMCustomer).where(CRMCustomer.id == customer_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "Customer not found")
+    c.customer_type = CustomerType(data.customer_type)
+    await db.commit()
+    return {"message": f"Customer type updated to {data.customer_type}"}
+
+
+class UpdateMedicationDetailReq(BaseModel):
+    dosage: Optional[str] = None
+    timing: Optional[str] = None
+    food_relation: Optional[str] = None
+    days_of_medication: Optional[int] = None
+
+
+@router.put("/crm/purchases/{purchase_id}/medication-details")
+async def update_medication_details(purchase_id: int, data: UpdateMedicationDetailReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    p = (await db.execute(select(MedicinePurchase).where(MedicinePurchase.id == purchase_id))).scalar_one_or_none()
+    if not p:
+        raise HTTPException(404, "Purchase not found")
+    if data.dosage is not None: p.dosage = data.dosage
+    if data.timing is not None: p.timing = data.timing
+    if data.food_relation is not None: p.food_relation = data.food_relation
+    if data.days_of_medication is not None:
+        p.days_of_medication = data.days_of_medication
+        if p.purchase_date:
+            p.next_due_date = p.purchase_date + timedelta(days=data.days_of_medication)
+    await db.commit()
+    return {"message": "Medication details updated", "next_due_date": p.next_due_date.isoformat() if p.next_due_date else None}
+
 
 
 # ─── Refill Due Management ─────────────────────────────────

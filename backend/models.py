@@ -247,6 +247,9 @@ class MedicinePurchase(Base):
     purchase_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     next_due_date = Column(DateTime(timezone=True), index=True)
     status = Column(String(20), default="active")
+    dosage = Column(String(100), nullable=True)
+    timing = Column(String(100), nullable=True)
+    food_relation = Column(String(50), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -410,9 +413,3 @@ class RequestComment(Base):
     user_role = Column(String(50))
     message = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-    message = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-    doctor_name = Column(String(255), nullable=True)
-    clinic_location = Column(String(500), nullable=True)

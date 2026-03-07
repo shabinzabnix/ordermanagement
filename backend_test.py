@@ -11,7 +11,7 @@ import json
 
 class BatchCIntelligenceTester:
     def __init__(self):
-        self.base_url = "https://sahakar-inventory-ai.preview.emergentagent.com/api"
+        self.base_url = "https://rx-med-tracker.preview.emergentagent.com/api"
         self.token = None
         self.tests_run = 0
         self.tests_passed = 0

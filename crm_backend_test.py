@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 import json
 
 class CRMAPITester:
-    def __init__(self, base_url="https://sahakar-inventory-ai.preview.emergentagent.com"):
+    def __init__(self, base_url="https://rx-med-tracker.preview.emergentagent.com"):
         self.base_url = base_url
         self.token = None
         self.tests_run = 0
