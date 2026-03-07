@@ -71,6 +71,44 @@ async def get_subcategory_data(
 
     return {"suppliers": supplier_list[:100], "total": len(supplier_list)}
 
+@router.get("/po/product-stock-info")
+async def product_stock_info(
+    product_id: str = Query(None),
+    search: str = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Get product landing cost + stock across all stores. For store_staff, show only their store."""
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    user_store = user.get("store_id") if user.get("role") == "STORE_STAFF" else None
+
+    products = []
+    if product_id:
+        prods = (await db.execute(select(Product).where(Product.product_id == product_id))).scalars().all()
+    elif search and len(search) >= 2:
+        prods = (await db.execute(select(Product).where(Product.product_name.ilike(f"%{search}%")).limit(15))).scalars().all()
+    else:
+        return {"products": []}
+
+    for p in prods:
+        # Stock per store
+        ss_q = select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock")).where(
+            StoreStockBatch.ho_product_id == p.product_id).group_by(StoreStockBatch.store_id)
+        if user_store:
+            ss_q = ss_q.where(StoreStockBatch.store_id == user_store)
+        stock_rows = (await db.execute(ss_q)).all()
+        store_stock = [{"store_id": r[0], "store": smap.get(r[0], ""), "stock": round(float(r[1] or 0), 0)} for r in stock_rows if float(r[1] or 0) > 0]
+
+        products.append({
+            "product_id": p.product_id, "product_name": p.product_name,
+            "landing_cost": p.landing_cost or 0, "mrp": p.mrp or 0, "ptr": p.ptr or 0,
+            "primary_supplier": p.primary_supplier or "",
+            "store_stock": store_stock,
+            "total_stock": sum(s["stock"] for s in store_stock),
+        })
+    return {"products": products}
+
+
+
 
 # ─── Store Purchase Request ─────────────────────────────────
 

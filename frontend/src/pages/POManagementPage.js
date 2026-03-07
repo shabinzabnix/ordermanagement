@@ -79,7 +79,17 @@ export default function POManagementPage() {
   }, []);
 
   const addPoProduct = (p) => {
-    setPoItems([...poItems, { product_id: p.product_id, product_name: p.product_name, is_registered: true, quantity: 1, landing_cost: p.landing_cost || 0 }]);
+    if (poItems.some(i => i.product_id === p.product_id)) { toast.warning('Already added'); return; }
+    api.get('/po/product-stock-info', { params: { product_id: p.product_id } }).then(r => {
+      const info = r.data.products?.[0];
+      setPoItems(prev => [...prev, {
+        product_id: p.product_id, product_name: p.product_name, is_registered: true,
+        quantity: 1, landing_cost: info?.landing_cost || p.landing_cost || 0,
+        store_stock: info?.store_stock || [], total_stock: info?.total_stock || 0,
+      }]);
+    }).catch(() => {
+      setPoItems(prev => [...prev, { product_id: p.product_id, product_name: p.product_name, is_registered: true, quantity: 1, landing_cost: p.landing_cost || 0, store_stock: [], total_stock: 0 }]);
+    });
     setPoSearch(''); setShowPoSugg(false);
   };
   const addManualProduct = () => {
@@ -342,7 +352,13 @@ export default function POManagementPage() {
                         const added = poItems.some(i => i.product_id === p.product_id);
                         return (
                           <TableRow key={p.product_id} className={`hover:bg-sky-50/50 cursor-pointer ${added ? 'bg-emerald-50/30' : ''}`}
-                            onClick={() => { if (!added) setPoItems([...poItems, { product_id: p.product_id, product_name: p.product_name, is_registered: true, quantity: 1, landing_cost: p.landing_cost || 0 }]); }}>
+                            onClick={() => { if (!added) {
+                              api.get('/po/product-stock-info', { params: { product_id: p.product_id } }).then(r => {
+                                const info = r.data.products?.[0];
+                                setPoItems(prev => [...prev, { product_id: p.product_id, product_name: p.product_name, is_registered: true, quantity: 1,
+                                  landing_cost: info?.landing_cost || p.landing_cost || 0, store_stock: info?.store_stock || [], total_stock: info?.total_stock || 0 }]);
+                              }).catch(() => { setPoItems(prev => [...prev, { product_id: p.product_id, product_name: p.product_name, is_registered: true, quantity: 1, landing_cost: p.landing_cost || 0, store_stock: [], total_stock: 0 }]); });
+                            } }}>
                             <TableCell className="w-[30px] py-1"><Checkbox checked={added} className="rounded-sm" /></TableCell>
                             <TableCell className="text-[12px] font-medium text-slate-800 py-1">{p.product_name}</TableCell>
                             <TableCell className="font-mono text-[10px] text-slate-400">{p.product_id}</TableCell>
@@ -384,13 +400,19 @@ export default function POManagementPage() {
             {poItems.length > 0 && (
               <Card className="border-emerald-200 rounded-sm">
                 <Table><TableHeader><TableRow className="border-b border-slate-100">
-                  {['Product', 'Type', 'Qty', 'Cost', 'Value', ''].map(h => (
+                  {['Product', 'Type', 'Stock', 'Qty', 'Cost', 'Value', ''].map(h => (
                     <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty', 'Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                   ))}</TableRow></TableHeader>
                   <TableBody>{poItems.map((it, i) => (
                     <TableRow key={i}>
                       <TableCell className="text-[12px] font-medium py-1.5">{it.product_name}</TableCell>
                       <TableCell>{it.is_registered ? <Badge className="text-[8px] rounded-sm bg-emerald-50 text-emerald-700">Reg</Badge> : <Badge className="text-[8px] rounded-sm bg-amber-50 text-amber-700">Manual</Badge>}</TableCell>
+                      <TableCell className="py-1">
+                        <div className="flex gap-0.5 flex-wrap">{it.store_stock?.length > 0
+                          ? it.store_stock.map((s, j) => <Badge key={j} variant="secondary" className="text-[7px] rounded-sm px-1">{s.store}:{s.stock}</Badge>)
+                          : <span className="text-[9px] text-slate-400">{it.is_registered ? 'No stock' : '-'}</span>}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right py-1.5"><Input type="number" min={1} value={it.quantity} onChange={e => updatePoItem(i, 'quantity', e.target.value)} className="w-[60px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
                       <TableCell className="text-right py-1.5"><Input type="number" value={it.landing_cost} onChange={e => updatePoItem(i, 'landing_cost', e.target.value)} className="w-[70px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
                       <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {(it.quantity * it.landing_cost).toFixed(2)}</TableCell>

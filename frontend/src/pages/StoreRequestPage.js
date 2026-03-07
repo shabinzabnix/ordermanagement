@@ -43,7 +43,17 @@ export default function StoreRequestPage() {
 
   const addProduct = (p) => {
     if (items.find(i => i.product_id === p.product_id)) { toast.warning('Already added'); return; }
-    setItems([...items, { product_id: p.product_id, product_name: p.product_name, landing_cost: p.landing_cost || 0, quantity: 1 }]);
+    // Fetch stock info for this product
+    api.get('/po/product-stock-info', { params: { product_id: p.product_id } }).then(r => {
+      const info = r.data.products?.[0];
+      setItems(prev => [...prev, {
+        product_id: p.product_id, product_name: p.product_name,
+        landing_cost: info?.landing_cost || p.landing_cost || 0, quantity: 1,
+        store_stock: info?.store_stock || [], total_stock: info?.total_stock || 0,
+      }]);
+    }).catch(() => {
+      setItems(prev => [...prev, { product_id: p.product_id, product_name: p.product_name, landing_cost: p.landing_cost || 0, quantity: 1, store_stock: [], total_stock: 0 }]);
+    });
     setProductSearch(''); setShowSugg(false);
   };
   const updateQty = (idx, qty) => { const n = [...items]; n[idx].quantity = parseFloat(qty) || 0; setItems(n); };
@@ -110,10 +120,20 @@ export default function StoreRequestPage() {
           )}
           {items.length > 0 && (<>
             <Card className="border-emerald-200 rounded-sm">
-              <Table><TableBody>{items.map((it, i) => (
+              <Table><TableHeader><TableRow className="border-b border-slate-100">
+                {['Product', 'ID', 'Stock', 'Qty (Strips)', 'L.Cost', 'Value', ''].map(h => (
+                  <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty (Strips)', 'L.Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                ))}
+              </TableRow></TableHeader><TableBody>{items.map((it, i) => (
                 <TableRow key={i}>
                   <TableCell className="text-[12px] font-medium text-slate-800 py-1.5">{it.product_name}</TableCell>
                   <TableCell className="font-mono text-[10px] text-slate-400">{it.product_id}</TableCell>
+                  <TableCell className="py-1.5">
+                    <div className="flex gap-0.5 flex-wrap">{it.store_stock?.length > 0
+                      ? it.store_stock.map((s, j) => <Badge key={j} variant="secondary" className="text-[8px] rounded-sm px-1">{s.store}: {s.stock}</Badge>)
+                      : <span className="text-[10px] text-red-400">No stock</span>}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-right py-1.5"><Input type="number" min={1} value={it.quantity} onChange={e => updateQty(i, e.target.value)} className="w-[70px] h-7 text-right rounded-sm text-[12px] ml-auto" /></TableCell>
                   <TableCell className="text-right text-[11px] tabular-nums">{it.landing_cost.toFixed(2)}</TableCell>
                   <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {(it.quantity * it.landing_cost).toFixed(2)}</TableCell>
