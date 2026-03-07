@@ -137,7 +137,7 @@ async def demand_forecast(
     search: str = Query(None),
     days: int = Query(30),
     page: int = Query(1, ge=1),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=99999),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
@@ -211,6 +211,33 @@ async def demand_forecast(
     total = len(forecasts)
     start = (page - 1) * limit
     return {"forecasts": forecasts[start:start + limit], "total": total, "forecast_days": days, "page": page, "limit": limit}
+
+
+@router.get("/intel/export-forecast")
+async def export_forecast(
+    store_id: int = Query(None),
+    search: str = Query(None),
+    days: int = Query(30),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    from routers.phase2_routes import _excel
+    data = await demand_forecast(store_id=store_id, search=search, days=days, page=1, limit=99999, db=db, user=user)
+    rows = [{"rank": i+1, "product": f["product_name"], "product_id": f["product_id"],
+             "store": f["store_name"], "sales_30d": f["sales_30d"], "sales_60d": f["sales_60d"],
+             "sales_90d": f["sales_90d"], "avg_daily": f["avg_daily"],
+             "current_stock": f["current_stock"], "days_left": f["days_of_stock"],
+             "reorder_qty": f["reorder_qty"], "urgency": f["urgency"]}
+            for i, f in enumerate(data["forecasts"])]
+    headers = [
+        {"label": "#", "key": "rank"}, {"label": "Product", "key": "product"},
+        {"label": "Product ID", "key": "product_id"}, {"label": "Store", "key": "store"},
+        {"label": "30d Qty", "key": "sales_30d"}, {"label": "60d Qty", "key": "sales_60d"},
+        {"label": "90d Qty", "key": "sales_90d"}, {"label": "Avg/Day", "key": "avg_daily"},
+        {"label": "Stock (Units)", "key": "current_stock"}, {"label": "Days Left", "key": "days_left"},
+        {"label": "Reorder (Units)", "key": "reorder_qty"}, {"label": "Urgency", "key": "urgency"},
+    ]
+    return _excel(rows, headers, "demand_forecast.xlsx")
 
 # ─── Expiry Risk Detection ────────────────────────────────
 
@@ -433,7 +460,7 @@ async def get_task_queue(
 async def supplier_intelligence(
     search: str = Query(None),
     page: int = Query(1, ge=1),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=99999),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):

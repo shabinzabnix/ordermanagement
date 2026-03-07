@@ -7,7 +7,9 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Skeleton } from '../components/ui/skeleton';
-import { TrendingUp, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TrendingUp, Search, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { downloadExcel } from '../lib/api';
+import { toast } from 'sonner';
 
 export default function DemandForecastPage() {
   const [data, setData] = useState({ forecasts: [], total: 0 });
@@ -37,9 +39,20 @@ export default function DemandForecastPage() {
 
   return (
     <div data-testid="demand-forecast-page" className="space-y-5">
-      <div>
-        <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Demand Forecast & Reorder Intelligence</h2>
-        <p className="text-sm font-body text-slate-500 mt-0.5">{data.total} products analyzed | Forecast period: {period} days</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Demand Forecast & Reorder Intelligence</h2>
+          <p className="text-sm font-body text-slate-500 mt-0.5">{data.total?.toLocaleString()} products analyzed | Forecast period: {period} days</p>
+        </div>
+        <Button variant="outline" className="rounded-sm font-body text-xs" data-testid="export-forecast"
+          onClick={() => {
+            const params = new URLSearchParams({ days: period });
+            if (storeFilter !== 'all') params.append('store_id', storeFilter);
+            if (search) params.append('search', search);
+            downloadExcel(`/intel/export-forecast?${params}`, 'demand_forecast.xlsx').catch(() => toast.error('Export failed'));
+          }}>
+          <Download className="w-3.5 h-3.5 mr-1.5" /> Export All ({data.total?.toLocaleString()})
+        </Button>
       </div>
 
       <Card className="border-slate-200 shadow-sm rounded-sm">
