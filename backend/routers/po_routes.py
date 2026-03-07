@@ -27,6 +27,26 @@ def _gen_po_number():
     return f"PO-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
 
 
+
+@router.get("/po/suppliers")
+async def get_supplier_list(
+    search: str = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Get unique supplier names from Product Master for dropdown."""
+    suppliers = set()
+    for field in [Product.primary_supplier, Product.secondary_supplier, Product.least_price_supplier, Product.most_qty_supplier]:
+        result = await db.execute(select(field).distinct().where(field.isnot(None)))
+        for r in result.all():
+            if r[0] and str(r[0]).strip():
+                suppliers.add(str(r[0]).strip())
+    supplier_list = sorted(suppliers)
+    if search:
+        sl = search.lower()
+        supplier_list = [s for s in supplier_list if sl in s.lower()]
+    return {"suppliers": supplier_list[:100], "total": len(supplier_list)}
+
+
 # ─── Store Purchase Request ─────────────────────────────────
 
 class RequestItemReq(BaseModel):

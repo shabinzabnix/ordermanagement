@@ -29,9 +29,13 @@ export default function POManagementPage() {
   const [manualQty, setManualQty] = useState('');
   const [manualCost, setManualCost] = useState('');
   const [saving, setSaving] = useState(false);
-  // Sub-cat upload
+  // Suppliers + Sub-cat upload
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [showSuppliers, setShowSuppliers] = useState(false);
   const [uploadSupplier, setUploadSupplier] = useState('');
   const sugRef = useRef(null);
+  const supRef = useRef(null);
 
   const loadData = () => {
     api.get('/po/list', { params: statusFilter !== 'all' ? { status: statusFilter } : {} }).then(r => setOrders(r.data.orders)).catch(() => {});
@@ -39,13 +43,24 @@ export default function POManagementPage() {
   };
   useEffect(() => { loadData(); }, [statusFilter]);
 
+  // Load suppliers
+  useEffect(() => {
+    if (supplierSearch.length < 1) { api.get('/po/suppliers').then(r => setSuppliers(r.data.suppliers)).catch(() => {}); return; }
+    const t = setTimeout(() => { api.get('/po/suppliers', { params: { search: supplierSearch } }).then(r => setSuppliers(r.data.suppliers)).catch(() => {}); }, 200);
+    return () => clearTimeout(t);
+  }, [supplierSearch]);
+  useEffect(() => { api.get('/po/suppliers').then(r => setSuppliers(r.data.suppliers)).catch(() => {}); }, []);
+
   useEffect(() => {
     if (poSearch.length < 2) { setPoSugg([]); return; }
     const t = setTimeout(() => { api.get('/products', { params: { search: poSearch, limit: 15 } }).then(r => { setPoSugg(r.data.products); setShowPoSugg(true); }).catch(() => {}); }, 300);
     return () => clearTimeout(t);
   }, [poSearch]);
   useEffect(() => {
-    const h = (e) => { if (sugRef.current && !sugRef.current.contains(e.target)) setShowPoSugg(false); };
+    const h = (e) => {
+      if (sugRef.current && !sugRef.current.contains(e.target)) setShowPoSugg(false);
+      if (supRef.current && !supRef.current.contains(e.target)) setShowSuppliers(false);
+    };
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
   }, []);
 
@@ -238,7 +253,16 @@ export default function POManagementPage() {
             <CardContent className="space-y-3">
               <p className="text-[11px] font-body text-slate-500">Excel format: Sub Category, Product Name, Qty, Rate (optional: HO ID). Creates separate POs per sub-category.</p>
               <div className="flex gap-3">
-                <Input placeholder="Supplier name *" value={uploadSupplier} onChange={e => setUploadSupplier(e.target.value)} className="w-[250px] rounded-sm" />
+                <div className="relative w-[250px]">
+                  <Input placeholder="Search supplier *" value={uploadSupplier} onChange={e => { setUploadSupplier(e.target.value); setSupplierSearch(e.target.value); }}
+                    onFocus={() => setShowSuppliers(true)} className="rounded-sm" />
+                  {showSuppliers && uploadSupplier && suppliers.length > 0 && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[150px] overflow-auto">
+                      {suppliers.map(s => (<button key={s} type="button" className="w-full text-left px-3 py-1.5 hover:bg-sky-50 border-b border-slate-50 text-[12px]"
+                        onClick={() => { setUploadSupplier(s); setShowSuppliers(false); }}>{s}</button>))}
+                    </div>
+                  )}
+                </div>
                 <input type="file" accept=".xlsx,.xls" onChange={handleSubcatUpload} disabled={!uploadSupplier} className="hidden" id="subcat-upload" />
                 <label htmlFor="subcat-upload"><Button asChild className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" disabled={!uploadSupplier}><span><Upload className="w-3.5 h-3.5 mr-1.5" /> Upload</span></Button></label>
               </div>
@@ -253,8 +277,24 @@ export default function POManagementPage() {
           <DialogHeader><DialogTitle className="font-heading">Create Purchase Order</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5"><Label className="font-body text-xs">Supplier *</Label>
-                <Input value={poForm.supplier_name} onChange={e => setPoForm({...poForm, supplier_name: e.target.value})} className="rounded-sm" placeholder="Supplier name" /></div>
+              <div className="space-y-1.5" ref={supRef}>
+                <Label className="font-body text-xs">Supplier *</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <Input value={supplierSearch || poForm.supplier_name} placeholder="Search supplier..."
+                    onChange={e => { setSupplierSearch(e.target.value); setPoForm({...poForm, supplier_name: e.target.value}); setShowSuppliers(true); }}
+                    onFocus={() => setShowSuppliers(true)} className="rounded-sm pl-9" autoComplete="off" />
+                  {showSuppliers && suppliers.length > 0 && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[180px] overflow-auto">
+                      {suppliers.map(s => (
+                        <button key={s} type="button" className="w-full text-left px-3 py-1.5 hover:bg-sky-50 border-b border-slate-50 last:border-0 text-[12px] font-body"
+                          onClick={() => { setPoForm({...poForm, supplier_name: s}); setSupplierSearch(s); setShowSuppliers(false); }}>{s}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {poForm.supplier_name && <p className="text-[10px] text-emerald-600">Selected: {poForm.supplier_name}</p>}
+              </div>
               <div className="space-y-1.5"><Label className="font-body text-xs">Remarks</Label>
                 <Input value={poForm.remarks} onChange={e => setPoForm({...poForm, remarks: e.target.value})} className="rounded-sm" /></div>
             </div>
