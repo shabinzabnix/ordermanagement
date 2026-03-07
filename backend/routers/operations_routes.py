@@ -19,11 +19,21 @@ router = APIRouter()
 
 HO_STOCK_COLUMNS = {
     "product id": "product_id",
+    "id": "product_id",
+    "ho id": "product_id",
     "product name": "product_name",
+    "product": "product_name",
+    "name": "product_name",
+    "item name": "product_name",
     "batch": "batch",
+    "batch no": "batch",
     "mrp": "mrp",
     "closing stock": "closing_stock",
+    "stock": "closing_stock",
+    "qty": "closing_stock",
     "landing cost value": "landing_cost_value",
+    "lcost value": "landing_cost_value",
+    "cost value": "landing_cost_value",
     "expiry date": "expiry_date",
     "expiry": "expiry_date",
     "exp date": "expiry_date",
@@ -101,18 +111,28 @@ async def upload_ho_stock(
 
     await db.execute(delete(HOStockBatch))
 
+    # Pre-load product names from Product Master for fallback
+    product_names = {}
+    for p in (await db.execute(select(Product))).scalars().all():
+        product_names[p.product_id] = p.product_name
+
     success, failed, errors = 0, 0, []
     for idx, row in df_mapped.iterrows():
         try:
             pid = str(row.get("product_id", "")).strip()
+            if pid.endswith(".0"):
+                pid = pid[:-2]
             batch = str(row.get("batch", "")).strip()
             if not pid or not batch:
                 errors.append(f"Row {idx+2}: Missing product_id or batch")
                 failed += 1
                 continue
+            pname = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
+            if not pname or pname == "nan":
+                pname = product_names.get(pid, "")
             db.add(HOStockBatch(
                 product_id=pid,
-                product_name=str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else "",
+                product_name=pname,
                 batch=batch,
                 mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
                 closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
