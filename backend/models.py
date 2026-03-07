@@ -9,6 +9,7 @@ class UserRole(str, enum.Enum):
     HO_STAFF = "HO_STAFF"
     STORE_STAFF = "STORE_STAFF"
     CRM_STAFF = "CRM_STAFF"
+    DIRECTOR = "DIRECTOR"
 
 
 class TransferStatus(str, enum.Enum):

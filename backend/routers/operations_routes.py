@@ -93,7 +93,7 @@ def map_columns(df, column_map, required_fields):
 async def upload_ho_stock(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
@@ -297,7 +297,7 @@ async def get_consolidated_stock(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
 
@@ -690,7 +690,7 @@ class HOApproveReq(BaseModel):
 async def ho_approve_purchase(
     purchase_id: int, data: HOApproveReq,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """HO approves with supplier assignment and TAT."""
     purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()
@@ -719,7 +719,7 @@ class FulfillmentReq(BaseModel):
 async def update_fulfillment(
     purchase_id: int, data: FulfillmentReq,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Update fulfillment status: ordered → dispatched → delivered."""
     purchase = (await db.execute(select(PurchaseRequest).where(PurchaseRequest.id == purchase_id))).scalar_one_or_none()

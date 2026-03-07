@@ -81,7 +81,7 @@ export default function UserManagementPage() {
 
   const roleColor = (r) => {
     if (r === 'ADMIN') return 'bg-violet-50 text-violet-700';
-    if (r === 'HO_STAFF') return 'bg-sky-50 text-sky-700';
+    if (r === 'HO_STAFF' || r === 'DIRECTOR') return 'bg-sky-50 text-sky-700';
     if (r === 'CRM_STAFF') return 'bg-rose-50 text-rose-700';
     return 'bg-emerald-50 text-emerald-700';
   };
@@ -126,6 +126,7 @@ export default function UserManagementPage() {
                       <SelectItem value="HO_STAFF">HO Staff</SelectItem>
                       <SelectItem value="STORE_STAFF">Store Staff</SelectItem>
                       <SelectItem value="CRM_STAFF">CRM Staff</SelectItem>
+                      <SelectItem value="DIRECTOR">Director</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

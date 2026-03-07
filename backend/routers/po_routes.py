@@ -276,7 +276,7 @@ async def list_store_requests(
 @router.get("/po/store-requests/{request_id}/stock-info")
 async def request_stock_info(
     request_id: int,
-    db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """For HO: show stock across all stores + sales trend for each product in request."""
     req = (await db.execute(select(StoreRequest).where(StoreRequest.id == request_id))).scalar_one_or_none()
@@ -342,7 +342,7 @@ class CreatePOReq(BaseModel):
 async def create_purchase_order(
     data: CreatePOReq,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     total_qty = sum(it.quantity for it in data.items)
     total_value = sum(round(it.quantity * it.landing_cost, 2) for it in data.items)
@@ -445,7 +445,7 @@ async def purchase_review(
     po_category: str = Query(None),
     status: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Get all store request items with PO category — full details per product."""
     query = select(StoreRequestItem)
@@ -536,7 +536,7 @@ class UpdateItemReq(BaseModel):
 
 
 @router.put("/po/purchase-review/update")
-async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
+async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR"))):
     for iid in data.item_ids:
         it = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.id == iid))).scalar_one_or_none()
         if it:
@@ -758,7 +758,7 @@ class UpdatePOReq(BaseModel):
 
 
 @router.put("/po/{po_id}/update")
-async def update_po(po_id: int, data: UpdatePOReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
+async def update_po(po_id: int, data: UpdatePOReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR"))):
     po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
     if not po:
         raise HTTPException(404, "PO not found")
@@ -787,7 +787,7 @@ async def update_po(po_id: int, data: UpdatePOReq, db: AsyncSession = Depends(ge
 
 
 @router.delete("/po/{po_id}")
-async def delete_po(po_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
+async def delete_po(po_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR"))):
     po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
     if not po:
         raise HTTPException(404, "PO not found")
@@ -842,7 +842,7 @@ async def reject_po(po_id: int, db: AsyncSession = Depends(get_db), user: dict =
 @router.put("/po/{po_id}/fulfillment")
 async def update_po_fulfillment(
     po_id: int, status: str = Query(...),
-    db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
     if not po:
@@ -860,7 +860,7 @@ async def update_po_fulfillment(
 async def upload_po_by_subcategory(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Upload Excel: HO ID, Product Name, Qty. Auto-categorizes by sub_category from Product Master."""
     if not file.filename.endswith((".xlsx", ".xls")):

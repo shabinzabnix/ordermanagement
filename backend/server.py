@@ -71,6 +71,10 @@ async def startup():
             await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'crm_staff'"))
         except Exception:
             pass
+        try:
+            await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'DIRECTOR'"))
+        except Exception:
+            pass
     async with engine.connect() as conn:
         await conn.execution_options(isolation_level="AUTOCOMMIT")
         try:

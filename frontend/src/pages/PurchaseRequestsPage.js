@@ -33,7 +33,7 @@ export default function PurchaseRequestsPage() {
   const [actionForm, setActionForm] = useState({ supplier: '', tat_days: '', remarks: '', fulfillment_status: '' });
 
   const isCRM = user?.role === 'CRM_STAFF';
-  const isHO = user?.role === 'ADMIN' || user?.role === 'HO_STAFF';
+  const isHO = user?.role === 'ADMIN' || user?.role === 'HO_STAFF' || user?.role === 'DIRECTOR';
 
   const loadPurchases = () => { api.get('/purchases').then(r => setPurchases(r.data.purchases)).catch(() => {}); };
   useEffect(() => { loadPurchases(); api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);

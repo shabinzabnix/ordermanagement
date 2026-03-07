@@ -23,7 +23,7 @@ router = APIRouter()
 async def intel_dashboard(
     store_id: int = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     now = datetime.now(timezone.utc)
     d30 = now + timedelta(days=30)
@@ -144,7 +144,7 @@ async def demand_forecast(
     page: int = Query(1, ge=1),
     limit: int = Query(100, ge=1, le=99999),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Demand forecasting: Sales QTY from SalesRecord, Stock UNITS from StoreStockBatch."""
     now = datetime.now(timezone.utc)
@@ -224,7 +224,7 @@ async def export_forecast(
     search: str = Query(None),
     days: int = Query(30),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     from routers.phase2_routes import _excel
     data = await demand_forecast(store_id=store_id, search=search, days=days, page=1, limit=99999, db=db, user=user)
@@ -251,7 +251,7 @@ async def expiry_risk(
     risk_level: str = Query("all"),
     store_id: int = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     now = datetime.now(timezone.utc)
     d30 = now + timedelta(days=30)
@@ -316,7 +316,7 @@ async def expiry_risk(
 @router.get("/intel/redistribution")
 async def redistribution_suggestions(
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     now = datetime.now(timezone.utc)
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
@@ -467,7 +467,7 @@ async def supplier_intelligence(
     page: int = Query(1, ge=1),
     limit: int = Query(100, ge=1, le=99999),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Analyze suppliers from Product Master: price trends, best supplier per product."""
     products = (await db.execute(select(Product))).scalars().all()
@@ -600,7 +600,7 @@ async def purchase_recommendation(
 @router.get("/intel/store-performance")
 async def enhanced_store_performance(
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Enhanced store scorecard with CLV-per-store and CRM metrics."""
     now = datetime.now(timezone.utc)
@@ -893,7 +893,7 @@ async def store_dashboard(
 @router.get("/intel/store-dashboard-summary")
 async def store_dashboard_summary(
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """All stores summary: stock value + sales value."""
     now = datetime.now(timezone.utc)
@@ -1118,7 +1118,7 @@ async def purchase_analytics(
     date_from: str = Query(None),
     date_to: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Purchase analytics: supplier-wise, product-wise, store-wise spending."""
     now = datetime.now(timezone.utc)

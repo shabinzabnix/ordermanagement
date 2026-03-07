@@ -16,7 +16,7 @@ import { ShoppingCart, Search, Trash2, Plus, Package, MessageCircle, Send, Refre
 
 export default function StoreRequestPage() {
   const { user } = useAuth();
-  const isHO = user?.role === 'ADMIN' || user?.role === 'HO_STAFF';
+  const isHO = user?.role === 'ADMIN' || user?.role === 'HO_STAFF' || user?.role === 'DIRECTOR';
   const isCRM = user?.role === 'CRM_STAFF';
   const isStore = user?.role === 'STORE_STAFF';
   const canApprove = isHO || isCRM;
