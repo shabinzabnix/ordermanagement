@@ -228,8 +228,9 @@ export default function StoreRequestPage() {
                       <span>Sales 30d: <b className="text-slate-700">{it.sales_30d || 0}</b></span>
                       <span>Reason: <Badge className={`text-[8px] rounded-sm ${reasonBadge(it.request_reason)}`}>{it.request_reason?.replace('_',' ')}</Badge></span>
                       {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name}</b> ({it.customer_mobile})</span>}
-                      {it.tat_days && <span>TAT: <b className="text-sky-700">{it.tat_days} days</b></span>}
+                      {it.tat_type && <span>TAT: <b className="text-sky-700">{it.tat_type === 'same_day' ? 'Same Day' : it.tat_type === 'next_day' ? 'Next Day' : `${it.tat_days} days`}</b></span>}
                       {it.selected_supplier && <span>Supplier: <b className="text-emerald-700">{it.selected_supplier}</b></span>}
+                      {it.fulfillment_status && <span>Tracking: <Badge className={`text-[8px] rounded-sm ${it.fulfillment_status === 'received' ? 'bg-emerald-100 text-emerald-700' : it.fulfillment_status === 'dispatched' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{it.fulfillment_status.replace('_', ' ')}</Badge></span>}
                     </div>
 
                     {/* Stock Row */}
@@ -242,7 +243,7 @@ export default function StoreRequestPage() {
 
                     {/* HO Actions */}
                     {isHO && (
-                      <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                      <div className="flex flex-col gap-2.5 pt-2 border-t border-slate-100">
                         {/* Supplier Selection */}
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[10px] font-body text-slate-500 font-medium w-[60px] shrink-0">Supplier:</span>
@@ -255,22 +256,52 @@ export default function StoreRequestPage() {
                           ))}
                         </div>
 
-                        {/* Status + TAT + Submit */}
-                        <div className="flex items-center gap-3 bg-slate-50 rounded-sm p-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-body text-slate-500 font-medium">Status:</span>
-                            <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='approved'?'bg-emerald-500 text-white border-emerald-500':''}`}
-                              onClick={() => updateItem(it.id, null, 'approved')}>Approve</Button>
-                            <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='ordered'?'bg-sky-500 text-white border-sky-500':''}`}
-                              onClick={() => updateItem(it.id, null, 'ordered')}>Ordered</Button>
-                            <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='rejected'?'bg-red-500 text-white border-red-500':''}`}
-                              onClick={() => updateItem(it.id, null, 'rejected')}>Reject</Button>
-                          </div>
-                          <div className="flex items-center gap-1.5 ml-auto">
-                            <span className="text-[10px] font-body text-slate-500">TAT:</span>
-                            <Input type="number" placeholder="days" className="w-[55px] h-7 text-[11px] rounded-sm text-center"
-                              defaultValue={it.tat_days||''} onBlur={e => {const v=parseInt(e.target.value);if(v>0)updateItem(it.id,null,null,v);}} />
-                          </div>
+                        {/* TAT Selection */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-body text-slate-500 font-medium w-[60px] shrink-0">TAT:</span>
+                          {['same_day', 'next_day'].map(t => (
+                            <Button key={t} size="sm" variant="outline"
+                              className={`h-6 px-2.5 rounded-sm text-[10px] ${it.tat_type===t ? 'bg-sky-500 text-white border-sky-500' : ''}`}
+                              onClick={() => { api.put('/po/purchase-review/update', { item_ids: [it.id], tat_type: t, tat_days: t === 'same_day' ? 0 : 1 }).then(() => loadData()); }}>
+                              {t === 'same_day' ? 'Same Day' : 'Next Day'}
+                            </Button>
+                          ))}
+                          <Input type="number" placeholder="days" className="w-[55px] h-6 text-[10px] rounded-sm text-center"
+                            defaultValue={it.tat_days > 1 ? it.tat_days : ''} onBlur={e => {const v=parseInt(e.target.value);if(v>1) api.put('/po/purchase-review/update', { item_ids: [it.id], tat_type: 'days', tat_days: v }).then(() => loadData());}} />
+                          <span className="text-[10px] text-slate-400">days</span>
+                          {it.tat_type && <Badge className="text-[9px] rounded-sm bg-sky-50 text-sky-700">{it.tat_type === 'same_day' ? 'Same Day' : it.tat_type === 'next_day' ? 'Next Day' : `${it.tat_days}d`}</Badge>}
+                        </div>
+
+                        {/* Communication */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-body text-slate-500 font-medium w-[60px] shrink-0">Remark:</span>
+                          <Input placeholder="Add communication / remark..." className="flex-1 h-6 text-[10px] rounded-sm"
+                            defaultValue={it.ho_remarks || ''} onBlur={e => { if (e.target.value) api.put('/po/purchase-review/update', { item_ids: [it.id], ho_remarks: e.target.value }).then(() => loadData()); }} />
+                        </div>
+                        {it.ho_remarks && <p className="text-[10px] font-body text-violet-600 italic ml-[68px]">{it.ho_remarks}</p>}
+
+                        {/* Status + Tracking */}
+                        <div className="flex items-center gap-2 bg-slate-50 rounded-sm p-2">
+                          <span className="text-[10px] font-body text-slate-500 font-medium">Status:</span>
+                          <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='approved'?'bg-emerald-500 text-white border-emerald-500':''}`}
+                            onClick={() => updateItem(it.id, null, 'approved')}>Approve</Button>
+                          <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='rejected'?'bg-red-500 text-white border-red-500':''}`}
+                            onClick={() => updateItem(it.id, null, 'rejected')}>Reject</Button>
+
+                          {/* Tracking after approval */}
+                          {(it.item_status === 'approved' || it.fulfillment_status) && (
+                            <div className="flex items-center gap-1 ml-3 pl-3 border-l border-slate-200">
+                              <span className="text-[10px] text-slate-500">Tracking:</span>
+                              {['order_placed', 'dispatched', 'received'].map(fs => (
+                                <Button key={fs} size="sm" variant="outline"
+                                  className={`h-6 px-2 rounded-sm text-[9px] ${it.fulfillment_status===fs ?
+                                    (fs==='received' ? 'bg-emerald-500 text-white border-emerald-500' : fs==='dispatched' ? 'bg-sky-500 text-white border-sky-500' : 'bg-amber-500 text-white border-amber-500') : ''}`}
+                                  onClick={() => { api.put('/po/purchase-review/update', { item_ids: [it.id], fulfillment_status: fs }).then(() => loadData()); }}>
+                                  {fs === 'order_placed' ? 'Order Placed' : fs === 'dispatched' ? 'Dispatched' : 'Received'}
+                                </Button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}

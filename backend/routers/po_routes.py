@@ -499,7 +499,8 @@ async def purchase_review(
             "quantity": it.quantity, "landing_cost": it.landing_cost,
             "po_category": it.po_category, "item_status": it.item_status,
             "selected_supplier": it.selected_supplier,
-            "tat_days": it.tat_days, "ho_remarks": it.ho_remarks,
+            "tat_days": it.tat_days, "tat_type": it.tat_type, "ho_remarks": it.ho_remarks,
+            "fulfillment_status": it.fulfillment_status,
             "suppliers": suppliers,
             "store_stock": store_stock,
             "total_network_stock": sum(s["stock"] for s in store_stock),
@@ -516,7 +517,9 @@ class UpdateItemReq(BaseModel):
     supplier: Optional[str] = None
     status: Optional[str] = None
     tat_days: Optional[int] = None
+    tat_type: Optional[str] = None
     ho_remarks: Optional[str] = None
+    fulfillment_status: Optional[str] = None
 
 
 @router.put("/po/purchase-review/update")
@@ -527,8 +530,10 @@ async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(ge
             if data.supplier: it.selected_supplier = data.supplier
             if data.status: it.item_status = data.status
             if data.tat_days is not None: it.tat_days = data.tat_days
+            if data.tat_type is not None: it.tat_type = data.tat_type
             if data.ho_remarks is not None: it.ho_remarks = data.ho_remarks
-    await _log(db, user, f"Updated {len(data.item_ids)} items: supplier={data.supplier}, status={data.status}, tat={data.tat_days}", "purchase_review")
+            if data.fulfillment_status is not None: it.fulfillment_status = data.fulfillment_status
+    await _log(db, user, f"Updated {len(data.item_ids)} items", "purchase_review")
     await db.commit()
     return {"message": f"Updated {len(data.item_ids)} items"}
 

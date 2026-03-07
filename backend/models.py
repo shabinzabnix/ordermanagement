@@ -379,7 +379,9 @@ class StoreRequestItem(Base):
     selected_supplier = Column(String(500), nullable=True)
     item_status = Column(String(30), default="pending")
     tat_days = Column(Integer, nullable=True)
+    tat_type = Column(String(20), nullable=True)
     ho_remarks = Column(Text, nullable=True)
+    fulfillment_status = Column(String(30), nullable=True)
 
 class POComment(Base):
     __tablename__ = "po_comments"
