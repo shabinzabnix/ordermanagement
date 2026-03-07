@@ -127,16 +127,16 @@ export default function ProductMasterPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Product ID', 'Product Name', 'Category', 'Supplier', 'MRP', 'PTR', 'L.Cost'].map(h => (
-                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${h === 'MRP' || h === 'PTR' || h === 'L.Cost' ? 'text-right' : ''}`}>{h}</TableHead>
+                {['Product ID', 'Product Name', 'Category', 'Primary Supplier', 'Secondary Supplier', 'Least Price', 'Most Qty', 'MRP', 'PTR', 'L.Cost'].map(h => (
+                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['MRP', 'PTR', 'L.Cost'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? [...Array(8)].map((_, i) => (
-                <TableRow key={i}>{[...Array(7)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-50 rounded animate-pulse" /></TableCell>)}</TableRow>
+                <TableRow key={i}>{[...Array(10)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-50 rounded animate-pulse" /></TableCell>)}</TableRow>
               )) : products.length === 0 ? (
-                <TableRow><TableCell colSpan={7} className="text-center py-16">
+                <TableRow><TableCell colSpan={10} className="text-center py-16">
                   <Package className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">No products found</p>
                 </TableCell></TableRow>
@@ -145,7 +145,10 @@ export default function ProductMasterPage() {
                   <TableCell className="font-mono text-[11px] text-slate-500 py-2.5">{p.product_id}</TableCell>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.product_name}</TableCell>
                   <TableCell>{p.category && <Badge variant="secondary" className="text-[10px] rounded-sm font-body">{p.category}</Badge>}</TableCell>
-                  <TableCell className="text-[12px] font-body text-slate-500">{p.primary_supplier || '-'}</TableCell>
+                  <TableCell className="text-[11px] font-body text-slate-600">{p.primary_supplier || '-'}</TableCell>
+                  <TableCell className="text-[11px] font-body text-slate-500">{p.secondary_supplier || '-'}</TableCell>
+                  <TableCell className="text-[11px] font-body text-slate-500">{p.least_price_supplier || '-'}</TableCell>
+                  <TableCell className="text-[11px] font-body text-slate-500">{p.most_qty_supplier || '-'}</TableCell>
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{(p.mrp || 0).toFixed(2)}</TableCell>
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{(p.ptr || 0).toFixed(2)}</TableCell>
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{(p.landing_cost || 0).toFixed(2)}</TableCell>
