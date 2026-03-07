@@ -382,6 +382,7 @@ class StoreRequestItem(Base):
     tat_type = Column(String(20), nullable=True)
     ho_remarks = Column(Text, nullable=True)
     fulfillment_status = Column(String(30), nullable=True)
+    received_qty = Column(Float, default=0)
 
 class POComment(Base):
     __tablename__ = "po_comments"

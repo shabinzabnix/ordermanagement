@@ -557,6 +557,93 @@ async def get_request_comments(item_id: int, db: AsyncSession = Depends(get_db),
                            "created_at": c.created_at.isoformat() if c.created_at else None} for c in comments]}
 
 
+@router.post("/po/reconcile-received")
+async def reconcile_received(
+    store_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Match order_placed items against purchase uploads to update received status."""
+    # Get all order_placed items for this store
+    order_items = (await db.execute(
+        select(StoreRequestItem)
+        .join(StoreRequest, StoreRequestItem.request_id == StoreRequest.id)
+        .where(and_(StoreRequest.store_id == store_id, StoreRequestItem.item_status == "order_placed"))
+    )).scalars().all()
+
+    if not order_items:
+        return {"message": "No order_placed items to reconcile", "received": 0, "partial": 0, "pending": 0}
+
+    # Get purchase records for this store
+    purchase_map = {}
+    for pr in (await db.execute(select(PurchaseRecord).where(PurchaseRecord.store_id == store_id))).scalars().all():
+        pid = pr.product_id or ""
+        pname = pr.product_name or ""
+        key = pid if pid else pname.lower()
+        purchase_map[key] = purchase_map.get(key, 0) + float(pr.quantity or 0)
+
+    received = 0
+    partial = 0
+    still_pending = 0
+
+    for it in order_items:
+        key = it.product_id if it.product_id else (it.product_name or "").lower()
+        purchased_qty = purchase_map.get(key, 0)
+
+        if purchased_qty >= it.quantity:
+            it.item_status = "received"
+            it.fulfillment_status = "received"
+            it.received_qty = it.quantity
+            received += 1
+        elif purchased_qty > 0:
+            it.item_status = "partially_received"
+            it.fulfillment_status = "partially_received"
+            it.received_qty = purchased_qty
+            partial += 1
+        else:
+            still_pending += 1
+
+    await _log(db, user, f"Reconciled store {store_id}: {received} received, {partial} partial, {still_pending} pending", "reconciliation")
+    await db.commit()
+    return {"message": "Reconciliation complete", "received": received, "partial": partial, "pending": still_pending}
+
+
+@router.get("/po/received-items")
+async def get_received_items(
+    store_id: int = Query(None),
+    status: str = Query("all"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+        store_id = user["store_id"]
+    query = select(StoreRequestItem).join(StoreRequest, StoreRequestItem.request_id == StoreRequest.id).where(
+        StoreRequestItem.item_status.in_(["order_placed", "received", "partially_received"])
+    )
+    if store_id:
+        query = query.where(StoreRequest.store_id == store_id)
+    if status != "all":
+        query = query.where(StoreRequestItem.item_status == status)
+
+    items = (await db.execute(query.order_by(StoreRequestItem.id.desc()))).scalars().all()
+    req_ids = set(it.request_id for it in items)
+    req_map = {}
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    if req_ids:
+        for r in (await db.execute(select(StoreRequest).where(StoreRequest.id.in_(req_ids)))).scalars().all():
+            req_map[r.id] = r
+
+    return {"items": [{
+        "id": it.id, "request_id": it.request_id,
+        "store_name": smap.get(req_map[it.request_id].store_id, "") if it.request_id in req_map else "",
+        "product_id": it.product_id, "product_name": it.product_name,
+        "quantity": it.quantity, "received_qty": it.received_qty or 0,
+        "landing_cost": it.landing_cost, "selected_supplier": it.selected_supplier,
+        "item_status": it.item_status,
+    } for it in items]}
+
+
+
 @router.get("/po/all-comments")
 async def get_all_comments(
     limit: int = Query(50),
