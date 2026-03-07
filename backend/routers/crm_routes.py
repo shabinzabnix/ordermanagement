@@ -789,7 +789,7 @@ async def upload_sales_report(
                 "store_id": store_id, "mobile": mobile_clean, "name": name,
                 "inv_date": inv_date or datetime.now(timezone.utc),
                 "entry_number": entry_num,
-                "product_id": str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
+                "product_id": str(row.get("product_id", "")).strip().replace(".0", "") if pd.notna(row.get("product_id")) else None,
                 "product_name": product,
                 "quantity": float(row.get("qty", 0)) if pd.notna(row.get("qty")) else (float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0),
                 "total_amount": float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
