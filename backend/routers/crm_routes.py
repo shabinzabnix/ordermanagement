@@ -667,10 +667,9 @@ async def upload_sales_report(
             test_df = pd.read_excel(BytesIO(content), header=skip)
             if test_df.empty:
                 continue
-            # Check if actual column names exist (not "Unnamed:")
             cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
             matched = sum(1 for c in cols_lower if c in SALES_COLUMNS)
-            if matched >= 3:  # At least 3 required columns found
+            if matched >= 3:
                 df = test_df
                 header_row_used = skip
                 break
@@ -704,8 +703,19 @@ async def upload_sales_report(
     if not store_check:
         raise HTTPException(400, f"Store ID {store_id} does not exist. Please create the store first.")
 
+    # Load existing entry_numbers for this store to skip duplicates
+    existing_entries = set()
+    existing_q = (await db.execute(
+        select(SalesRecord.entry_number, SalesRecord.product_name)
+        .where(SalesRecord.store_id == store_id)
+    )).all()
+    for r in existing_q:
+        if r[0]:
+            existing_entries.add((str(r[0]).strip(), str(r[1] or "").strip()))
+
     batch_id = str(uuid.uuid4())[:12]
     success, failed, new_customers, updated_customers = 0, 0, 0, 0
+    skipped_duplicate = 0
     errors = []
     non_registered = 0
 
@@ -715,7 +725,7 @@ async def upload_sales_report(
         existing_customers[c.mobile_number] = c
 
     # Process all rows - collect data first, then bulk insert
-    new_custs_to_add = {}  # mobile -> CRMCustomer
+    new_custs_to_add = {}
     sales_to_add = []
 
     for idx, row in df.iterrows():
@@ -728,6 +738,16 @@ async def upload_sales_report(
                 continue
             if not name or name == "nan":
                 name = "Unknown Customer"
+
+            # Parse entry_number
+            entry_num = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None
+            if entry_num in ("", "nan", "None"):
+                entry_num = None
+
+            # Skip if this entry_number + product already exists for this store
+            if entry_num and (entry_num, product) in existing_entries:
+                skipped_duplicate += 1
+                continue
 
             # Clean mobile
             mobile_clean = None
@@ -768,7 +788,7 @@ async def upload_sales_report(
             sales_to_add.append({
                 "store_id": store_id, "mobile": mobile_clean, "name": name,
                 "inv_date": inv_date or datetime.now(timezone.utc),
-                "entry_number": str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None,
+                "entry_number": entry_num,
                 "product_id": str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
                 "product_name": product,
                 "quantity": float(row.get("qty", 0)) if pd.notna(row.get("qty")) else (float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0),
@@ -816,7 +836,7 @@ async def upload_sales_report(
         raise HTTPException(500, f"Failed to save sales records: {str(e)[:200]}")
     return {
         "message": "Sales report uploaded",
-        "total": len(df), "success": success, "failed": failed,
+        "total": len(df), "new_records": success, "skipped_duplicate": skipped_duplicate, "failed": failed,
         "new_customers": new_customers, "updated_customers": updated_customers,
         "non_registered": non_registered,
         "batch_id": batch_id, "errors": errors[:20],

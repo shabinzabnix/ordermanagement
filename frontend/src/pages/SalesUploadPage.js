@@ -45,7 +45,7 @@ export default function SalesUploadPage() {
     try {
       const res = await api.post(`/crm/sales-upload?store_id=${selectedStore}`, fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
       setUploadResult(res.data);
-      toast.success(`Imported: ${res.data.success}/${res.data.total} records, ${res.data.new_customers} new customers`);
+      toast.success(`Imported: ${res.data.new_records} new records, ${res.data.skipped_duplicate} duplicates skipped, ${res.data.new_customers} new customers`);
       loadRecords();
     } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); }
     finally { setUploading(false); e.target.value = ''; }
@@ -98,10 +98,12 @@ export default function SalesUploadPage() {
             <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold text-emerald-700 flex items-center gap-2"><CheckCircle className="w-4 h-4" /> Upload Result</CardTitle></CardHeader>
             <CardContent className="space-y-1 text-[12px] font-body">
               <p>Total Rows: <span className="font-medium">{uploadResult.total}</span></p>
-              <p>Imported: <span className="font-medium text-emerald-700">{uploadResult.success}</span></p>
+              <p>New Records: <span className="font-medium text-emerald-700">{uploadResult.new_records}</span></p>
+              <p>Duplicates Skipped: <span className="font-medium text-amber-600">{uploadResult.skipped_duplicate}</span></p>
               <p>Failed: <span className="font-medium text-red-600">{uploadResult.failed}</span></p>
               <p>New Customers: <span className="font-medium text-sky-600">{uploadResult.new_customers}</span></p>
               <p>Updated: <span className="font-medium">{uploadResult.updated_customers}</span></p>
+              <p>Non-Registered: <span className="font-medium">{uploadResult.non_registered}</span></p>
             </CardContent>
           </Card>
         )}
