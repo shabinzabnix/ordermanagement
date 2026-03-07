@@ -212,10 +212,23 @@ export default function StoreRequestPage() {
                         </div>
                       </div>
                     )}
-                    {/* HO only: Order Placed (after approval) */}
+                    {/* HO only: Select Supplier + Order Placed (after approval) */}
                     {canManage && it.item_status === 'approved' && (
-                      <Button size="sm" className="h-7 px-4 rounded-sm text-[10px] bg-amber-500 hover:bg-amber-600 text-white"
-                        onClick={() => updateItem(it.id, {fulfillment_status:'order_placed', status:'order_placed'})}>Mark Order Placed</Button>
+                      <div className="flex items-center gap-2 bg-amber-50/50 rounded-sm p-2 border border-amber-200">
+                        <span className="text-[10px] text-slate-500 font-medium">Supplier:</span>
+                        <Select value={it.selected_supplier || ''} onValueChange={v => updateItem(it.id, {supplier: v})}>
+                          <SelectTrigger className="w-[200px] h-7 text-[10px] rounded-sm"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
+                              <SelectItem key={type} value={name}>{name} ({type})</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {it.selected_supplier && <Badge className="text-[9px] rounded-sm bg-emerald-100 text-emerald-700">{it.selected_supplier}</Badge>}
+                        <Button size="sm" className="h-7 px-4 rounded-sm text-[10px] bg-amber-500 hover:bg-amber-600 text-white ml-auto"
+                          disabled={!it.selected_supplier}
+                          onClick={() => updateItem(it.id, {fulfillment_status:'order_placed', status:'order_placed'})}>Mark Order Placed</Button>
+                      </div>
                     )}
                   </div>
                 </CardContent>
