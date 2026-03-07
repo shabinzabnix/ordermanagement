@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
 import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2 } from 'lucide-react';
 
@@ -29,11 +30,16 @@ export default function POManagementPage() {
   const [manualQty, setManualQty] = useState('');
   const [manualCost, setManualCost] = useState('');
   const [saving, setSaving] = useState(false);
-  // Suppliers + Sub-cat upload
+  // Suppliers + Sub-cat
   const [suppliers, setSuppliers] = useState([]);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [showSuppliers, setShowSuppliers] = useState(false);
   const [uploadSupplier, setUploadSupplier] = useState('');
+  const [subCategories, setSubCategories] = useState([]);
+  const [selectedSubCat, setSelectedSubCat] = useState('');
+  const [subcatProducts, setSubcatProducts] = useState([]);
+  const [subcatSuppliers, setSubcatSuppliers] = useState([]);
+  const [subcatSearch, setSubcatSearch] = useState('');
   const sugRef = useRef(null);
   const supRef = useRef(null);
 
@@ -50,6 +56,14 @@ export default function POManagementPage() {
     return () => clearTimeout(t);
   }, [supplierSearch]);
   useEffect(() => { api.get('/po/suppliers').then(r => setSuppliers(r.data.suppliers)).catch(() => {}); }, []);
+  useEffect(() => { api.get('/products/sub-categories').then(r => setSubCategories(r.data.sub_categories || [])).catch(() => {}); }, []);
+
+  // Load products + suppliers when sub-category selected in PO form
+  useEffect(() => {
+    if (!selectedSubCat) { setSubcatProducts([]); setSubcatSuppliers([]); return; }
+    api.get('/po/subcategory-data', { params: { sub_category: selectedSubCat } })
+      .then(r => { setSubcatProducts(r.data.products); setSubcatSuppliers(r.data.suppliers); }).catch(() => {});
+  }, [selectedSubCat]);
 
   useEffect(() => {
     if (poSearch.length < 2) { setPoSugg([]); return; }
@@ -273,36 +287,82 @@ export default function POManagementPage() {
 
       {/* Create PO Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="rounded-sm max-w-2xl max-h-[85vh] overflow-auto">
+        <DialogContent className="rounded-sm max-w-3xl max-h-[85vh] overflow-auto">
           <DialogHeader><DialogTitle className="font-heading">Create Purchase Order</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            {/* Step 1: Sub Category */}
+            <div className="space-y-1.5">
+              <Label className="font-body text-xs font-medium">1. Select Sub Category</Label>
+              <Select value={selectedSubCat} onValueChange={v => { setSelectedSubCat(v); setPoItems([]); setSubcatSearch(''); }}>
+                <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select sub category to load products & suppliers" /></SelectTrigger>
+                <SelectContent className="max-h-[250px]">{subCategories.map(sc => <SelectItem key={sc} value={sc}>{sc}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+
+            {/* Auto-loaded suppliers for sub-category */}
+            {selectedSubCat && subcatSuppliers.length > 0 && (
+              <div className="p-3 bg-sky-50/50 border border-sky-200 rounded-sm">
+                <p className="text-[10px] font-body text-sky-600 uppercase tracking-wider mb-1.5">Suppliers for {selectedSubCat}</p>
+                <div className="flex gap-1.5 flex-wrap">{subcatSuppliers.map(s => <Badge key={s} variant="secondary" className="text-[10px] rounded-sm">{s}</Badge>)}</div>
+              </div>
+            )}
+
+            {/* Step 2: Supplier selection */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5" ref={supRef}>
-                <Label className="font-body text-xs">Supplier *</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                  <Input value={supplierSearch || poForm.supplier_name} placeholder="Search supplier..."
-                    onChange={e => { setSupplierSearch(e.target.value); setPoForm({...poForm, supplier_name: e.target.value}); setShowSuppliers(true); }}
-                    onFocus={() => setShowSuppliers(true)} className="rounded-sm pl-9" autoComplete="off" />
-                  {showSuppliers && suppliers.length > 0 && (
-                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[180px] overflow-auto">
-                      {suppliers.map(s => (
-                        <button key={s} type="button" className="w-full text-left px-3 py-1.5 hover:bg-sky-50 border-b border-slate-50 last:border-0 text-[12px] font-body"
-                          onClick={() => { setPoForm({...poForm, supplier_name: s}); setSupplierSearch(s); setShowSuppliers(false); }}>{s}</button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {poForm.supplier_name && <p className="text-[10px] text-emerald-600">Selected: {poForm.supplier_name}</p>}
+                <Label className="font-body text-xs font-medium">2. Select Supplier *</Label>
+                <Select value={poForm.supplier_name} onValueChange={v => setPoForm({...poForm, supplier_name: v})}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                  <SelectContent className="max-h-[200px]">
+                    {(selectedSubCat && subcatSuppliers.length > 0 ? subcatSuppliers : suppliers).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5"><Label className="font-body text-xs">Remarks</Label>
                 <Input value={poForm.remarks} onChange={e => setPoForm({...poForm, remarks: e.target.value})} className="rounded-sm" /></div>
             </div>
-            {/* Search product */}
+
+            {/* Step 3: Products from sub-category */}
+            {selectedSubCat && subcatProducts.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="font-body text-xs font-medium">3. Select Products ({subcatProducts.length} in {selectedSubCat})</Label>
+                  <div className="relative w-[220px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                    <Input placeholder="Filter..." value={subcatSearch} onChange={e => setSubcatSearch(e.target.value)} className="pl-9 rounded-sm text-sm h-8" /></div>
+                </div>
+                <Card className="border-slate-200 rounded-sm">
+                  <div className="max-h-[200px] overflow-auto">
+                    <Table><TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b border-slate-100">
+                      {['', 'Product', 'ID', 'Supplier', 'L.Cost', 'MRP'].map(h => (
+                        <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['L.Cost', 'MRP'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                      ))}
+                    </TableRow></TableHeader>
+                    <TableBody>
+                      {(subcatSearch ? subcatProducts.filter(p => p.product_name.toLowerCase().includes(subcatSearch.toLowerCase())) : subcatProducts).map(p => {
+                        const added = poItems.some(i => i.product_id === p.product_id);
+                        return (
+                          <TableRow key={p.product_id} className={`hover:bg-sky-50/50 cursor-pointer ${added ? 'bg-emerald-50/30' : ''}`}
+                            onClick={() => { if (!added) setPoItems([...poItems, { product_id: p.product_id, product_name: p.product_name, is_registered: true, quantity: 1, landing_cost: p.landing_cost || 0 }]); }}>
+                            <TableCell className="w-[30px] py-1"><Checkbox checked={added} className="rounded-sm" /></TableCell>
+                            <TableCell className="text-[12px] font-medium text-slate-800 py-1">{p.product_name}</TableCell>
+                            <TableCell className="font-mono text-[10px] text-slate-400">{p.product_id}</TableCell>
+                            <TableCell className="text-[10px] text-slate-500">{p.primary_supplier || '-'}</TableCell>
+                            <TableCell className="text-right text-[11px] tabular-nums">{p.landing_cost.toFixed(2)}</TableCell>
+                            <TableCell className="text-right text-[11px] tabular-nums">{p.mrp.toFixed(2)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody></Table>
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* Also allow search from full product master */}
             <div ref={sugRef} className="space-y-1.5">
-              <Label className="font-body text-xs">Add Registered Product</Label>
+              <Label className="font-body text-[10px] text-slate-400">Or search from all products</Label>
               <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                <Input placeholder="Search product..." value={poSearch} onChange={e => setPoSearch(e.target.value)} className="pl-9 rounded-sm" autoComplete="off" />
+                <Input placeholder="Search any product..." value={poSearch} onChange={e => setPoSearch(e.target.value)} className="pl-9 rounded-sm text-sm" autoComplete="off" />
                 {showPoSugg && poSugg.length > 0 && (
                   <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-sm shadow-lg max-h-[150px] overflow-auto">
                     {poSugg.map(p => (<button key={p.product_id} type="button" className="w-full text-left px-3 py-2 hover:bg-sky-50 border-b border-slate-50"
@@ -310,7 +370,8 @@ export default function POManagementPage() {
                   </div>)}
               </div>
             </div>
-            {/* Manual product */}
+
+            {/* Manual non-registered product */}
             <div className="flex gap-2 items-end">
               <div className="flex-1 space-y-1"><Label className="font-body text-[10px] text-slate-400">Non-Registered Product</Label>
                 <Input placeholder="Product name" value={manualName} onChange={e => setManualName(e.target.value)} className="rounded-sm text-sm" /></div>
@@ -318,17 +379,18 @@ export default function POManagementPage() {
               <Input placeholder="Cost" type="number" value={manualCost} onChange={e => setManualCost(e.target.value)} className="w-[80px] rounded-sm text-sm" />
               <Button variant="outline" size="sm" className="rounded-sm text-xs" onClick={addManualProduct} disabled={!manualName}><Plus className="w-3 h-3" /></Button>
             </div>
-            {/* Items */}
+
+            {/* Selected PO Items */}
             {poItems.length > 0 && (
-              <Card className="border-slate-200 rounded-sm">
+              <Card className="border-emerald-200 rounded-sm">
                 <Table><TableHeader><TableRow className="border-b border-slate-100">
-                  {['Product', 'Registered', 'Qty', 'Cost', 'Value', ''].map(h => (
+                  {['Product', 'Type', 'Qty', 'Cost', 'Value', ''].map(h => (
                     <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty', 'Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                   ))}</TableRow></TableHeader>
                   <TableBody>{poItems.map((it, i) => (
                     <TableRow key={i}>
                       <TableCell className="text-[12px] font-medium py-1.5">{it.product_name}</TableCell>
-                      <TableCell>{it.is_registered ? <Badge className="text-[8px] rounded-sm bg-emerald-50 text-emerald-700">Yes</Badge> : <Badge className="text-[8px] rounded-sm bg-amber-50 text-amber-700">Manual</Badge>}</TableCell>
+                      <TableCell>{it.is_registered ? <Badge className="text-[8px] rounded-sm bg-emerald-50 text-emerald-700">Reg</Badge> : <Badge className="text-[8px] rounded-sm bg-amber-50 text-amber-700">Manual</Badge>}</TableCell>
                       <TableCell className="text-right py-1.5"><Input type="number" min={1} value={it.quantity} onChange={e => updatePoItem(i, 'quantity', e.target.value)} className="w-[60px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
                       <TableCell className="text-right py-1.5"><Input type="number" value={it.landing_cost} onChange={e => updatePoItem(i, 'landing_cost', e.target.value)} className="w-[70px] h-6 text-right rounded-sm text-[11px] ml-auto" /></TableCell>
                       <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {(it.quantity * it.landing_cost).toFixed(2)}</TableCell>
@@ -336,9 +398,9 @@ export default function POManagementPage() {
                     </TableRow>
                   ))}</TableBody>
                 </Table>
-                <div className="flex justify-between items-center px-4 py-2 bg-sky-50 border-t border-sky-100">
-                  <span className="text-[12px] font-body text-sky-800">{poItems.length} items</span>
-                  <span className="text-lg font-heading font-bold text-sky-700 tabular-nums">INR {poTotal.toFixed(2)}</span>
+                <div className="flex justify-between items-center px-4 py-2 bg-emerald-50 border-t border-emerald-100">
+                  <span className="text-[12px] font-body text-emerald-800">{poItems.length} items</span>
+                  <span className="text-lg font-heading font-bold text-emerald-700 tabular-nums">INR {poTotal.toFixed(2)}</span>
                 </div>
               </Card>
             )}
