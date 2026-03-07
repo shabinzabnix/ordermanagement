@@ -1164,7 +1164,7 @@ async def purchase_analytics(
     store_q = (await db.execute(
         select(PurchaseRecord.store_id, func.sum(PurchaseRecord.total_amount).label("amt"),
                func.sum(PurchaseRecord.quantity).label("qty"))
-        .where(PurchaseRecord.purchase_date >= cutoff)
+        .where(base)
         .group_by(PurchaseRecord.store_id).order_by(func.sum(PurchaseRecord.total_amount).desc())
     )).all()
     store_spending = [{"store_id": r[0], "store_name": stores_map.get(r[0], ""), "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0)} for r in store_q]
@@ -1172,7 +1172,7 @@ async def purchase_analytics(
     # Sales vs Purchase comparison per product (matching by product_id)
     sales_q = (await db.execute(
         select(SalesRecord.product_id, func.sum(SalesRecord.quantity).label("sq"), func.sum(SalesRecord.total_amount).label("sa"))
-        .where(SalesRecord.invoice_date >= cutoff)
+        .where(base if base is not True else True)
         .group_by(SalesRecord.product_id)
     )).all()
     sales_map = {r[0]: {"qty": float(r[1] or 0), "amt": float(r[2] or 0)} for r in sales_q if r[0]}
