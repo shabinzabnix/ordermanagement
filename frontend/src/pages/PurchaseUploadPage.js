@@ -24,9 +24,10 @@ export default function PurchaseUploadPage() {
   const [search, setSearch] = useState('');
   const [supplier, setSupplier] = useState('');
   const [analytics, setAnalytics] = useState(null);
-  const [period, setPeriod] = useState('30');
   const [loading, setLoading] = useState(false);
   const limit = 100;
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
   useEffect(() => { if (user?.role === 'STORE_STAFF' && user?.store_id) setSelectedStore(String(user.store_id)); }, [user]);
@@ -41,10 +42,12 @@ export default function PurchaseUploadPage() {
   }, [selectedStore, page, search, supplier]);
 
   useEffect(() => {
-    const params = { days: parseInt(period) };
+    const params = {};
     if (selectedStore) params.store_id = selectedStore;
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
     api.get('/intel/purchase-analytics', { params }).then(r => setAnalytics(r.data)).catch(() => {});
-  }, [selectedStore, period]);
+  }, [selectedStore, dateFrom, dateTo]);
 
   const handleUpload = async (e) => {
     const file = e.target.files[0];
@@ -97,10 +100,8 @@ export default function PurchaseUploadPage() {
               </Button>
             </label>
           </div>
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-[130px] font-body text-sm rounded-sm"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="7">7 Days</SelectItem><SelectItem value="30">30 Days</SelectItem><SelectItem value="90">90 Days</SelectItem></SelectContent>
-          </Select>
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-[140px] font-body text-sm rounded-sm" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-[140px] font-body text-sm rounded-sm" />
           {uploadResult && (
             <Badge className="text-[11px] rounded-sm bg-emerald-50 text-emerald-700"><CheckCircle className="w-3 h-3 mr-1 inline" />
               New: {uploadResult.new_records} | Skipped: {uploadResult.skipped_duplicate} | Failed: {uploadResult.failed}

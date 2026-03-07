@@ -1114,18 +1114,29 @@ async def list_purchase_records(
 @router.get("/intel/purchase-analytics")
 async def purchase_analytics(
     store_id: int = Query(None),
-    days: int = Query(30),
+    days: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
     """Purchase analytics: supplier-wise, product-wise, store-wise spending."""
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=days)
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
 
-    base = and_(PurchaseRecord.purchase_date >= cutoff)
+    conditions = []
+    if date_from:
+        try: conditions.append(PurchaseRecord.purchase_date >= datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc))
+        except: pass
+    if date_to:
+        try: conditions.append(PurchaseRecord.purchase_date < datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1))
+        except: pass
+    if not conditions and days:
+        conditions.append(PurchaseRecord.purchase_date >= now - timedelta(days=days))
     if store_id:
-        base = and_(base, PurchaseRecord.store_id == store_id)
+        conditions.append(PurchaseRecord.store_id == store_id)
+
+    base = and_(*conditions) if conditions else True
 
     # Totals
     total_amount = float((await db.execute(select(func.sum(PurchaseRecord.total_amount)).where(base))).scalar() or 0)
