@@ -1,23 +1,35 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Card } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
-import { FileUp, Download } from 'lucide-react';
+import { FileUp, Download, Trash2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { downloadExcel } from '../lib/api';
 import { toast } from 'sonner';
 
 export default function UploadHistoryPage() {
+  const { user } = useAuth();
   const [uploads, setUploads] = useState([]);
   const [typeFilter, setTypeFilter] = useState('all');
 
-  useEffect(() => {
+  const loadUploads = () => {
     const params = {};
     if (typeFilter !== 'all') params.upload_type = typeFilter;
     api.get('/uploads', { params }).then(r => setUploads(r.data.uploads)).catch(() => {});
-  }, [typeFilter]);
+  };
+  useEffect(() => { loadUploads(); }, [typeFilter]);
+
+  const handleDelete = async (id, fileName) => {
+    if (!window.confirm(`Delete upload record "${fileName}"?`)) return;
+    try {
+      await api.delete(`/uploads/${id}`);
+      toast.success('Upload record deleted');
+      loadUploads();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed to delete'); }
+  };
 
   return (
     <div data-testid="upload-history-page" className="space-y-5">
@@ -32,16 +44,16 @@ export default function UploadHistoryPage() {
             <Download className="w-3.5 h-3.5 mr-1.5" /> Export
           </Button>
           <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-[180px] font-body text-sm rounded-sm" data-testid="upload-type-filter">
-            <SelectValue placeholder="All Types" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            <SelectItem value="product_master">Product Master</SelectItem>
-            <SelectItem value="ho_stock">HO Stock</SelectItem>
-            <SelectItem value="store_stock">Store Stock</SelectItem>
-          </SelectContent>
-        </Select>
+            <SelectTrigger className="w-[180px] font-body text-sm rounded-sm" data-testid="upload-type-filter">
+              <SelectValue placeholder="All Types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="product_master">Product Master</SelectItem>
+              <SelectItem value="ho_stock">HO Stock</SelectItem>
+              <SelectItem value="store_stock">Store Stock</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -50,14 +62,14 @@ export default function UploadHistoryPage() {
           <Table>
             <TableHeader>
               <TableRow className="border-b-2 border-slate-100">
-                {['File Name', 'Type', 'Total', 'Success', 'Failed', 'Date'].map(h => (
+                {['File Name', 'Type', 'Uploaded By', 'Total', 'Success', 'Failed', 'Date', ''].map(h => (
                   <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['Total','Success','Failed'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {uploads.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-16">
+                <TableRow><TableCell colSpan={8} className="text-center py-16">
                   <FileUp className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">No upload records</p>
                 </TableCell></TableRow>
@@ -65,10 +77,19 @@ export default function UploadHistoryPage() {
                 <TableRow key={u.id} className="hover:bg-slate-50/50" data-testid={`upload-row-${u.id}`}>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800 max-w-[300px] truncate">{u.file_name}</TableCell>
                   <TableCell><Badge variant="secondary" className="text-[10px] rounded-sm font-body">{u.upload_type?.replace('_', ' ')}</Badge></TableCell>
+                  <TableCell className="text-[12px] font-body text-slate-600">{u.uploaded_by_name || '-'}</TableCell>
                   <TableCell className="text-right text-[12px] tabular-nums">{u.total_records}</TableCell>
                   <TableCell className="text-right text-[12px] tabular-nums text-emerald-600">{u.success_records}</TableCell>
                   <TableCell className="text-right text-[12px] tabular-nums text-red-600">{u.failed_records || 0}</TableCell>
                   <TableCell className="text-[11px] text-slate-400">{u.created_at ? new Date(u.created_at).toLocaleString() : '-'}</TableCell>
+                  <TableCell>
+                    {user?.role === 'ADMIN' && (
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
+                        onClick={() => handleDelete(u.id, u.file_name)} data-testid={`delete-upload-${u.id}`}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

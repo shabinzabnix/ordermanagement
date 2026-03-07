@@ -403,6 +403,13 @@ async def get_uploads(
     query = query.order_by(UploadHistory.created_at.desc()).offset((page - 1) * limit).limit(limit)
     result = await db.execute(query)
     uploads = result.scalars().all()
+
+    # Get user names
+    uids = set(u.uploaded_by for u in uploads if u.uploaded_by)
+    umap = {}
+    if uids:
+        umap = {u.id: u.full_name for u in (await db.execute(select(User).where(User.id.in_(uids)))).scalars().all()}
+
     return {
         "uploads": [
             {
@@ -411,6 +418,7 @@ async def get_uploads(
                 "upload_type": u.upload_type.value if isinstance(u.upload_type, UploadType) else u.upload_type,
                 "store_id": u.store_id,
                 "uploaded_by": u.uploaded_by,
+                "uploaded_by_name": umap.get(u.uploaded_by, ""),
                 "total_records": u.total_records,
                 "success_records": u.success_records,
                 "failed_records": u.failed_records,
@@ -422,3 +430,18 @@ async def get_uploads(
         "page": page,
         "limit": limit,
     }
+
+
+
+@router.delete("/uploads/{upload_id}")
+async def delete_upload(
+    upload_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN")),
+):
+    upload = (await db.execute(select(UploadHistory).where(UploadHistory.id == upload_id))).scalar_one_or_none()
+    if not upload:
+        raise HTTPException(404, "Upload not found")
+    await db.delete(upload)
+    await db.commit()
+    return {"message": "Upload record deleted"}
