@@ -43,6 +43,7 @@ export default function StoreRequestPage() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatMsg, setChatMsg] = useState('');
   const [allComments, setAllComments] = useState([]);
+  const [msgSearch, setMsgSearch] = useState('');
   // HO review
   const [allItems, setAllItems] = useState([]);
   const [reviewFilter, setReviewFilter] = useState('all');
@@ -54,8 +55,10 @@ export default function StoreRequestPage() {
   const loadData = () => {
     api.get('/po/store-requests').then(r => setRequests(r.data.requests)).catch(() => {});
     api.get('/po/purchase-review?po_category=all').then(r => setAllItems(r.data.items)).catch(() => {});
-    api.get('/po/all-comments?limit=50').then(r => setAllComments(r.data.comments)).catch(() => {});
+    api.get('/po/all-comments', { params: { limit: 50, search: msgSearch || undefined } }).then(r => setAllComments(r.data.comments)).catch(() => {});
   };
+  useEffect(() => { loadData(); }, []);
+  useEffect(() => { api.get('/po/all-comments', { params: { limit: 50, search: msgSearch || undefined } }).then(r => setAllComments(r.data.comments)).catch(() => {}); }, [msgSearch]);
 
   useEffect(() => {
     if (productSearch.length < 2) { setSuggestions([]); return; }
@@ -166,6 +169,7 @@ export default function StoreRequestPage() {
                   {/* Header */}
                   <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-100">
                     <div className="flex items-center gap-2 min-w-0">
+                      <Badge className="text-[9px] rounded-sm bg-slate-200 text-slate-700 font-mono shrink-0">REQ-{it.request_id}</Badge>
                       <span className="text-[14px] font-heading font-bold text-slate-900 truncate">{it.product_name}</span>
                       <span className="font-mono text-[10px] text-slate-400 shrink-0">{it.product_id}</span>
                       {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm shrink-0">{it.product_info.sub_category}</Badge>}
@@ -295,14 +299,19 @@ export default function StoreRequestPage() {
         <TabsContent value="messages">
           <Card className="border-slate-200 shadow-sm rounded-sm">
             <CardHeader className="pb-2 border-b border-slate-100">
-              <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
-                <MessageCircle className="w-4 h-4 text-sky-500" /> All Communications ({allComments.length})
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
+                  <MessageCircle className="w-4 h-4 text-sky-500" /> All Communications ({allComments.length})
+                </CardTitle>
+                <div className="relative w-[250px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <Input placeholder="Search by request ID, store, product..." value={msgSearch} onChange={e => setMsgSearch(e.target.value)}
+                    className="pl-9 h-8 text-[11px] rounded-sm" /></div>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="max-h-[calc(100vh-280px)] overflow-auto">
                 {allComments.length === 0 ? (
-                  <div className="text-center py-16"><MessageCircle className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No messages yet</p></div>
+                  <div className="text-center py-16"><MessageCircle className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No messages</p></div>
                 ) : allComments.map(m => {
                   const isMe = m.user_name === user?.full_name;
                   return (
@@ -315,18 +324,18 @@ export default function StoreRequestPage() {
                         {m.user_name?.[0]?.toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[12px] font-body font-semibold text-slate-800">{m.user_name}</span>
                           <Badge className={`text-[7px] rounded-sm px-1 ${
                             m.user_role === 'STORE_STAFF' ? 'bg-emerald-50 text-emerald-600' :
                             m.user_role === 'CRM_STAFF' ? 'bg-rose-50 text-rose-600' :
                             m.user_role === 'HO_STAFF' ? 'bg-sky-50 text-sky-600' :
                             'bg-violet-50 text-violet-600'}`}>{m.user_role?.replace('_',' ')}</Badge>
+                          <Badge className="text-[8px] rounded-sm bg-slate-200 text-slate-700 font-mono">REQ-{m.request_id}</Badge>
+                          <Badge variant="secondary" className="text-[8px] rounded-sm">{m.store_name}</Badge>
                           <span className="text-[9px] text-slate-400">{m.created_at ? new Date(m.created_at).toLocaleString() : ''}</span>
                         </div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <Badge variant="secondary" className="text-[8px] rounded-sm px-1 shrink-0">{m.product_name?.slice(0,30)}</Badge>
-                        </div>
+                        <Badge variant="secondary" className="text-[8px] rounded-sm px-1 mt-0.5">{m.product_name?.slice(0,40)}</Badge>
                         <p className="text-[12px] font-body text-slate-700 mt-1">{m.message}</p>
                       </div>
                     </div>

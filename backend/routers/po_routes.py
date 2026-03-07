@@ -560,18 +560,38 @@ async def get_request_comments(item_id: int, db: AsyncSession = Depends(get_db),
 @router.get("/po/all-comments")
 async def get_all_comments(
     limit: int = Query(50),
+    search: str = Query(None),
     db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
 ):
-    comments = (await db.execute(select(RequestComment).order_by(RequestComment.created_at.desc()).limit(limit))).scalars().all()
-    # Get product names for each item
+    comments = (await db.execute(select(RequestComment).order_by(RequestComment.created_at.desc()).limit(200))).scalars().all()
     item_ids = set(c.item_id for c in comments)
     item_map = {}
+    req_map = {}
     if item_ids:
         for it in (await db.execute(select(StoreRequestItem).where(StoreRequestItem.id.in_(item_ids)))).scalars().all():
-            item_map[it.id] = it.product_name
-    return {"comments": [{"id": c.id, "item_id": c.item_id, "product_name": item_map.get(c.item_id, ""),
-                           "user_name": c.user_name, "user_role": c.user_role, "message": c.message,
-                           "created_at": c.created_at.isoformat() if c.created_at else None} for c in comments]}
+            item_map[it.id] = {"product_name": it.product_name, "request_id": it.request_id}
+        req_ids = set(v["request_id"] for v in item_map.values() if v.get("request_id"))
+        if req_ids:
+            smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+            for r in (await db.execute(select(StoreRequest).where(StoreRequest.id.in_(req_ids)))).scalars().all():
+                req_map[r.id] = {"store_name": smap.get(r.store_id, ""), "store_id": r.store_id}
+
+    result = []
+    for c in comments:
+        info = item_map.get(c.item_id, {})
+        rinfo = req_map.get(info.get("request_id"), {})
+        entry = {"id": c.id, "item_id": c.item_id,
+                 "request_id": info.get("request_id"),
+                 "product_name": info.get("product_name", ""),
+                 "store_name": rinfo.get("store_name", ""),
+                 "user_name": c.user_name, "user_role": c.user_role, "message": c.message,
+                 "created_at": c.created_at.isoformat() if c.created_at else None}
+        if search:
+            sl = search.lower()
+            if sl not in entry["product_name"].lower() and sl not in entry["store_name"].lower() and sl not in str(entry["request_id"]) and sl not in entry["message"].lower():
+                continue
+        result.append(entry)
+    return {"comments": result[:limit]}
 
 
 
