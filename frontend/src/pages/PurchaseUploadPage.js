@@ -145,21 +145,32 @@ export default function PurchaseUploadPage() {
             </TableBody></Table></div>
           </Card>
           <Card className="border-slate-200 shadow-sm rounded-sm">
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold">Purchase vs Sales (Top Products)</CardTitle></CardHeader>
-            <div className="overflow-auto max-h-[250px]"><Table>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold">Purchase vs Sales (Top Products by Amount)</CardTitle></CardHeader>
+            <div className="overflow-auto max-h-[300px]"><Table>
               <TableHeader><TableRow className="border-b border-slate-100">
-                {['Product', 'Purchased', 'Sold'].map(h => <TableHead key={h} className="text-[9px] uppercase tracking-wider font-bold text-slate-400 font-body py-2">{h}</TableHead>)}
+                {['Product', 'Purchase Amt', 'Sales Amt', 'Difference', 'Purch Qty', 'Sales Qty'].map(h => (
+                  <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 font-body py-2 ${h !== 'Product' ? 'text-right' : ''}`}>{h}</TableHead>
+                ))}
               </TableRow></TableHeader>
               <TableBody>
-                {analytics.purchase_vs_sales?.slice(0, 10).map((p, i) => (
-                  <TableRow key={i} className="hover:bg-slate-50/50">
-                    <TableCell className="text-[12px] font-medium text-slate-800 max-w-[180px] truncate">{p.product}</TableCell>
-                    <TableCell className="text-[11px] tabular-nums">{p.purchase_qty} qty / INR {p.purchase_amt.toLocaleString('en-IN')}</TableCell>
-                    <TableCell className="text-[11px] tabular-nums">{p.sales_qty} qty / INR {p.sales_amt.toLocaleString('en-IN')}</TableCell>
-                  </TableRow>
-                ))}
+                {analytics.purchase_vs_sales?.slice(0, 15).map((p, i) => {
+                  const diff = p.purchase_amt - p.sales_amt;
+                  return (
+                    <TableRow key={i} className="hover:bg-slate-50/50">
+                      <TableCell className="text-[12px] font-medium text-slate-800 max-w-[180px] truncate">{p.product}</TableCell>
+                      <TableCell className="text-right text-[11px] tabular-nums text-sky-700 font-medium">INR {p.purchase_amt.toLocaleString('en-IN')}</TableCell>
+                      <TableCell className="text-right text-[11px] tabular-nums text-emerald-700 font-medium">INR {p.sales_amt.toLocaleString('en-IN')}</TableCell>
+                      <TableCell className={`text-right text-[11px] tabular-nums font-medium ${diff > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                        {diff > 0 ? '+' : ''}{diff.toLocaleString('en-IN', {maximumFractionDigits: 0})}
+                      </TableCell>
+                      <TableCell className="text-right text-[10px] tabular-nums text-slate-500">{p.purchase_qty}</TableCell>
+                      <TableCell className="text-right text-[10px] tabular-nums text-slate-500">{p.sales_qty}</TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table></div>
+            <p className="text-[9px] text-slate-400 font-body px-4 py-1 border-t border-slate-100">Note: Purchase qty is in strips, Sales qty is in individual units. Amount (INR) comparison is accurate.</p>
           </Card>
         </div>
       )}
