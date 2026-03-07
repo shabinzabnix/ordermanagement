@@ -581,12 +581,14 @@ export default function POManagementPage() {
                   <Trash2 className="w-3 h-3 mr-1" /> Delete PO
                 </Button>
                 <Button variant="outline" className="rounded-sm font-body text-xs" onClick={savePoEdit}>Save Changes</Button>
-                <Button className="bg-emerald-500 hover:bg-emerald-600 rounded-sm font-body text-xs" onClick={() => { handleAction(poDetail.po.id, 'approve'); setPoDetail(null); }}>
-                  <Check className="w-3 h-3 mr-1" /> Approve
-                </Button>
-                <Button variant="outline" className="rounded-sm font-body text-xs text-red-600" onClick={() => { handleAction(poDetail.po.id, 'reject'); setPoDetail(null); }}>
-                  <X className="w-3 h-3 mr-1" /> Reject
-                </Button>
+                {user?.role === 'ADMIN' && (<>
+                  <Button className="bg-emerald-500 hover:bg-emerald-600 rounded-sm font-body text-xs" onClick={() => { handleAction(poDetail.po.id, 'approve'); setPoDetail(null); }}>
+                    <Check className="w-3 h-3 mr-1" /> Approve
+                  </Button>
+                  <Button variant="outline" className="rounded-sm font-body text-xs text-red-600" onClick={() => { handleAction(poDetail.po.id, 'reject'); setPoDetail(null); }}>
+                    <X className="w-3 h-3 mr-1" /> Reject
+                  </Button>
+                </>)}
               </>)}
               {poDetail.po.status === 'approved' && poDetail.po.fulfillment_status !== 'received' && (
                 <Select value="" onValueChange={v => { handleFulfillment(poDetail.po.id, v); setPoDetail(null); }}>
