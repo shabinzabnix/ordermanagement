@@ -184,55 +184,97 @@ export default function StoreRequestPage() {
 
         {/* Requests List - Individual Products */}
         <TabsContent value="requests">
-          <div className="space-y-2">
+          <div className="space-y-3">
             {allItems.length === 0 ? (
               <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><ShoppingCart className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No requests</p></CardContent></Card>
             ) : allItems.map(it => (
-              <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm ${it.item_status === 'approved' ? 'border-l-4 border-l-emerald-400' : it.item_status === 'ordered' ? 'border-l-4 border-l-sky-400' : it.item_status === 'rejected' ? 'border-l-4 border-l-red-400' : ''}`}>
-                <CardContent className="p-3 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-heading font-bold text-slate-900">{it.product_name}</span>
-                      {it.po_category && <Badge className={`text-[8px] rounded-sm ${{
-                        'BRAND-RX':'bg-blue-50 text-blue-700','GEN-RX':'bg-violet-50 text-violet-700','OTC':'bg-emerald-50 text-emerald-700','OTX':'bg-amber-50 text-amber-700',
+              <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm overflow-hidden ${
+                it.item_status === 'approved' ? 'border-l-4 border-l-emerald-500' :
+                it.item_status === 'ordered' ? 'border-l-4 border-l-sky-500' :
+                it.item_status === 'rejected' ? 'border-l-4 border-l-red-500' :
+                'border-l-4 border-l-amber-400'}`}>
+                <CardContent className="p-0">
+                  {/* Top Bar: Product Name + Status */}
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[14px] font-heading font-bold text-slate-900 truncate">{it.product_name}</span>
+                      <span className="font-mono text-[10px] text-slate-400 shrink-0">{it.product_id}</span>
+                      {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm shrink-0">{it.product_info.sub_category}</Badge>}
+                      {it.po_category && <Badge className={`text-[8px] rounded-sm shrink-0 ${{
+                        'BRAND-RX':'bg-blue-100 text-blue-700','GEN-RX':'bg-violet-100 text-violet-700','OTC':'bg-emerald-100 text-emerald-700','OTX':'bg-amber-100 text-amber-700',
                       }[it.po_category]||'bg-slate-100'}`}>{it.po_category}</Badge>}
-                      {it.product_info?.sub_category && <Badge variant="secondary" className="text-[8px] rounded-sm">{it.product_info.sub_category}</Badge>}
-                      <span className="font-mono text-[10px] text-slate-400">{it.product_id}</span>
                     </div>
-                    <Badge className={`text-[9px] rounded-sm ${sBadge(it.item_status)}`}>{it.item_status}</Badge>
+                    <Badge className={`text-[10px] rounded-sm px-2 py-0.5 font-medium ${sBadge(it.item_status)}`}>{it.item_status?.toUpperCase()}</Badge>
                   </div>
-                  <div className="flex gap-3 text-[11px] font-body text-slate-500 flex-wrap">
-                    <span>Store: <b className="text-slate-700">{it.store_name}</b></span>
-                    <span>Qty: <b className="text-slate-700">{it.quantity}</b></span>
-                    <span>L.Cost: <b className="text-slate-700">{it.landing_cost?.toFixed(2)}</b></span>
-                    <span>Value: <b className="text-slate-700">INR {(it.quantity*(it.landing_cost||0)).toFixed(2)}</b></span>
-                    <span>Sales 30d: <b className="text-slate-700">{it.sales_30d}</b></span>
-                    {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name} ({it.customer_mobile})</b></span>}
-                    <span>Reason: <Badge className={`text-[8px] rounded-sm ${reasonBadge(it.request_reason)}`}>{it.request_reason?.replace('_',' ')}</Badge></span>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-slate-400">Stock:</span>
-                    {it.store_stock?.length > 0 ? it.store_stock.map((s,j) => <Badge key={j} variant="secondary" className="text-[8px] rounded-sm px-1">{s.store}: {s.stock}</Badge>) : <span className="text-[10px] text-red-500">No stock</span>}
-                  </div>
-                  {isHO && (
-                    <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
-                      {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
-                        <Button key={type} variant="outline" size="sm" className={`h-5 px-2 rounded-sm text-[9px] ${it.selected_supplier===name?'bg-emerald-50 text-emerald-700 border-emerald-300':''}`}
-                          onClick={() => updateItem(it.id, name)}>{name} <span className="text-slate-400 ml-0.5">({type})</span></Button>
-                      ))}
-                      {it.selected_supplier && <Badge className="text-[9px] rounded-sm bg-emerald-100 text-emerald-800">Assigned: {it.selected_supplier}</Badge>}
-                      <div className="ml-auto flex items-center gap-2">
-                        <Select value="" onValueChange={v => updateItem(it.id, null, v)}>
-                          <SelectTrigger className="w-[90px] h-6 text-[10px] rounded-sm"><SelectValue placeholder="Status" /></SelectTrigger>
-                          <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
-                        </Select>
-                        <span className="text-[10px] text-slate-400">TAT:</span>
-                        <Input type="number" placeholder="d" className="w-[40px] h-6 text-[10px] rounded-sm text-center"
-                          defaultValue={it.tat_days||''} onBlur={e => {const v=parseInt(e.target.value);if(v>0)updateItem(it.id,null,null,v);}} />
-                        {it.tat_days && <span className="text-[10px] text-sky-600">{it.tat_days}d</span>}
+
+                  {/* Info Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-0 border-b border-slate-100">
+                    {[
+                      { l: 'Store', v: it.store_name },
+                      { l: 'Qty Requested', v: it.quantity },
+                      { l: 'L.Cost', v: `INR ${(it.landing_cost||0).toFixed(2)}` },
+                      { l: 'Est. Value', v: `INR ${(it.quantity*(it.landing_cost||0)).toFixed(2)}` },
+                    ].map(d => (
+                      <div key={d.l} className="px-4 py-2 border-r border-slate-100 last:border-r-0">
+                        <p className="text-[9px] font-body text-slate-400 uppercase">{d.l}</p>
+                        <p className="text-[13px] font-heading font-semibold text-slate-800">{d.v}</p>
                       </div>
+                    ))}
+                  </div>
+
+                  <div className="px-4 py-2.5 space-y-2.5">
+                    {/* Extra Info */}
+                    <div className="flex gap-4 text-[11px] font-body text-slate-500 flex-wrap">
+                      <span>Sales 30d: <b className="text-slate-700">{it.sales_30d || 0}</b></span>
+                      <span>Reason: <Badge className={`text-[8px] rounded-sm ${reasonBadge(it.request_reason)}`}>{it.request_reason?.replace('_',' ')}</Badge></span>
+                      {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name}</b> ({it.customer_mobile})</span>}
+                      {it.tat_days && <span>TAT: <b className="text-sky-700">{it.tat_days} days</b></span>}
+                      {it.selected_supplier && <span>Supplier: <b className="text-emerald-700">{it.selected_supplier}</b></span>}
                     </div>
-                  )}
+
+                    {/* Stock Row */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-body text-slate-400 font-medium">STOCK:</span>
+                      {it.store_stock?.length > 0
+                        ? it.store_stock.map((s,j) => <Badge key={j} className="text-[9px] rounded-sm bg-sky-50 text-sky-700 px-1.5">{s.store}: {s.stock}</Badge>)
+                        : <Badge className="text-[9px] rounded-sm bg-red-50 text-red-600">No stock anywhere</Badge>}
+                    </div>
+
+                    {/* HO Actions */}
+                    {isHO && (
+                      <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                        {/* Supplier Selection */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-body text-slate-500 font-medium w-[60px] shrink-0">Supplier:</span>
+                          {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
+                            <Button key={type} variant="outline" size="sm"
+                              className={`h-6 px-2.5 rounded-sm text-[10px] transition-all ${it.selected_supplier===name ? 'bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600' : 'hover:border-sky-300'}`}
+                              onClick={() => updateItem(it.id, name)}>
+                              {name} <span className={`ml-1 ${it.selected_supplier===name ? 'text-emerald-100' : 'text-slate-400'}`}>({type})</span>
+                            </Button>
+                          ))}
+                        </div>
+
+                        {/* Status + TAT + Submit */}
+                        <div className="flex items-center gap-3 bg-slate-50 rounded-sm p-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-body text-slate-500 font-medium">Status:</span>
+                            <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='approved'?'bg-emerald-500 text-white border-emerald-500':''}`}
+                              onClick={() => updateItem(it.id, null, 'approved')}>Approve</Button>
+                            <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='ordered'?'bg-sky-500 text-white border-sky-500':''}`}
+                              onClick={() => updateItem(it.id, null, 'ordered')}>Ordered</Button>
+                            <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${it.item_status==='rejected'?'bg-red-500 text-white border-red-500':''}`}
+                              onClick={() => updateItem(it.id, null, 'rejected')}>Reject</Button>
+                          </div>
+                          <div className="flex items-center gap-1.5 ml-auto">
+                            <span className="text-[10px] font-body text-slate-500">TAT:</span>
+                            <Input type="number" placeholder="days" className="w-[55px] h-7 text-[11px] rounded-sm text-center"
+                              defaultValue={it.tat_days||''} onBlur={e => {const v=parseInt(e.target.value);if(v>0)updateItem(it.id,null,null,v);}} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             ))}
