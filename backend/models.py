@@ -378,12 +378,16 @@ class StoreRequestItem(Base):
     po_category = Column(String(50), nullable=True)
     selected_supplier = Column(String(500), nullable=True)
     item_status = Column(String(30), default="pending")
+    tat_days = Column(Integer, nullable=True)
+    ho_remarks = Column(Text, nullable=True)
 
 class POComment(Base):
     __tablename__ = "po_comments"
     id = Column(Integer, primary_key=True, autoincrement=True)
     po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=False, index=True)
     user_name = Column(String(255))
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 class POCategoryRule(Base):
     __tablename__ = "po_category_rules"

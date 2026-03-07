@@ -322,12 +322,12 @@ export default function POManagementPage() {
               </div>
               <Select value={reviewStatus} onValueChange={setReviewStatus}>
                 <SelectTrigger className="w-[110px] h-7 text-xs rounded-sm"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="ordered">Ordered</SelectItem></SelectContent>
+                <SelectContent><SelectItem value="all">All</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="ordered">Ordered</SelectItem></SelectContent>
               </Select>
               {reviewSelected.length > 0 && (
                 <div className="flex gap-2 items-center ml-auto border-l pl-3 border-slate-200">
                   <span className="text-[11px] font-body text-sky-700 font-medium">{reviewSelected.length} selected</span>
-                  <Input placeholder="Supplier..." value={bulkSupplier} onChange={e => setBulkSupplier(e.target.value)} className="w-[140px] h-7 rounded-sm text-sm" />
+                  <Input placeholder="Supplier..." value={bulkSupplier} onChange={e => setBulkSupplier(e.target.value)} className="w-[130px] h-7 rounded-sm text-sm" />
                   <Select value={bulkStatus} onValueChange={setBulkStatus}>
                     <SelectTrigger className="w-[90px] h-7 text-[10px] rounded-sm"><SelectValue placeholder="Status" /></SelectTrigger>
                     <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
@@ -337,51 +337,65 @@ export default function POManagementPage() {
               )}
             </CardContent>
           </Card>
-          <Card className="border-slate-200 shadow-sm rounded-sm mt-3">
-            <div className="overflow-auto max-h-[calc(100vh-350px)]">
-              <Table><TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b-2 border-slate-100">
-                <TableHead className="w-[30px] py-3"><input type="checkbox" className="rounded" checked={reviewSelected.length === reviewItems.length && reviewItems.length > 0}
-                  onChange={e => e.target.checked ? setReviewSelected(reviewItems.map(i => i.id)) : setReviewSelected([])} /></TableHead>
-                {['Store', 'Product', 'Category', 'Qty', 'L.Cost', 'Primary', 'Secondary', 'Assigned', 'Status'].map(h => (
-                  <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Qty', 'L.Cost'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
-                ))}
-              </TableRow></TableHeader>
-              <TableBody>
-                {reviewItems.length === 0 ? (
-                  <TableRow><TableCell colSpan={10} className="text-center py-16"><Package className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No items. Set category rules in Admin and submit store requests.</p></TableCell></TableRow>
-                ) : reviewItems.map(it => (
-                  <TableRow key={it.id} className={`hover:bg-slate-50/50 ${reviewSelected.includes(it.id) ? 'bg-sky-50/50' : ''}`}>
-                    <TableCell className="py-1.5"><input type="checkbox" className="rounded" checked={reviewSelected.includes(it.id)} onChange={() => toggleReviewSelect(it.id)} /></TableCell>
-                    <TableCell className="text-[11px] text-slate-600">{it.store_name}</TableCell>
-                    <TableCell className="text-[12px] font-medium text-slate-800 max-w-[180px] truncate">{it.product_name}</TableCell>
-                    <TableCell><Badge className={`text-[8px] rounded-sm ${{
-                      'BRAND-RX': 'bg-blue-50 text-blue-700', 'GEN-RX': 'bg-violet-50 text-violet-700',
-                      'OTC': 'bg-emerald-50 text-emerald-700', 'OTX': 'bg-amber-50 text-amber-700',
-                    }[it.po_category] || 'bg-slate-100 text-slate-600'}`}>{it.po_category}</Badge></TableCell>
-                    <TableCell className="text-right text-[11px] tabular-nums">{it.quantity}</TableCell>
-                    <TableCell className="text-right text-[11px] tabular-nums">{it.landing_cost?.toFixed(2)}</TableCell>
-                    <TableCell className="text-[10px] text-sky-700 cursor-pointer hover:underline" onClick={() => updateReviewItem(it.id, it.suppliers?.primary)}>{it.suppliers?.primary || '-'}</TableCell>
-                    <TableCell className="text-[10px] text-slate-500 cursor-pointer hover:underline" onClick={() => updateReviewItem(it.id, it.suppliers?.secondary)}>{it.suppliers?.secondary || '-'}</TableCell>
-                    <TableCell>{it.selected_supplier
-                      ? <Badge className="text-[9px] rounded-sm bg-emerald-50 text-emerald-700">{it.selected_supplier}</Badge>
-                      : <Select value="" onValueChange={v => updateReviewItem(it.id, v)}>
-                          <SelectTrigger className="h-5 w-[70px] text-[9px] rounded-sm px-1"><SelectValue placeholder="Select" /></SelectTrigger>
-                          <SelectContent>{Object.entries(it.suppliers || {}).map(([t, n]) => n && <SelectItem key={t} value={n}>{n}</SelectItem>)}</SelectContent>
-                        </Select>}
-                    </TableCell>
-                    <TableCell>
-                      <Select value="" onValueChange={v => updateReviewItem(it.id, null, v)}>
-                        <SelectTrigger className={`h-5 w-[65px] text-[9px] rounded-sm px-1 ${{
-                          approved: 'bg-emerald-50 text-emerald-700', ordered: 'bg-sky-50 text-sky-700', rejected: 'bg-red-50 text-red-700',
-                        }[it.item_status] || 'bg-amber-50 text-amber-700'}`}><SelectValue placeholder={it.item_status} /></SelectTrigger>
-                        <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody></Table>
-            </div>
-          </Card>
+          <div className="space-y-2 mt-3">
+            {reviewItems.length === 0 ? (
+              <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><Package className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No emergency PO items</p></CardContent></Card>
+            ) : reviewItems.map(it => (
+              <Card key={it.id} className={`border-slate-200 shadow-sm rounded-sm ${reviewSelected.includes(it.id) ? 'ring-2 ring-sky-300' : ''} ${it.item_status === 'approved' ? 'border-l-4 border-l-emerald-400' : it.item_status === 'ordered' ? 'border-l-4 border-l-sky-400' : it.item_status === 'rejected' ? 'border-l-4 border-l-red-400' : ''}`}>
+                <CardContent className="p-3">
+                  <div className="flex items-start gap-3">
+                    <input type="checkbox" className="rounded mt-1" checked={reviewSelected.includes(it.id)} onChange={() => toggleReviewSelect(it.id)} />
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[14px] font-heading font-bold text-slate-900">{it.product_name}</span>
+                          <Badge className={`text-[8px] rounded-sm ${{
+                            'BRAND-RX': 'bg-blue-50 text-blue-700', 'GEN-RX': 'bg-violet-50 text-violet-700',
+                            'OTC': 'bg-emerald-50 text-emerald-700', 'OTX': 'bg-amber-50 text-amber-700',
+                          }[it.po_category] || 'bg-slate-100 text-slate-600'}`}>{it.po_category}</Badge>
+                          <span className="font-mono text-[10px] text-slate-400">{it.product_id}</span>
+                        </div>
+                        <Badge className={`text-[9px] rounded-sm ${{approved:'bg-emerald-50 text-emerald-700',ordered:'bg-sky-50 text-sky-700',rejected:'bg-red-50 text-red-700'}[it.item_status]||'bg-amber-50 text-amber-700'}`}>{it.item_status}</Badge>
+                      </div>
+                      <div className="flex gap-4 text-[11px] font-body text-slate-500">
+                        <span>Store: <b className="text-slate-700">{it.store_name}</b></span>
+                        <span>Qty: <b className="text-slate-700">{it.quantity}</b></span>
+                        <span>L.Cost: <b className="text-slate-700">{it.landing_cost?.toFixed(2)}</b></span>
+                        <span>Value: <b className="text-slate-700">INR {(it.quantity*(it.landing_cost||0)).toFixed(2)}</b></span>
+                        <span>Sales 30d: <b className="text-slate-700">{it.sales_30d}</b></span>
+                        {it.customer_name && <span>Customer: <b className="text-slate-700">{it.customer_name} ({it.customer_mobile})</b></span>}
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-body text-slate-400">Stock:</span>
+                        {it.store_stock?.length > 0 ? it.store_stock.map((s,j) => <Badge key={j} variant="secondary" className="text-[8px] rounded-sm px-1">{s.store}: {s.stock}</Badge>) : <span className="text-[10px] text-red-500">No stock</span>}
+                        <span className="text-[10px] text-slate-400 ml-2">Network: <b>{it.total_network_stock}</b></span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-body text-slate-400">Suppliers:</span>
+                        {Object.entries(it.suppliers||{}).map(([type,name]) => name && (
+                          <Button key={type} variant="outline" size="sm" className={`h-5 px-2 rounded-sm text-[9px] ${it.selected_supplier===name?'bg-emerald-50 text-emerald-700 border-emerald-300':''}`}
+                            onClick={() => updateReviewItem(it.id, name)}>{name} <span className="text-slate-400 ml-1">({type})</span></Button>
+                        ))}
+                        {it.selected_supplier && <Badge className="text-[9px] rounded-sm bg-emerald-100 text-emerald-800 ml-1">Assigned: {it.selected_supplier}</Badge>}
+                      </div>
+                      <div className="flex items-center gap-3 pt-1 border-t border-slate-100">
+                        <Select value="" onValueChange={v => updateReviewItem(it.id, null, v)}>
+                          <SelectTrigger className="w-[100px] h-6 text-[10px] rounded-sm"><SelectValue placeholder="Update Status" /></SelectTrigger>
+                          <SelectContent><SelectItem value="approved">Approve</SelectItem><SelectItem value="ordered">Ordered</SelectItem><SelectItem value="rejected">Reject</SelectItem></SelectContent>
+                        </Select>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-slate-400">TAT:</span>
+                          <Input type="number" placeholder="days" className="w-[50px] h-6 text-[10px] rounded-sm text-center"
+                            defaultValue={it.tat_days||''} onBlur={e => {const v=parseInt(e.target.value);if(v>0)api.put('/po/purchase-review/update',{item_ids:[it.id],tat_days:v}).then(()=>loadData());}} />
+                        </div>
+                        {it.tat_days && <span className="text-[10px] text-sky-600">TAT: {it.tat_days}d</span>}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </TabsContent>
 
         {/* Purchase Orders Tab */}

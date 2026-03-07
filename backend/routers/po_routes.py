@@ -771,7 +771,7 @@ async def purchase_review(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
 ):
-    """Get all store request items that have a PO category, with supplier options."""
+    """Get all store request items with PO category — full details per product."""
     query = select(StoreRequestItem).where(StoreRequestItem.po_category.isnot(None))
     if po_category and po_category != "all":
         query = query.where(StoreRequestItem.po_category == po_category)
@@ -780,19 +780,20 @@ async def purchase_review(
 
     items = (await db.execute(query.order_by(StoreRequestItem.id.desc()))).scalars().all()
 
-    # Get request info and product suppliers
     req_ids = set(it.request_id for it in items)
     req_map = {}
     if req_ids:
         for r in (await db.execute(select(StoreRequest).where(StoreRequest.id.in_(req_ids)))).scalars().all():
             req_map[r.id] = r
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    now = datetime.now(timezone.utc)
 
     result = []
     for it in items:
         req = req_map.get(it.request_id)
-        # Get suppliers from Product Master
+        # Suppliers from Product Master
         suppliers = {}
+        prod_info = {}
         if it.product_id:
             prod = (await db.execute(select(Product).where(Product.product_id == it.product_id))).scalar_one_or_none()
             if prod:
@@ -800,16 +801,44 @@ async def purchase_review(
                 if prod.secondary_supplier: suppliers["secondary"] = prod.secondary_supplier
                 if prod.least_price_supplier: suppliers["least_price"] = prod.least_price_supplier
                 if prod.most_qty_supplier: suppliers["most_qty"] = prod.most_qty_supplier
+                prod_info = {"category": prod.category, "sub_category": prod.sub_category, "mrp": prod.mrp or 0, "ptr": prod.ptr or 0}
+
+        # Stock across ALL stores
+        store_stock = []
+        if it.product_id:
+            ss_q = (await db.execute(
+                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock"))
+                .where(StoreStockBatch.ho_product_id == it.product_id)
+                .group_by(StoreStockBatch.store_id)
+            )).all()
+            store_stock = [{"store": smap.get(r[0], ""), "stock": round(float(r[1] or 0), 0)} for r in ss_q if float(r[1] or 0) > 0]
+
+        # Sales trend
+        sales_30d = 0
+        if it.product_id:
+            sales_30d = float((await db.execute(
+                select(func.sum(SalesRecord.quantity)).where(and_(
+                    SalesRecord.product_id == it.product_id, SalesRecord.invoice_date >= now - timedelta(days=30)
+                ))
+            )).scalar() or 0)
 
         result.append({
             "id": it.id, "request_id": it.request_id,
             "store_name": smap.get(req.store_id, "") if req else "",
+            "customer_name": req.customer_name if req else None,
+            "customer_mobile": req.customer_mobile if req else None,
+            "request_reason": req.request_reason if req else "",
             "product_id": it.product_id, "product_name": it.product_name,
             "quantity": it.quantity, "landing_cost": it.landing_cost,
             "po_category": it.po_category, "item_status": it.item_status,
             "selected_supplier": it.selected_supplier,
+            "tat_days": it.tat_days, "ho_remarks": it.ho_remarks,
             "suppliers": suppliers,
-            "request_reason": req.request_reason if req else "",
+            "store_stock": store_stock,
+            "total_network_stock": sum(s["stock"] for s in store_stock),
+            "sales_30d": round(sales_30d, 0),
+            "product_info": prod_info,
+            "created_at": req.created_at.isoformat() if req and req.created_at else None,
         })
 
     return {"items": result, "total": len(result)}
@@ -819,18 +848,19 @@ class UpdateItemReq(BaseModel):
     item_ids: List[int]
     supplier: Optional[str] = None
     status: Optional[str] = None
+    tat_days: Optional[int] = None
+    ho_remarks: Optional[str] = None
 
 
 @router.put("/po/purchase-review/update")
 async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF"))):
-    """Bulk update supplier or status for selected items."""
     for iid in data.item_ids:
         it = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.id == iid))).scalar_one_or_none()
         if it:
-            if data.supplier:
-                it.selected_supplier = data.supplier
-            if data.status:
-                it.item_status = data.status
-    await _log(db, user, f"Updated {len(data.item_ids)} review items: supplier={data.supplier}, status={data.status}", "purchase_review")
+            if data.supplier: it.selected_supplier = data.supplier
+            if data.status: it.item_status = data.status
+            if data.tat_days is not None: it.tat_days = data.tat_days
+            if data.ho_remarks is not None: it.ho_remarks = data.ho_remarks
+    await _log(db, user, f"Updated {len(data.item_ids)} items: supplier={data.supplier}, status={data.status}, tat={data.tat_days}", "purchase_review")
     await db.commit()
     return {"message": f"Updated {len(data.item_ids)} items"}
