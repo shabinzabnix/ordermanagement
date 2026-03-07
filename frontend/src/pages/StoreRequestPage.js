@@ -7,9 +7,10 @@ import { Label } from '../components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
-import { ShoppingCart, Search, Trash2 } from 'lucide-react';
+import { ShoppingCart, Search, Trash2, Plus, FileText } from 'lucide-react';
 
 export default function StoreRequestPage() {
   const { user } = useAuth();
@@ -24,11 +25,17 @@ export default function StoreRequestPage() {
   const [suggestions, setSuggestions] = useState([]);
   const [showSugg, setShowSugg] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Non-registered product form
+  const [manualName, setManualName] = useState('');
+  const [manualQty, setManualQty] = useState('');
+  const [manualCost, setManualCost] = useState('');
+  const [hasPrescription, setHasPrescription] = useState(false);
+  const [doctorName, setDoctorName] = useState('');
+  const [clinicLocation, setClinicLocation] = useState('');
   const sugRef = useRef(null);
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); loadRequests(); }, []);
   useEffect(() => { if (user?.role === 'STORE_STAFF' && user?.store_id) setStoreId(String(user.store_id)); }, [user]);
-
   const loadRequests = () => { api.get('/po/store-requests').then(r => setRequests(r.data.requests)).catch(() => {}); };
 
   useEffect(() => {
@@ -36,26 +43,26 @@ export default function StoreRequestPage() {
     const t = setTimeout(() => { api.get('/products', { params: { search: productSearch, limit: 15 } }).then(r => { setSuggestions(r.data.products); setShowSugg(true); }).catch(() => {}); }, 300);
     return () => clearTimeout(t);
   }, [productSearch]);
-  useEffect(() => {
-    const h = (e) => { if (sugRef.current && !sugRef.current.contains(e.target)) setShowSugg(false); };
-    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
-  }, []);
+  useEffect(() => { const h = (e) => { if (sugRef.current && !sugRef.current.contains(e.target)) setShowSugg(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
 
   const addProduct = (p) => {
     if (items.find(i => i.product_id === p.product_id)) { toast.warning('Already added'); return; }
-    // Fetch stock info for this product
     api.get('/po/product-stock-info', { params: { product_id: p.product_id } }).then(r => {
       const info = r.data.products?.[0];
-      setItems(prev => [...prev, {
-        product_id: p.product_id, product_name: p.product_name,
-        landing_cost: info?.landing_cost || p.landing_cost || 0, quantity: 1,
-        store_stock: info?.store_stock || [], total_stock: info?.total_stock || 0,
-      }]);
-    }).catch(() => {
-      setItems(prev => [...prev, { product_id: p.product_id, product_name: p.product_name, landing_cost: p.landing_cost || 0, quantity: 1, store_stock: [], total_stock: 0 }]);
-    });
+      setItems(prev => [...prev, { product_id: p.product_id, product_name: p.product_name, is_registered: true,
+        landing_cost: info?.landing_cost || p.landing_cost || 0, quantity: 1, store_stock: info?.store_stock || [], has_prescription: false }]);
+    }).catch(() => { setItems(prev => [...prev, { product_id: p.product_id, product_name: p.product_name, is_registered: true, landing_cost: p.landing_cost || 0, quantity: 1, store_stock: [], has_prescription: false }]); });
     setProductSearch(''); setShowSugg(false);
   };
+
+  const addManualProduct = () => {
+    if (!manualName) return;
+    setItems([...items, { product_id: null, product_name: manualName, is_registered: false,
+      landing_cost: parseFloat(manualCost) || 0, quantity: parseFloat(manualQty) || 1, store_stock: [],
+      has_prescription: hasPrescription, doctor_name: hasPrescription ? doctorName : null, clinic_location: hasPrescription ? clinicLocation : null }]);
+    setManualName(''); setManualQty(''); setManualCost(''); setHasPrescription(false); setDoctorName(''); setClinicLocation('');
+  };
+
   const updateQty = (idx, qty) => { const n = [...items]; n[idx].quantity = parseFloat(qty) || 0; setItems(n); };
   const removeItem = (idx) => setItems(items.filter((_, i) => i !== idx));
   const totalValue = items.reduce((s, i) => s + (i.quantity * i.landing_cost), 0);
@@ -69,7 +76,9 @@ export default function StoreRequestPage() {
       const res = await api.post('/po/store-request', {
         store_id: parseInt(storeId), request_reason: reason,
         customer_name: needsCustomer ? custName : null, customer_mobile: needsCustomer ? custMobile : null,
-        items: items.map(i => ({ product_id: i.product_id, product_name: i.product_name, quantity: i.quantity })),
+        items: items.map(i => ({ product_id: i.product_id, product_name: i.product_name, is_registered: i.is_registered,
+          quantity: i.quantity, has_prescription: i.has_prescription || false,
+          doctor_name: i.doctor_name || null, clinic_location: i.clinic_location || null })),
       });
       toast.success(`Request submitted! Approx INR ${res.data.total_value.toLocaleString('en-IN')}`);
       setReason(''); setCustName(''); setCustMobile(''); setItems([]);
@@ -104,9 +113,10 @@ export default function StoreRequestPage() {
               <div className="space-y-1.5"><Label className="font-body text-xs">Mobile *</Label><Input value={custMobile} onChange={e => setCustMobile(e.target.value)} className="rounded-sm font-mono" maxLength={10} /></div>
             </div>
           )}
-          {reason && (
+          {reason && (<>
+            {/* Registered Product Search */}
             <div className="space-y-1.5" ref={sugRef}>
-              <Label className="font-body text-xs font-medium">2. Add Products (qty in strips)</Label>
+              <Label className="font-body text-xs font-medium">2. Add Registered Products (qty in strips)</Label>
               <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                 <Input placeholder="Search product by name or ID..." value={productSearch} onChange={e => setProductSearch(e.target.value)}
                   onFocus={() => suggestions.length > 0 && setShowSugg(true)} className="rounded-sm pl-9" autoComplete="off" />
@@ -117,31 +127,62 @@ export default function StoreRequestPage() {
                   </div>)}
               </div>
             </div>
-          )}
+
+            {/* Non-Registered Product */}
+            <Card className="border-slate-200 rounded-sm">
+              <CardHeader className="py-2 px-4"><CardTitle className="text-xs font-heading font-semibold text-slate-600">Add Non-Registered Product</CardTitle></CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                <div className="grid grid-cols-3 gap-2">
+                  <Input placeholder="Product name *" value={manualName} onChange={e => setManualName(e.target.value)} className="rounded-sm text-sm" />
+                  <Input placeholder="Qty" type="number" value={manualQty} onChange={e => setManualQty(e.target.value)} className="rounded-sm text-sm" />
+                  <Input placeholder="Approx cost" type="number" value={manualCost} onChange={e => setManualCost(e.target.value)} className="rounded-sm text-sm" />
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox checked={hasPrescription} onCheckedChange={v => setHasPrescription(v)} className="rounded-sm" />
+                    <span className="text-[11px] font-body text-slate-700">Prescription available</span>
+                  </label>
+                </div>
+                {hasPrescription && (
+                  <div className="grid grid-cols-2 gap-2 p-2.5 bg-violet-50/50 border border-violet-200 rounded-sm">
+                    <div className="space-y-1"><Label className="font-body text-[10px] text-violet-600">Doctor Name</Label>
+                      <Input value={doctorName} onChange={e => setDoctorName(e.target.value)} className="rounded-sm text-sm h-8" placeholder="Dr. name" /></div>
+                    <div className="space-y-1"><Label className="font-body text-[10px] text-violet-600">Clinic / Location</Label>
+                      <Input value={clinicLocation} onChange={e => setClinicLocation(e.target.value)} className="rounded-sm text-sm h-8" placeholder="Clinic location" /></div>
+                  </div>
+                )}
+                <Button variant="outline" size="sm" className="rounded-sm font-body text-xs" onClick={addManualProduct} disabled={!manualName}>
+                  <Plus className="w-3 h-3 mr-1" /> Add Non-Registered Product
+                </Button>
+              </CardContent>
+            </Card>
+          </>)}
+
+          {/* Selected Items */}
           {items.length > 0 && (<>
             <Card className="border-emerald-200 rounded-sm">
               <Table><TableHeader><TableRow className="border-b border-slate-100">
-                {['Product', 'ID', 'Stock', 'Qty (Strips)', 'L.Cost', 'Value', ''].map(h => (
-                  <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty (Strips)', 'L.Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                {['Product', 'Type', 'Stock', 'Qty', 'L.Cost', 'Value', 'Rx', ''].map(h => (
+                  <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty', 'L.Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow></TableHeader><TableBody>{items.map((it, i) => (
                 <TableRow key={i}>
-                  <TableCell className="text-[12px] font-medium text-slate-800 py-1.5">{it.product_name}</TableCell>
-                  <TableCell className="font-mono text-[10px] text-slate-400">{it.product_id}</TableCell>
-                  <TableCell className="py-1.5">
-                    <div className="flex gap-0.5 flex-wrap">{it.store_stock?.length > 0
-                      ? it.store_stock.map((s, j) => <Badge key={j} variant="secondary" className="text-[8px] rounded-sm px-1">{s.store}: {s.stock}</Badge>)
-                      : <span className="text-[10px] text-red-400">No stock</span>}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right py-1.5"><Input type="number" min={1} value={it.quantity} onChange={e => updateQty(i, e.target.value)} className="w-[70px] h-7 text-right rounded-sm text-[12px] ml-auto" /></TableCell>
+                  <TableCell className="text-[12px] font-medium text-slate-800 py-1.5 max-w-[150px] truncate">{it.product_name}</TableCell>
+                  <TableCell>{it.is_registered ? <Badge className="text-[8px] rounded-sm bg-emerald-50 text-emerald-700">Reg</Badge> : <Badge className="text-[8px] rounded-sm bg-amber-50 text-amber-700">Manual</Badge>}</TableCell>
+                  <TableCell className="py-1"><div className="flex gap-0.5 flex-wrap">{it.store_stock?.length > 0
+                    ? it.store_stock.map((s, j) => <Badge key={j} variant="secondary" className="text-[7px] rounded-sm px-1">{s.store}:{s.stock}</Badge>)
+                    : <span className="text-[9px] text-slate-400">{it.is_registered ? 'No stock' : '-'}</span>}</div></TableCell>
+                  <TableCell className="text-right py-1.5"><Input type="number" min={1} value={it.quantity} onChange={e => updateQty(i, e.target.value)} className="w-[60px] h-7 text-right rounded-sm text-[12px] ml-auto" /></TableCell>
                   <TableCell className="text-right text-[11px] tabular-nums">{it.landing_cost.toFixed(2)}</TableCell>
                   <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {(it.quantity * it.landing_cost).toFixed(2)}</TableCell>
+                  <TableCell>{it.has_prescription && (
+                    <Badge className="text-[7px] rounded-sm bg-violet-50 text-violet-700" title={`Dr: ${it.doctor_name || '-'} | ${it.clinic_location || '-'}`}><FileText className="w-2.5 h-2.5 inline mr-0.5" />Rx</Badge>
+                  )}</TableCell>
                   <TableCell><Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400" onClick={() => removeItem(i)}><Trash2 className="w-3 h-3" /></Button></TableCell>
                 </TableRow>
               ))}</TableBody></Table>
               <div className="flex justify-between items-center px-4 py-2 bg-emerald-50 border-t border-emerald-100">
-                <span className="text-[12px] font-body text-emerald-800">{items.length} items</span>
+                <span className="text-[12px] font-body text-emerald-800">{items.length} items | {items.filter(i => !i.is_registered).length} non-registered</span>
                 <span className="text-lg font-heading font-bold text-emerald-700 tabular-nums">INR {totalValue.toFixed(2)}</span>
               </div>
             </Card>
@@ -152,6 +193,7 @@ export default function StoreRequestPage() {
         </CardContent>
       </Card>
 
+      {/* Existing Requests */}
       <Card className="border-slate-200 shadow-sm rounded-sm">
         <CardHeader className="pb-2"><CardTitle className="text-sm font-heading font-semibold">My Requests</CardTitle></CardHeader>
         <div className="overflow-auto max-h-[250px]"><Table><TableHeader><TableRow className="border-b-2 border-slate-100">

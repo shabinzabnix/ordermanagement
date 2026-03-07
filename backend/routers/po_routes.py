@@ -115,7 +115,11 @@ async def product_stock_info(
 class RequestItemReq(BaseModel):
     product_id: Optional[str] = None
     product_name: str
+    is_registered: bool = True
     quantity: float
+    has_prescription: bool = False
+    doctor_name: Optional[str] = None
+    clinic_location: Optional[str] = None
 
 class StoreRequestReq(BaseModel):
     store_id: int
@@ -171,9 +175,12 @@ async def create_store_request(
 
         items_data.append({
             "product_id": item.product_id, "product_name": item.product_name,
+            "is_registered": item.is_registered,
             "quantity": item.quantity, "landing_cost": lcost,
             "estimated_value": est_value, "current_store_stock": store_stock,
             "pending_orders": pending,
+            "has_prescription": item.has_prescription,
+            "doctor_name": item.doctor_name, "clinic_location": item.clinic_location,
         })
 
     req = StoreRequest(
@@ -188,9 +195,12 @@ async def create_store_request(
     for it in items_data:
         db.add(StoreRequestItem(
             request_id=req.id, product_id=it["product_id"], product_name=it["product_name"],
+            is_registered=it["is_registered"],
             quantity=it["quantity"], landing_cost=it["landing_cost"],
             estimated_value=it["estimated_value"], current_store_stock=it["current_store_stock"],
             pending_orders=it["pending_orders"],
+            has_prescription=it["has_prescription"],
+            doctor_name=it["doctor_name"], clinic_location=it["clinic_location"],
         ))
 
     await _log(db, user, f"Created store request: {len(items_data)} items, INR {total_value}", "store_request", req.id)
@@ -228,9 +238,12 @@ async def list_store_requests(
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "items": [{
                 "id": it.id, "product_id": it.product_id, "product_name": it.product_name,
+                "is_registered": it.is_registered,
                 "quantity": it.quantity, "landing_cost": it.landing_cost,
                 "estimated_value": it.estimated_value, "current_store_stock": it.current_store_stock,
                 "pending_orders": it.pending_orders,
+                "has_prescription": it.has_prescription,
+                "doctor_name": it.doctor_name, "clinic_location": it.clinic_location,
             } for it in items],
         })
     return {"requests": result, "total": total}
