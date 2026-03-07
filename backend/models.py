@@ -398,6 +398,17 @@ class POCategoryRule(Base):
     sub_categories = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+
+
+class RequestComment(Base):
+    __tablename__ = "request_comments"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(Integer, ForeignKey("store_request_items.id"), nullable=False, index=True)
+    user_name = Column(String(255))
+    user_role = Column(String(50))
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
     message = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

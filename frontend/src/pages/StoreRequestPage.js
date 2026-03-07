@@ -11,7 +11,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
-import { ShoppingCart, Search, Trash2, Plus, Package } from 'lucide-react';
+import { ShoppingCart, Search, Trash2, Plus, Package, MessageCircle, Send } from 'lucide-react';
 
 export default function StoreRequestPage() {
   const { user } = useAuth();
@@ -38,6 +38,10 @@ export default function StoreRequestPage() {
   const [doctorName, setDoctorName] = useState('');
   const [clinicLocation, setClinicLocation] = useState('');
   const [saving, setSaving] = useState(false);
+  // Chat
+  const [chatOpen, setChatOpen] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatMsg, setChatMsg] = useState('');
   // HO review
   const [allItems, setAllItems] = useState([]);
   const [reviewFilter, setReviewFilter] = useState('all');
@@ -99,6 +103,18 @@ export default function StoreRequestPage() {
 
   const updateItem = async (id, updates) => {
     try { await api.put('/po/purchase-review/update', { item_ids: [id], ...updates }); loadData(); } catch { toast.error('Failed'); }
+  };
+
+  const openChat = async (itemId) => {
+    setChatOpen(itemId);
+    setChatMsg('');
+    try { const r = await api.get(`/po/request-comments/${itemId}`); setChatMessages(r.data.comments); } catch { setChatMessages([]); }
+  };
+  const sendChat = async () => {
+    if (!chatMsg.trim() || !chatOpen) return;
+    try { await api.post('/po/request-comment', { item_id: chatOpen, message: chatMsg }); setChatMsg('');
+      const r = await api.get(`/po/request-comments/${chatOpen}`); setChatMessages(r.data.comments);
+    } catch { toast.error('Failed'); }
   };
 
   const reasonBadge = (r) => r === 'emergency_purchase' ? 'bg-red-50 text-red-700' : r === 'stock_refill' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700';
@@ -182,13 +198,44 @@ export default function StoreRequestPage() {
                       </div>
                     )}
                     {/* Communication */}
-                    {(canApprove || canManage) && (
-                      <div className="flex items-center gap-2">
-                        <Input placeholder="Add remark / communication..." className="flex-1 h-7 text-[11px] rounded-sm"
-                          defaultValue={it.ho_remarks||''} onBlur={e => {if(e.target.value!==it.ho_remarks)updateItem(it.id,{ho_remarks:e.target.value});}} />
+                    {it.ho_remarks && <p className="text-[10px] font-body text-violet-600 bg-violet-50/50 px-2 py-1 rounded-sm">{it.ho_remarks}</p>}
+                    {/* Chat Button */}
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" className={`h-7 px-3 rounded-sm text-[10px] ${chatOpen === it.id ? 'bg-sky-50 border-sky-300' : ''}`}
+                        onClick={() => chatOpen === it.id ? setChatOpen(null) : openChat(it.id)}>
+                        <MessageCircle className="w-3 h-3 mr-1" /> Chat
+                      </Button>
+                    </div>
+                    {/* Chat Panel */}
+                    {chatOpen === it.id && (
+                      <div className="bg-slate-50 rounded-sm border border-slate-200 overflow-hidden">
+                        <div className="max-h-[200px] overflow-auto p-2 space-y-1.5">
+                          {chatMessages.length === 0 && <p className="text-[10px] text-slate-400 text-center py-4">No messages yet</p>}
+                          {chatMessages.map(m => {
+                            const isMe = m.user_name === user?.full_name;
+                            return (
+                              <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[80%] rounded-lg px-3 py-1.5 ${isMe ? 'bg-sky-500 text-white' : 'bg-white border border-slate-200'}`}>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`text-[9px] font-medium ${isMe ? 'text-sky-100' : 'text-sky-700'}`}>{m.user_name}</span>
+                                    <Badge className={`text-[7px] rounded-sm px-1 ${isMe ? 'bg-sky-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{m.user_role?.replace('_',' ')}</Badge>
+                                  </div>
+                                  <p className={`text-[11px] ${isMe ? 'text-white' : 'text-slate-700'}`}>{m.message}</p>
+                                  <p className={`text-[8px] mt-0.5 ${isMe ? 'text-sky-200' : 'text-slate-400'}`}>{m.created_at ? new Date(m.created_at).toLocaleString() : ''}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex gap-1.5 p-2 border-t border-slate-200 bg-white">
+                          <Input placeholder="Type message..." value={chatMsg} onChange={e => setChatMsg(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && sendChat()} className="flex-1 h-8 text-[11px] rounded-sm" />
+                          <Button size="sm" className="h-8 w-8 p-0 bg-sky-500 hover:bg-sky-600 rounded-sm" onClick={sendChat} disabled={!chatMsg.trim()}>
+                            <Send className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     )}
-                    {it.ho_remarks && <p className="text-[10px] font-body text-violet-600 bg-violet-50/50 px-2 py-1 rounded-sm">{it.ho_remarks}</p>}
                     {/* Store: Cancel option */}
                     {isStore && it.item_status === 'pending' && (
                       <Button size="sm" variant="outline" className="h-7 px-3 rounded-sm text-[10px] text-red-600 border-red-200 hover:bg-red-50"

@@ -5,7 +5,7 @@ from database import get_db
 from models import (
     Product, Store, StoreStockBatch, SalesRecord, PurchaseRecord,
     PurchaseOrder, PurchaseOrderItem, StoreRequest, StoreRequestItem,
-    AuditLog, POComment, POCategoryRule,
+    AuditLog, POComment, POCategoryRule, RequestComment,
 )
 from auth import get_current_user, require_roles
 from pydantic import BaseModel
@@ -536,6 +536,26 @@ async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(ge
     await _log(db, user, f"Updated {len(data.item_ids)} items", "purchase_review")
     await db.commit()
     return {"message": f"Updated {len(data.item_ids)} items"}
+
+
+class RequestCommentReq(BaseModel):
+    item_id: int
+    message: str
+
+
+@router.post("/po/request-comment")
+async def add_request_comment(data: RequestCommentReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    db.add(RequestComment(item_id=data.item_id, user_name=user.get("full_name", ""), user_role=user.get("role", ""), message=data.message))
+    await db.commit()
+    return {"message": "Comment added"}
+
+
+@router.get("/po/request-comments/{item_id}")
+async def get_request_comments(item_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    comments = (await db.execute(select(RequestComment).where(RequestComment.item_id == item_id).order_by(RequestComment.created_at))).scalars().all()
+    return {"comments": [{"id": c.id, "user_name": c.user_name, "user_role": c.user_role, "message": c.message,
+                           "created_at": c.created_at.isoformat() if c.created_at else None} for c in comments]}
+
 
 
 
