@@ -1,12 +1,12 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from starlette.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pathlib import Path
 import os
 import logging
 from database import init_db, async_session_maker
-from models import User, UserRole
-from auth import hash_password
+from models import User, UserRole, AuditLog
+from auth import hash_password, decode_token
 from routers.auth_routes import router as auth_router
 from routers.data_routes import router as data_router
 from routers.operations_routes import router as operations_router
@@ -28,6 +28,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Audit middleware - logs all POST/PUT/DELETE actions
+@app.middleware("http")
+async def audit_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.method in ("POST", "PUT", "DELETE") and "/api/" in request.url.path and response.status_code < 400:
+        try:
+            auth = request.headers.get("authorization", "")
+            if auth.startswith("Bearer "):
+                token_data = decode_token(auth.split(" ")[1])
+                user_id = token_data.get("user_id", 0)
+                user_name = token_data.get("full_name", "")
+                path = request.url.path.replace("/api/", "")
+                action = f"{request.method} /{path}"
+                async with async_session_maker() as session:
+                    session.add(AuditLog(user_id=user_id, user_name=user_name, action=action, entity_type=path.split("/")[0]))
+                    await session.commit()
+        except Exception:
+            pass
+    return response
 
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(data_router, prefix="/api", tags=["Data"])

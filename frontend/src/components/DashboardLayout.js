@@ -128,6 +128,12 @@ export default function DashboardLayout({ children }) {
       <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
           <h1 className="font-heading text-[15px] font-semibold text-slate-900 tracking-tight">{currentPage}</h1>
+          <div className="flex items-center gap-4">
+            <div className="hidden md:flex items-center gap-2 text-[11px] font-body text-slate-400">
+              <span>{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+              <span className="text-slate-200">|</span>
+              <span className="uppercase tracking-wider">{user?.role?.replace('_', ' ')}</span>
+            </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -151,6 +157,7 @@ export default function DashboardLayout({ children }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </header>
 
         <main className="flex-1 overflow-auto p-6">
