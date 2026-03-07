@@ -56,7 +56,8 @@ export default function TransfersPage() {
   const loadNetworkStock = async (productId) => {
     try {
       const res = await api.get(`/stock/availability/${productId}`);
-      setNetworkStock(res.data.availability);
+      // Filter out Head Office stock - only show store stock for inter-store transfers
+      setNetworkStock((res.data.availability || []).filter(s => s.store_id));
     } catch { setNetworkStock([]); }
   };
 
@@ -211,7 +212,6 @@ export default function TransfersPage() {
                                 {storesWithStock.map(s => (
                                   <SelectItem key={s.store_id} value={String(s.store_id)}>{s.location} ({s.stock} units)</SelectItem>
                                 ))}
-                                {networkStock.some(n => !n.store_id) && <SelectItem value="ho">Head Office</SelectItem>}
                               </SelectContent>
                             </Select>
                           </div>
