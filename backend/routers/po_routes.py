@@ -638,11 +638,20 @@ async def upload_po_by_subcategory(
 @router.get("/po/{po_id}/pdf")
 async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     """Generate PO PDF with letterhead."""
+    import base64
+    from pathlib import Path
+
     po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))).scalar_one_or_none()
     if not po:
         raise HTTPException(404, "PO not found")
     items = (await db.execute(select(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po_id))).scalars().all()
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    # Load letterhead as base64
+    letterhead_b64 = ""
+    lh_path = Path(__file__).parent.parent.parent / "frontend" / "public" / "letterhead.jpeg"
+    if lh_path.exists():
+        letterhead_b64 = base64.b64encode(lh_path.read_bytes()).decode()
 
     # Generate HTML for PDF
     items_html = ""
@@ -659,7 +668,8 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
     html = f"""<!DOCTYPE html><html><head><style>
         @page {{ margin: 0; size: A4; }}
         body {{ font-family: 'Helvetica', sans-serif; margin: 0; padding: 0; }}
-        .letterhead {{ width: 100%; height: 160px; background: url('/letterhead.jpeg') center top no-repeat; background-size: 100% auto; }}
+        .letterhead {{ width: 100%; }}
+        .letterhead img {{ width: 100%; display: block; }}
         .content {{ padding: 20px 40px; }}
         .po-title {{ font-size: 20px; font-weight: 700; color: #0f172a; margin: 10px 0; }}
         .info-row {{ display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; color: #475569; }}
@@ -669,7 +679,7 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
         .footer {{ position: fixed; bottom: 0; width: 100%; height: 50px; background: #475569; display: flex; align-items: center; justify-content: center; }}
         .footer span {{ color: white; font-size: 13px; font-weight: 600; }}
     </style></head><body>
-    <div class="letterhead"></div>
+    <div class="letterhead">{'<img src="data:image/jpeg;base64,' + letterhead_b64 + '" />' if letterhead_b64 else ''}</div>
     <div class="content">
         <div class="po-title">PURCHASE ORDER</div>
         <div style="display:flex;justify-content:space-between;">
