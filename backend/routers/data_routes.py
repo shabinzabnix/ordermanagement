@@ -40,6 +40,10 @@ PRODUCT_COLUMNS = {
     "ptr": "ptr",
     "landing cost": "landing_cost",
     "l cost": "landing_cost",
+    "l.cost": "landing_cost",
+    "lcost": "landing_cost",
+    "l. cost": "landing_cost",
+    "purchase price": "landing_cost",
 }
 PRODUCT_REQUIRED = ["product_id", "product_name"]
 
