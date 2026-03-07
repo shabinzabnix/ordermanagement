@@ -661,8 +661,6 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
             <td>{it.product_id or '-'}</td>
             <td style="font-weight:500;">{it.product_name}</td>
             <td style="text-align:right;">{it.quantity:.0f}</td>
-            <td style="text-align:right;">{it.landing_cost:.2f}</td>
-            <td style="text-align:right;font-weight:600;">{it.estimated_value:.2f}</td>
         </tr>"""
 
     html = f"""<!DOCTYPE html><html><head><style>
@@ -671,7 +669,7 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
         .page {{ position: relative; width: 210mm; min-height: 297mm; }}
         .letterhead {{ position: absolute; top: 0; left: 0; width: 100%; z-index: 0; }}
         .letterhead img {{ width: 100%; display: block; }}
-        .content {{ position: relative; z-index: 1; padding: 160px 40px 100px 40px; }}
+        .content {{ position: relative; z-index: 1; padding: 240px 40px 100px 40px; }}
         .po-title {{ font-size: 16px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; text-align: center; text-decoration: underline; }}
         .info-grid {{ display: flex; justify-content: space-between; margin-bottom: 8px; }}
         .info-item {{ font-size: 10px; color: #475569; margin-bottom: 2px; }}
@@ -701,14 +699,12 @@ async def generate_po_pdf(po_id: int, db: AsyncSession = Depends(get_db), user: 
             <table>
                 <thead><tr>
                     <th style="width:30px;">#</th><th>Product ID</th><th>Product Name</th>
-                    <th style="text-align:right;">Qty</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Value</th>
+                    <th style="text-align:right;">Qty</th>
                 </tr></thead>
                 <tbody>{items_html}
                 <tr class="total-row">
                     <td colspan="3" style="padding:6px;border:1px solid #e2e8f0;"><b>TOTAL</b></td>
                     <td style="padding:6px;text-align:right;border:1px solid #e2e8f0;"><b>{po.total_qty:.0f}</b></td>
-                    <td style="padding:6px;border:1px solid #e2e8f0;"></td>
-                    <td style="padding:6px;text-align:right;border:1px solid #e2e8f0;"><b>INR {po.total_value:,.2f}</b></td>
                 </tr></tbody>
             </table>
             <div class="sign-area">
