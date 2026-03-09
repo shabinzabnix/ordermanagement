@@ -148,6 +148,24 @@ export default function StoreDashboardPage() {
             </Card>
           )}
 
+          {/* Daily Purchases Chart */}
+          {storeData.daily_purchases?.length > 0 && (
+            <Card className="border-slate-200 shadow-sm rounded-sm">
+              <CardHeader className="pb-1"><CardTitle className="text-sm font-heading font-semibold">Date-wise Purchases ({storeData.store.name})</CardTitle></CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={storeData.daily_purchases} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 9, fontFamily: 'Public Sans', fill: '#94A3B8' }} />
+                    <YAxis tick={{ fontSize: 10, fontFamily: 'Public Sans', fill: '#94A3B8' }} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar dataKey="amount" fill="#0EA5E9" radius={[3, 3, 0, 0]} name="Purchase (INR)" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Top Products */}
           {storeData.top_products?.length > 0 && (
             <Card className="border-slate-200 shadow-sm rounded-sm">

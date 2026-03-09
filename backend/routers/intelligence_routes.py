@@ -1029,12 +1029,25 @@ async def store_dashboard(
     )).all()
     top_suppliers = [{"supplier": str(r[0]), "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0)} for r in top_suppliers_q]
 
+    # Date-wise purchase breakdown
+    daily_purchases_q = (await db.execute(
+        select(
+            cast(PurchaseRecord.purchase_date, Date).label("p_date"),
+            func.count(func.distinct(PurchaseRecord.entry_number)).label("count"),
+            func.sum(PurchaseRecord.total_amount).label("amount"),
+        ).where(and_(
+            PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to,
+        )).group_by(cast(PurchaseRecord.purchase_date, Date)).order_by(cast(PurchaseRecord.purchase_date, Date))
+    )).all()
+    daily_purchases = [{"date": str(r[0]), "invoices": int(r[1] or 0), "amount": round(float(r[2] or 0), 2)} for r in daily_purchases_q]
+
     return {
         "store": {"id": store.id, "name": store.store_name, "code": store.store_code, "location": store.location},
         "stock": {"value": round(stock_value, 2), "units": round(total_stock_units, 1), "sku_count": total_sku},
         "sales": {"count": total_sales_count, "value": round(total_sales_value, 2), "period_from": d_from.isoformat(), "period_to": d_to.isoformat()},
         "purchases": {"count": total_purchase_count, "value": round(total_purchase_amount, 2)},
         "daily_sales": daily_sales,
+        "daily_purchases": daily_purchases,
         "top_products": top_products,
         "top_suppliers": top_suppliers,
         "customer_count": customer_count,

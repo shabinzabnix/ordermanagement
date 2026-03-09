@@ -68,55 +68,92 @@ async def _log(db, user, action, entity_type=None, entity_id=None, details=None)
 async def aging_report(
     category: str = Query(None),
     location: str = Query(None),
+    status: str = Query(None),
+    bucket: str = Query(None),
+    search: str = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     now = datetime.now(timezone.utc)
+    d90 = now - timedelta(days=90)
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     items = []
 
-    for s in (await db.execute(select(HOStockBatch))).scalars().all():
-        if s.closing_stock <= 0:
-            continue
-        days = (now - s.created_at).days if s.created_at else 0
-        items.append({
-            "location": "Head Office", "store_id": None,
-            "product_id": s.product_id, "product_name": s.product_name,
-            "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
-            "days": days, "value": s.landing_cost_value or 0, "sales": 0,
-            "bucket": "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+",
-            "status": "dead" if days > 60 else "slow" if days > 30 else "active",
-        })
+    # --- HO Stock ---
+    if not location or location == "all" or location == "Head Office":
+        ho_q = select(HOStockBatch).where(HOStockBatch.closing_stock > 0)
+        if search:
+            ho_q = ho_q.where(HOStockBatch.product_name.ilike(f"%{search}%") | HOStockBatch.product_id.ilike(f"%{search}%"))
+        for s in (await db.execute(ho_q)).scalars().all():
+            days = (now - s.created_at).days if s.created_at else 0
+            b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
+            st = "dead" if days > 60 else "slow" if days > 30 else "active"
+            if bucket and bucket != "all" and b != bucket: continue
+            if status and status != "all" and st != status: continue
+            items.append({
+                "location": "Head Office", "store_id": None,
+                "product_id": s.product_id, "product_name": s.product_name,
+                "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
+                "days": days, "value": s.landing_cost_value or 0, "sales": 0,
+                "stock_date": s.created_at.isoformat() if s.created_at else None,
+                "bucket": b, "status": st,
+            })
 
-    for s in (await db.execute(select(StoreStockBatch))).scalars().all():
-        if s.closing_stock_strips <= 0:
-            continue
-        days = (now - s.created_at).days if s.created_at else 0
-        is_dead = (s.sales or 0) == 0 and days > 60
-        is_slow = (s.sales or 0) == 0 and days > 30 and not is_dead
-        items.append({
-            "location": stores.get(s.store_id, f"Store {s.store_id}"), "store_id": s.store_id,
-            "product_id": s.ho_product_id or s.store_product_id or "", "product_name": s.product_name,
-            "batch": s.batch, "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
-            "days": days, "value": s.cost_value or 0, "sales": s.sales or 0,
-            "bucket": "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+",
-            "status": "dead" if is_dead else "slow" if is_slow else "active",
-        })
+    # --- Store Stock ---
+    for sid, sname in stores.items():
+        if location and location != "all" and location != sname: continue
+        ss_q = select(StoreStockBatch).where(StoreStockBatch.store_id == sid, StoreStockBatch.closing_stock_strips > 0)
+        if search:
+            ss_q = ss_q.where(StoreStockBatch.product_name.ilike(f"%{search}%") | StoreStockBatch.ho_product_id.ilike(f"%{search}%"))
+        for s in (await db.execute(ss_q)).scalars().all():
+            days = (now - s.created_at).days if s.created_at else 0
+            b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
+            is_dead = (s.sales or 0) == 0 and days > 60
+            is_slow = (s.sales or 0) == 0 and days > 30 and not is_dead
+            st = "dead" if is_dead else "slow" if is_slow else "active"
+            if bucket and bucket != "all" and b != bucket: continue
+            if status and status != "all" and st != status: continue
+            items.append({
+                "location": sname, "store_id": sid,
+                "product_id": s.ho_product_id or s.store_product_id or "", "product_name": s.product_name,
+                "batch": s.batch, "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
+                "days": days, "value": s.cost_value or 0, "sales": s.sales or 0,
+                "stock_date": s.created_at.isoformat() if s.created_at else None,
+                "bucket": b, "status": st,
+            })
 
-    if location and location != "all":
-        items = [i for i in items if i["location"] == location]
+    items.sort(key=lambda x: -x["days"])
+    total = len(items)
+    paged = items[(page - 1) * limit: page * limit]
+
+    # Get 90d sales for paged products
+    pnames = list(set(i["product_name"] for i in paged))
+    sales_90d = {}
+    if pnames:
+        from models import SalesRecord as SR
+        for r in (await db.execute(
+            select(SR.product_name, func.sum(SR.quantity))
+            .where(SR.product_name.in_(pnames), SR.invoice_date >= d90)
+            .group_by(SR.product_name)
+        )).all():
+            sales_90d[r[0]] = round(float(r[1] or 0), 1)
+    for i in paged:
+        i["sales_90d"] = sales_90d.get(i["product_name"], 0)
 
     buckets = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
+    dead_count = slow_count = dead_value = slow_value = 0
     for i in items:
         buckets[i["bucket"]] += 1
+        if i["status"] == "dead": dead_count += 1; dead_value += i["value"]
+        if i["status"] == "slow": slow_count += 1; slow_value += i["value"]
 
     return {
-        "items": sorted(items, key=lambda x: -x["days"]),
+        "items": paged, "total": total, "page": page, "limit": limit,
         "summary": buckets,
-        "dead_count": sum(1 for i in items if i["status"] == "dead"),
-        "slow_count": sum(1 for i in items if i["status"] == "slow"),
-        "dead_value": round(sum(i["value"] for i in items if i["status"] == "dead"), 2),
-        "slow_value": round(sum(i["value"] for i in items if i["status"] == "slow"), 2),
+        "dead_count": dead_count, "slow_count": slow_count,
+        "dead_value": round(dead_value, 2), "slow_value": round(slow_value, 2),
         "locations": ["Head Office"] + list(stores.values()),
     }
 
