@@ -104,7 +104,9 @@ export default function CustomerProfilePage() {
   const [medEditId, setMedEditId] = useState(null);
   const [medEdit, setMedEdit] = useState({ dosage: '', timing: '', food_relation: '', days_of_medication: '' });
   const [pForm, setPForm] = useState({ store_id: '', purchase_date: '' });
-  const [pItems, setPItems] = useState([{ medicine_name: '', quantity: '', days_of_medication: '', dosage: '', timing: '', food_relation: '' }]);
+  const emptySchedule = { morning: { qty: '', food: '' }, afternoon: { qty: '', food: '' }, night: { qty: '', food: '' } };
+  const emptyItem = () => ({ medicine_name: '', days_of_medication: '', schedule: { ...emptySchedule, morning: { ...emptySchedule.morning }, afternoon: { ...emptySchedule.afternoon }, night: { ...emptySchedule.night } } });
+  const [pItems, setPItems] = useState([emptyItem()]);
   const [cForm, setCForm] = useState({ call_result: '', remarks: '' });
   const [saving, setSaving] = useState(false);
   const [storeStaff, setStoreStaff] = useState([]);
@@ -122,9 +124,42 @@ export default function CustomerProfilePage() {
     catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
   };
 
-  const addPItem = () => setPItems([...pItems, { medicine_name: '', quantity: '', days_of_medication: '', dosage: '', timing: '', food_relation: '' }]);
+  const addPItem = () => setPItems([...pItems, emptyItem()]);
   const removePItem = (idx) => { if (pItems.length > 1) setPItems(pItems.filter((_, i) => i !== idx)); };
   const updatePItem = (idx, field, val) => { const copy = [...pItems]; copy[idx] = { ...copy[idx], [field]: val }; setPItems(copy); };
+  const updateSchedule = (idx, slot, field, val) => {
+    const copy = [...pItems];
+    copy[idx] = { ...copy[idx], schedule: { ...copy[idx].schedule, [slot]: { ...copy[idx].schedule[slot], [field]: val } } };
+    setPItems(copy);
+  };
+
+  const calcDosesPerDay = (schedule) => {
+    return (parseFloat(schedule.morning.qty) || 0) + (parseFloat(schedule.afternoon.qty) || 0) + (parseFloat(schedule.night.qty) || 0);
+  };
+  const calcTotalQty = (item) => {
+    const perDay = calcDosesPerDay(item.schedule);
+    const days = parseInt(item.days_of_medication) || 0;
+    return Math.ceil(perDay * days);
+  };
+  const buildDosageStr = (schedule) => {
+    const parts = [];
+    if (parseFloat(schedule.morning.qty) > 0) parts.push(`${schedule.morning.qty} morning${schedule.morning.food ? ' ' + schedule.morning.food.replace('_', ' ') : ''}`);
+    if (parseFloat(schedule.afternoon.qty) > 0) parts.push(`${schedule.afternoon.qty} afternoon${schedule.afternoon.food ? ' ' + schedule.afternoon.food.replace('_', ' ') : ''}`);
+    if (parseFloat(schedule.night.qty) > 0) parts.push(`${schedule.night.qty} night${schedule.night.food ? ' ' + schedule.night.food.replace('_', ' ') : ''}`);
+    return parts.join(', ');
+  };
+  const buildTimingStr = (schedule) => {
+    const parts = [];
+    if (parseFloat(schedule.morning.qty) > 0) parts.push('morning');
+    if (parseFloat(schedule.afternoon.qty) > 0) parts.push('lunch');
+    if (parseFloat(schedule.night.qty) > 0) parts.push('dinner');
+    return parts.join(',');
+  };
+  const buildFoodStr = (schedule) => {
+    const foods = new Set();
+    ['morning', 'afternoon', 'night'].forEach(s => { if (schedule[s].food && parseFloat(schedule[s].qty) > 0) foods.add(schedule[s].food); });
+    return foods.size === 1 ? [...foods][0] : '';
+  };
 
   const handlePurchase = async (e) => {
     e.preventDefault(); setSaving(true);
@@ -132,17 +167,21 @@ export default function CustomerProfilePage() {
     try {
       for (const item of pItems) {
         if (!item.medicine_name) continue;
+        const totalQty = calcTotalQty(item);
+        const dosageStr = buildDosageStr(item.schedule);
+        const timingStr = buildTimingStr(item.schedule);
+        const foodStr = buildFoodStr(item.schedule);
         await api.post('/crm/purchases', {
           customer_id: parseInt(id), store_id: parseInt(pForm.store_id), medicine_name: item.medicine_name,
-          quantity: parseFloat(item.quantity) || 0, days_of_medication: parseInt(item.days_of_medication) || 0,
+          quantity: totalQty, days_of_medication: parseInt(item.days_of_medication) || 0,
           purchase_date: pForm.purchase_date || undefined,
-          dosage: item.dosage || null, timing: item.timing || null, food_relation: item.food_relation || null,
+          dosage: dosageStr || null, timing: timingStr || null, food_relation: foodStr || null,
         });
         successCount++;
       }
       toast.success(`${successCount} medicine(s) recorded`); setPurchaseOpen(false);
       setPForm({ store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', purchase_date: '' });
-      setPItems([{ medicine_name: '', quantity: '', days_of_medication: '', dosage: '', timing: '', food_relation: '' }]);
+      setPItems([emptyItem()]);
       loadProfile();
     } catch (err) { toast.error(err.response?.data?.detail || `Failed after ${successCount} items`); } finally { setSaving(false); }
   };
@@ -212,26 +251,60 @@ export default function CustomerProfilePage() {
                 <div className="space-y-1.5"><Label className="font-body text-xs">Purchase Date</Label><Input type="date" value={pForm.purchase_date} onChange={e => setPForm({...pForm, purchase_date: e.target.value})} className="rounded-sm" /></div>
               </div>
               <div className="space-y-3">
-                {pItems.map((item, idx) => (
+                {pItems.map((item, idx) => {
+                  const perDay = calcDosesPerDay(item.schedule);
+                  const totalQty = calcTotalQty(item);
+                  return (
                   <div key={idx} className="p-3 border border-slate-200 rounded-sm space-y-2 relative">
                     {pItems.length > 1 && <button type="button" className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-[10px] font-body" onClick={() => removePItem(idx)}>Remove</button>}
                     <p className="text-[10px] font-body text-slate-400 uppercase tracking-wider">Medicine {idx + 1}</p>
                     <MedicineSearchSelect value={item.medicine_name} onChange={v => updatePItem(idx, 'medicine_name', v)} />
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="space-y-1"><Label className="font-body text-[10px]">Qty</Label><Input type="number" value={item.quantity} onChange={e => updatePItem(idx, 'quantity', e.target.value)} className="rounded-sm h-8 text-sm" /></div>
-                      <div className="space-y-1"><Label className="font-body text-[10px]">Days *</Label><Input type="number" value={item.days_of_medication} onChange={e => updatePItem(idx, 'days_of_medication', e.target.value)} required className="rounded-sm h-8 text-sm" /></div>
-                      <div className="space-y-1"><Label className="font-body text-[10px]">Dosage</Label><Input value={item.dosage} onChange={e => updatePItem(idx, 'dosage', e.target.value)} className="rounded-sm h-8 text-sm" placeholder="1 tab" /></div>
+                    <div className="flex gap-3 items-end">
+                      <div className="space-y-1 w-[100px]"><Label className="font-body text-[10px]">Days *</Label><Input type="number" value={item.days_of_medication} onChange={e => updatePItem(idx, 'days_of_medication', e.target.value)} required className="rounded-sm h-8 text-sm" /></div>
+                      {perDay > 0 && parseInt(item.days_of_medication) > 0 && (
+                        <div className="flex-1 text-right">
+                          <p className="text-[10px] text-slate-400 font-body">{perDay} nos/day x {item.days_of_medication} days</p>
+                          <p className="text-[14px] font-heading font-bold text-sky-700 tabular-nums">{totalQty} nos total</p>
+                        </div>
+                      )}
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1"><Label className="font-body text-[10px]">Timing</Label>
-                        <Select value={item.timing || 'none'} onValueChange={v => updatePItem(idx, 'timing', v === 'none' ? '' : v)}><SelectTrigger className="rounded-sm h-8 text-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent><SelectItem value="none">-</SelectItem><SelectItem value="morning">Morning</SelectItem><SelectItem value="lunch">Afternoon</SelectItem><SelectItem value="dinner">Night</SelectItem><SelectItem value="morning,dinner">Morning + Night</SelectItem><SelectItem value="morning,lunch,dinner">All 3</SelectItem></SelectContent></Select></div>
-                      <div className="space-y-1"><Label className="font-body text-[10px]">Food</Label>
-                        <Select value={item.food_relation || 'none'} onValueChange={v => updatePItem(idx, 'food_relation', v === 'none' ? '' : v)}><SelectTrigger className="rounded-sm h-8 text-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent><SelectItem value="none">-</SelectItem><SelectItem value="before_food">Before</SelectItem><SelectItem value="after_food">After</SelectItem><SelectItem value="with_food">With Food</SelectItem></SelectContent></Select></div>
+                    <div className="bg-slate-50 rounded-sm p-2 space-y-1.5">
+                      <p className="text-[9px] font-body text-slate-400 uppercase tracking-wider">Dose Schedule (qty in nos per dose)</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { key: 'morning', label: 'Morning', icon: <Sun className="w-3 h-3 text-amber-500" /> },
+                          { key: 'afternoon', label: 'Afternoon', icon: <Coffee className="w-3 h-3 text-orange-500" /> },
+                          { key: 'night', label: 'Night', icon: <Moon className="w-3 h-3 text-indigo-500" /> },
+                        ].map(slot => (
+                          <div key={slot.key} className="space-y-1 p-1.5 bg-white rounded-sm border border-slate-100">
+                            <div className="flex items-center gap-1">{slot.icon}<span className="text-[10px] font-body font-medium text-slate-600">{slot.label}</span></div>
+                            <Select value={item.schedule[slot.key].qty || 'none'} onValueChange={v => updateSchedule(idx, slot.key, 'qty', v === 'none' ? '' : v)}>
+                              <SelectTrigger className="rounded-sm h-7 text-[11px]"><SelectValue placeholder="Qty" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-</SelectItem>
+                                <SelectItem value="0.25">1/4 (Quarter)</SelectItem>
+                                <SelectItem value="0.5">1/2 (Half)</SelectItem>
+                                <SelectItem value="1">1 (One)</SelectItem>
+                                <SelectItem value="1.5">1.5 (One & Half)</SelectItem>
+                                <SelectItem value="2">2 (Two)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Select value={item.schedule[slot.key].food || 'none'} onValueChange={v => updateSchedule(idx, slot.key, 'food', v === 'none' ? '' : v)}>
+                              <SelectTrigger className="rounded-sm h-7 text-[11px]"><SelectValue placeholder="Food" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">-</SelectItem>
+                                <SelectItem value="before_food">Before Food</SelectItem>
+                                <SelectItem value="after_food">After Food</SelectItem>
+                                <SelectItem value="with_food">With Food</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 <Button type="button" variant="outline" size="sm" className="rounded-sm text-xs font-body w-full" onClick={addPItem} data-testid="add-another-medicine">
                   <Plus className="w-3 h-3 mr-1" /> Add Another Medicine
                 </Button>
