@@ -311,6 +311,82 @@ async def expiry_risk(
     return {"items": items, "summary": summary}
 
 
+
+# ─── Expiry Monthly Calendar ─────────────────────────────────
+
+@router.get("/intel/expiry-monthly")
+async def expiry_monthly(
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
+):
+    """Returns all expiring products grouped by month, with store-wise breakdown."""
+    now = datetime.now(timezone.utc)
+    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    all_items = []
+
+    # HO stock with expiry
+    if not store_id:
+        for s in (await db.execute(select(HOStockBatch).where(HOStockBatch.expiry_date.isnot(None)))).scalars().all():
+            if not s.expiry_date or s.closing_stock <= 0: continue
+            all_items.append({
+                "location": "Head Office", "store_id": 0,
+                "product_id": s.product_id, "product_name": s.product_name,
+                "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
+                "value": float(s.landing_cost_value or 0),
+                "expiry_date": s.expiry_date, "expiry_str": s.expiry_date.isoformat(),
+            })
+
+    # Store stock with expiry
+    ss_q = select(StoreStockBatch).where(StoreStockBatch.expiry_date.isnot(None))
+    if store_id: ss_q = ss_q.where(StoreStockBatch.store_id == store_id)
+    for s in (await db.execute(ss_q)).scalars().all():
+        if not s.expiry_date or s.closing_stock_strips <= 0: continue
+        all_items.append({
+            "location": stores_map.get(s.store_id, f"Store {s.store_id}"), "store_id": s.store_id,
+            "product_id": s.ho_product_id or s.store_product_id or "",
+            "product_name": s.product_name, "batch": s.batch,
+            "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
+            "value": float(s.cost_value or 0),
+            "expiry_date": s.expiry_date, "expiry_str": s.expiry_date.isoformat(),
+        })
+
+    # Group by month
+    monthly = {}
+    for item in all_items:
+        month_key = item["expiry_date"].strftime("%Y-%m")
+        if month_key not in monthly:
+            monthly[month_key] = {"month": month_key, "label": item["expiry_date"].strftime("%B %Y"), "count": 0, "value": 0, "items": []}
+        monthly[month_key]["count"] += 1
+        monthly[month_key]["value"] += item["value"]
+        days_left = (item["expiry_date"] - now).days
+        monthly[month_key]["items"].append({
+            "location": item["location"], "store_id": item["store_id"],
+            "product_id": item["product_id"], "product_name": item["product_name"],
+            "batch": item["batch"], "stock": item["stock"], "mrp": item["mrp"],
+            "value": round(item["value"], 2),
+            "expiry_date": item["expiry_str"], "days_left": days_left,
+        })
+
+    # Sort months chronologically, round values
+    months_sorted = sorted(monthly.values(), key=lambda x: x["month"])
+    for m in months_sorted:
+        m["value"] = round(m["value"], 2)
+        m["items"].sort(key=lambda x: x["days_left"])
+
+    # Summary
+    expired = sum(1 for i in all_items if (i["expiry_date"] - now).days < 0)
+    within_30 = sum(1 for i in all_items if 0 <= (i["expiry_date"] - now).days <= 30)
+    within_90 = sum(1 for i in all_items if 0 <= (i["expiry_date"] - now).days <= 90)
+    total_value = round(sum(i["value"] for i in all_items), 2)
+
+    return {
+        "months": months_sorted,
+        "summary": {"total_batches": len(all_items), "expired": expired, "within_30d": within_30, "within_90d": within_90, "total_value": total_value},
+    }
+
+
 # ─── Dead Stock Redistribution ────────────────────────────
 
 @router.get("/intel/redistribution")
