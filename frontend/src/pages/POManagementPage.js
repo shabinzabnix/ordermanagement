@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -15,6 +16,7 @@ import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2, Setti
 import { UploadProgress } from '../components/UploadProgress';
 
 export default function POManagementPage() {
+  const { user } = useAuth();
   const [orders, setOrders] = useState([]);
   const [storeRequests, setStoreRequests] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
