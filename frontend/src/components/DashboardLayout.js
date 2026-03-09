@@ -16,7 +16,7 @@ import {
 
 const navItems = [
   // ── Overview
-  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'dashboard' },
+  { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'dashboard' },
   { label: 'Store Dashboard', path: '/store-dashboard', icon: Building2, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'store_dashboard' },
   { label: 'Top Selling', path: '/top-selling', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'top_selling' },
 

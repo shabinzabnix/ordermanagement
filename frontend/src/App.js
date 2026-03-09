@@ -112,7 +112,7 @@ function AppRoutes() {
       <Route path="/recalls" element={<ProtectedRoute><RecallPage /></ProtectedRoute>} />
       <Route path="/crm/daily-invoices" element={<ProtectedRoute><DailyInvoicesPage /></ProtectedRoute>} />
       <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to={['STORE_STAFF','STORE_MANAGER'].includes(user?.role) ? '/store-dashboard' : '/dashboard'} replace />} />
     </Routes>
   );
 }
