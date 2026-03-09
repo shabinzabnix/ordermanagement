@@ -206,13 +206,13 @@ export default function DailyReportPage() {
             <div className="overflow-auto max-h-[calc(100vh-440px)]">
               <Table>
                 <TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b-2 border-slate-100">
-                  {['Time', 'Customer', 'Medicine', 'Dosage', 'Timing', 'Days'].map(h => (
+                  {['Time', 'Customer', 'Medicine', 'Dosage', 'Timing', 'Days', 'Done By'].map(h => (
                     <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3">{h}</TableHead>
                   ))}
                 </TableRow></TableHeader>
                 <TableBody>
                   {!data?.medicines_added?.length ? (
-                    <TableRow><TableCell colSpan={6} className="text-center py-12"><Pill className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400">No medicines added</p></TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center py-12"><Pill className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400">No medicines added</p></TableCell></TableRow>
                   ) : data.medicines_added.map(m => (
                     <TableRow key={m.id} className="hover:bg-slate-50/50">
                       <TableCell className="font-mono text-[12px] text-slate-500 w-[60px]">{m.time}</TableCell>
@@ -221,6 +221,7 @@ export default function DailyReportPage() {
                       <TableCell className="text-[11px] text-slate-500">{m.dosage || '-'}</TableCell>
                       <TableCell className="text-[11px] text-slate-500">{m.timing || '-'}</TableCell>
                       <TableCell className="text-[12px] tabular-nums">{m.days || '-'}d</TableCell>
+                      <TableCell className="font-body text-[13px] font-medium text-violet-700">{m.done_by || '-'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

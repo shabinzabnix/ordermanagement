@@ -2277,15 +2277,21 @@ async def daily_crm_report(
         med_q = med_q.where(MedicinePurchase.store_id == target_store)
     meds_added = (await db.execute(med_q.order_by(MedicinePurchase.created_at.desc()))).scalars().all()
     med_cids = set(m.customer_id for m in meds_added)
+    med_uids = set(m.created_by for m in meds_added if m.created_by)
     med_cmap = {}
+    med_umap = {}
     if med_cids:
         for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(med_cids)))).scalars().all():
             med_cmap[c.id] = c.customer_name
+    if med_uids:
+        for u in (await db.execute(select(User).where(User.id.in_(med_uids)))).scalars().all():
+            med_umap[u.id] = u.full_name
 
     med_list = [{
         "id": m.id, "customer_name": med_cmap.get(m.customer_id, ""),
         "medicine": m.medicine_name, "dosage": m.dosage, "timing": m.timing,
         "days": m.days_of_medication,
+        "done_by": med_umap.get(m.created_by, ""),
         "time": m.created_at.strftime("%H:%M") if m.created_at else "",
     } for m in meds_added]
 
