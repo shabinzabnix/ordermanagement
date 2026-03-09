@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Package, Building2, Warehouse, Archive,
   BarChart3, ArrowLeftRight, ShoppingCart, Users, FileUp,
   ChevronLeft, ChevronRight, LogOut, Pill, Clock, UserCheck, ClipboardList, Trophy,
-  Heart, CalendarClock, Brain, TrendingUp, ShieldAlert, Zap, Truck,
+  Heart, CalendarClock, Brain, TrendingUp, ShieldAlert, Zap, Truck, Phone,
 } from 'lucide-react';
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Separator } from '../components/ui/separator';
@@ -33,6 +33,7 @@ const navItems = [
   { label: 'PO Manager', path: '/po-management', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'purchases' },
   { label: 'Purchase Upload', path: '/purchase-report', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'purchase_upload' },
   { label: 'Store CRM', path: '/crm/store-crm', icon: Heart, roles: ['STORE_STAFF', 'STORE_MANAGER', 'ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'store_crm' },
+  { label: 'Call Tasks', path: '/crm/call-tasks', icon: Phone, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'call_tasks' },
   { label: 'CRM', path: '/crm', icon: Heart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm' },
   { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'CRM_STAFF', 'STORE_MANAGER'], svc: 'sales_upload' },
   { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'refill_due' },

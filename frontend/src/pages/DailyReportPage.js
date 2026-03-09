@@ -108,8 +108,6 @@ export default function DailyReportPage() {
           <TabsTrigger value="staff" className="rounded-sm text-xs font-body" data-testid="tab-staff">Staff Activity ({data?.staff_summary?.length || 0})</TabsTrigger>
           <TabsTrigger value="new" className="rounded-sm text-xs font-body" data-testid="tab-new">New Customers ({data?.new_customers?.length || 0})</TabsTrigger>
           <TabsTrigger value="meds" className="rounded-sm text-xs font-body" data-testid="tab-meds">Medicines ({data?.medicines_added?.length || 0})</TabsTrigger>
-          <TabsTrigger value="conversions" className="rounded-sm text-xs font-body" data-testid="tab-conv">Conversions ({data?.conversions?.length || 0})</TabsTrigger>
-          <TabsTrigger value="uploads" className="rounded-sm text-xs font-body" data-testid="tab-uploads">Uploads ({data?.uploads?.length || 0})</TabsTrigger>
         </TabsList>
 
         {/* Calls Detail */}
@@ -223,62 +221,6 @@ export default function DailyReportPage() {
                       <TableCell className="text-[11px] text-slate-500">{m.dosage || '-'}</TableCell>
                       <TableCell className="text-[11px] text-slate-500">{m.timing || '-'}</TableCell>
                       <TableCell className="text-[12px] tabular-nums">{m.days || '-'}d</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Conversions */}
-        <TabsContent value="conversions">
-          <Card className="border-slate-200 shadow-sm rounded-sm">
-            <div className="overflow-auto max-h-[calc(100vh-440px)]">
-              <Table>
-                <TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b-2 border-slate-100">
-                  {['Time', 'Done By', 'Action'].map(h => (
-                    <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3">{h}</TableHead>
-                  ))}
-                </TableRow></TableHeader>
-                <TableBody>
-                  {!data?.conversions?.length ? (
-                    <TableRow><TableCell colSpan={3} className="text-center py-12"><RefreshCw className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400">No conversions</p></TableCell></TableRow>
-                  ) : data.conversions.map((c, i) => (
-                    <TableRow key={i} className="hover:bg-slate-50/50">
-                      <TableCell className="font-mono text-[12px] text-slate-500 w-[60px]">{c.time}</TableCell>
-                      <TableCell className="font-body text-[13px] font-medium text-violet-700">{c.user_name}</TableCell>
-                      <TableCell className="text-[12px] text-slate-600">{c.action}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Uploads */}
-        <TabsContent value="uploads">
-          <Card className="border-slate-200 shadow-sm rounded-sm">
-            <div className="overflow-auto max-h-[calc(100vh-440px)]">
-              <Table>
-                <TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b-2 border-slate-100">
-                  {['Time', 'File', 'Type', 'Uploaded By', 'Records', 'Success', 'Failed'].map(h => (
-                    <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Records', 'Success', 'Failed'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
-                  ))}
-                </TableRow></TableHeader>
-                <TableBody>
-                  {!data?.uploads?.length ? (
-                    <TableRow><TableCell colSpan={7} className="text-center py-12"><Upload className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400">No uploads</p></TableCell></TableRow>
-                  ) : data.uploads.map((u, i) => (
-                    <TableRow key={i} className="hover:bg-slate-50/50">
-                      <TableCell className="font-mono text-[12px] text-slate-500 w-[60px]">{u.time}</TableCell>
-                      <TableCell className="font-body text-[13px] text-slate-700 max-w-[200px] truncate">{u.file}</TableCell>
-                      <TableCell><Badge className="text-[9px] rounded-sm bg-sky-50 text-sky-700">{u.type?.replace('_', ' ')}</Badge></TableCell>
-                      <TableCell className="font-body text-[13px] font-medium text-violet-700">{u.uploaded_by}</TableCell>
-                      <TableCell className="text-right text-[12px] tabular-nums">{u.records}</TableCell>
-                      <TableCell className="text-right text-[12px] tabular-nums text-emerald-700">{u.success}</TableCell>
-                      <TableCell className="text-right text-[12px] tabular-nums text-red-600">{u.failed}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

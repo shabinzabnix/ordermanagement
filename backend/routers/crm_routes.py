@@ -377,6 +377,12 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
         "unique_medicines": len(medicine_stats),
         "repeat_count": sum(1 for m in repeat_medicines if m["is_repeat"]),
         "total_calls": len(calls),
+        "call_logs": [{
+            "id": cl.id, "caller_name": cl.caller_name or "",
+            "call_result": cl.call_result.value if hasattr(cl.call_result, 'value') else cl.call_result,
+            "remarks": cl.remarks or "",
+            "date": cl.created_at.isoformat() if cl.created_at else None,
+        } for cl in calls],
     }
 
 
@@ -1962,6 +1968,120 @@ async def rc_customers_list(
         "customers": result, "total": total, "page": page, "limit": limit,
         "store_summary": [{"store_id": k, "store_name": v["name"], "rc_count": v["count"]} for k, v in store_summary.items()] if store_summary else [],
     }
+
+
+# ─── Sales-Based Call Tasks (Previous Day) ────────────────────
+
+@router.get("/crm/sales-call-tasks")
+async def sales_call_tasks(
+    date: str = Query(None),
+    store_id: int = Query(None),
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Returns customers from previous day's sales for CRM follow-up calls."""
+    sf = _store_filter(user)
+    target_store = sf or (int(store_id) if store_id else None)
+    now = datetime.now(timezone.utc)
+
+    if date:
+        try: day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except: day_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        day_start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+
+    # Get sales from that day, grouped by customer
+    sales_q = (
+        select(
+            SalesRecord.customer_id,
+            func.count(SalesRecord.id).label("item_count"),
+            func.sum(SalesRecord.total_amount).label("invoice_total"),
+            func.max(SalesRecord.entry_number).label("last_invoice"),
+        )
+        .where(SalesRecord.customer_id.isnot(None), SalesRecord.invoice_date >= day_start, SalesRecord.invoice_date < day_end)
+        .group_by(SalesRecord.customer_id)
+    )
+    if target_store:
+        sales_q = sales_q.where(SalesRecord.store_id == target_store)
+
+    total_sub = sales_q.subquery()
+    total = (await db.execute(select(func.count()).select_from(total_sub))).scalar() or 0
+
+    rows = (await db.execute(
+        sales_q.order_by(func.sum(SalesRecord.total_amount).desc())
+        .offset((page - 1) * limit).limit(limit)
+    )).all()
+
+    cids = [r[0] for r in rows if r[0]]
+    cmap = {}
+    if cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(cids)))).scalars().all():
+            cmap[c.id] = c
+
+    # Check if already called today
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    called_today = set()
+    if cids:
+        called_q = (await db.execute(
+            select(CRMCallLog.customer_id).where(
+                CRMCallLog.customer_id.in_(cids),
+                CRMCallLog.created_at >= today_start,
+            )
+        )).all()
+        called_today = set(r[0] for r in called_q)
+
+    # Get previous purchases for each customer (medicines)
+    med_map = {}
+    if cids:
+        for mp in (await db.execute(
+            select(MedicinePurchase).where(
+                MedicinePurchase.customer_id.in_(cids), MedicinePurchase.status == "active"
+            )
+        )).scalars().all():
+            med_map.setdefault(mp.customer_id, []).append({
+                "medicine": mp.medicine_name, "dosage": mp.dosage,
+                "next_due": mp.next_due_date.isoformat() if mp.next_due_date else None,
+            })
+
+    # Previous call history
+    call_history = {}
+    if cids:
+        for cl in (await db.execute(
+            select(CRMCallLog).where(CRMCallLog.customer_id.in_(cids))
+            .order_by(CRMCallLog.created_at.desc()).limit(200)
+        )).scalars().all():
+            call_history.setdefault(cl.customer_id, []).append({
+                "caller": cl.caller_name, "result": cl.call_result.value if hasattr(cl.call_result, 'value') else cl.call_result,
+                "remarks": cl.remarks, "date": cl.created_at.isoformat() if cl.created_at else None,
+            })
+
+    # Store names
+    sids = set(c.first_store_id for c in cmap.values() if c.first_store_id)
+    smap = {}
+    if sids:
+        smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
+
+    result = []
+    for r in rows:
+        cid, item_count, invoice_total, last_invoice = r
+        c = cmap.get(cid)
+        if not c: continue
+        result.append({
+            "customer_id": cid,
+            "customer_name": c.customer_name, "mobile": c.mobile_number,
+            "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+            "store_name": smap.get(c.first_store_id, ""),
+            "invoice_total": round(float(invoice_total or 0), 2),
+            "item_count": item_count, "last_invoice": last_invoice,
+            "already_called": cid in called_today,
+            "active_medicines": med_map.get(cid, []),
+            "call_history": (call_history.get(cid, []))[:5],
+            "adherence": c.adherence_score or "unknown",
+            "clv_value": round(float(c.clv_value or 0), 2),
+        })
+
+    return {"tasks": result, "total": total, "page": page, "limit": limit, "sales_date": day_start.strftime("%Y-%m-%d")}
 
 
 # ─── Daily CRM Activity Report ────────────────────────────────

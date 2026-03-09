@@ -103,7 +103,8 @@ export default function CustomerProfilePage() {
   const [callOpen, setCallOpen] = useState(false);
   const [medEditId, setMedEditId] = useState(null);
   const [medEdit, setMedEdit] = useState({ dosage: '', timing: '', food_relation: '', days_of_medication: '' });
-  const [pForm, setPForm] = useState({ store_id: '', medicine_name: '', quantity: '', days_of_medication: '', purchase_date: '', dosage: '', timing: '', food_relation: '' });
+  const [pForm, setPForm] = useState({ store_id: '', purchase_date: '' });
+  const [pItems, setPItems] = useState([{ medicine_name: '', quantity: '', days_of_medication: '', dosage: '', timing: '', food_relation: '' }]);
   const [cForm, setCForm] = useState({ call_result: '', remarks: '' });
   const [saving, setSaving] = useState(false);
   const [storeStaff, setStoreStaff] = useState([]);
@@ -121,16 +122,29 @@ export default function CustomerProfilePage() {
     catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
   };
 
+  const addPItem = () => setPItems([...pItems, { medicine_name: '', quantity: '', days_of_medication: '', dosage: '', timing: '', food_relation: '' }]);
+  const removePItem = (idx) => { if (pItems.length > 1) setPItems(pItems.filter((_, i) => i !== idx)); };
+  const updatePItem = (idx, field, val) => { const copy = [...pItems]; copy[idx] = { ...copy[idx], [field]: val }; setPItems(copy); };
+
   const handlePurchase = async (e) => {
     e.preventDefault(); setSaving(true);
+    let successCount = 0;
     try {
-      await api.post('/crm/purchases', { customer_id: parseInt(id), store_id: parseInt(pForm.store_id), medicine_name: pForm.medicine_name,
-        quantity: parseFloat(pForm.quantity) || 0, days_of_medication: parseInt(pForm.days_of_medication) || 0, purchase_date: pForm.purchase_date || undefined,
-        dosage: pForm.dosage || null, timing: pForm.timing || null, food_relation: pForm.food_relation || null });
-      toast.success('Purchase recorded'); setPurchaseOpen(false);
-      setPForm({ store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', medicine_name: '', quantity: '', days_of_medication: '', purchase_date: '', dosage: '', timing: '', food_relation: '' });
+      for (const item of pItems) {
+        if (!item.medicine_name) continue;
+        await api.post('/crm/purchases', {
+          customer_id: parseInt(id), store_id: parseInt(pForm.store_id), medicine_name: item.medicine_name,
+          quantity: parseFloat(item.quantity) || 0, days_of_medication: parseInt(item.days_of_medication) || 0,
+          purchase_date: pForm.purchase_date || undefined,
+          dosage: item.dosage || null, timing: item.timing || null, food_relation: item.food_relation || null,
+        });
+        successCount++;
+      }
+      toast.success(`${successCount} medicine(s) recorded`); setPurchaseOpen(false);
+      setPForm({ store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', purchase_date: '' });
+      setPItems([{ medicine_name: '', quantity: '', days_of_medication: '', dosage: '', timing: '', food_relation: '' }]);
       loadProfile();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); } finally { setSaving(false); }
+    } catch (err) { toast.error(err.response?.data?.detail || `Failed after ${successCount} items`); } finally { setSaving(false); }
   };
 
   const handleCall = async (e) => {
@@ -189,32 +203,40 @@ export default function CustomerProfilePage() {
         </Dialog>
         <Dialog open={purchaseOpen} onOpenChange={setPurchaseOpen}>
           <DialogTrigger asChild><Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs"><Plus className="w-3.5 h-3.5 mr-1.5" /> Add Medicine</Button></DialogTrigger>
-          <DialogContent className="rounded-sm max-w-lg"><DialogHeader><DialogTitle className="font-heading">Add Medicine / Purchase</DialogTitle></DialogHeader>
+          <DialogContent className="rounded-sm max-w-2xl max-h-[85vh] overflow-auto"><DialogHeader><DialogTitle className="font-heading">Add Medicine / Prescription</DialogTitle></DialogHeader>
             <form onSubmit={handlePurchase} className="space-y-3">
-              <div className="space-y-1.5"><Label className="font-body text-xs">Medicine Name *</Label>
-                <MedicineSearchSelect value={pForm.medicine_name} onChange={v => setPForm({...pForm, medicine_name: v})} />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1.5"><Label className="font-body text-xs">Quantity</Label><Input type="number" value={pForm.quantity} onChange={e => setPForm({...pForm, quantity: e.target.value})} className="rounded-sm" /></div>
-                <div className="space-y-1.5"><Label className="font-body text-xs">Days of Medication *</Label><Input type="number" value={pForm.days_of_medication} onChange={e => setPForm({...pForm, days_of_medication: e.target.value})} required className="rounded-sm" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
+                  <Select value={pForm.store_id} onValueChange={v => setPForm({...pForm, store_id: v})} disabled={user?.role === 'STORE_STAFF'}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
+                    <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent></Select></div>
                 <div className="space-y-1.5"><Label className="font-body text-xs">Purchase Date</Label><Input type="date" value={pForm.purchase_date} onChange={e => setPForm({...pForm, purchase_date: e.target.value})} className="rounded-sm" /></div>
               </div>
-              <div className="p-3 bg-violet-50/50 border border-violet-200 rounded-sm space-y-3">
-                <p className="text-[11px] font-body font-medium text-violet-700">Medication Details</p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1.5"><Label className="font-body text-xs">Dosage</Label><Input value={pForm.dosage} onChange={e => setPForm({...pForm, dosage: e.target.value})} className="rounded-sm" placeholder="e.g. 1 tablet" /></div>
-                  <div className="space-y-1.5"><Label className="font-body text-xs">Timing</Label>
-                    <Select value={pForm.timing || 'none'} onValueChange={v => setPForm({...pForm, timing: v === 'none' ? '' : v})}><SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="none">-</SelectItem><SelectItem value="morning">Morning</SelectItem><SelectItem value="lunch">Afternoon</SelectItem><SelectItem value="dinner">Night</SelectItem><SelectItem value="morning,dinner">Morning + Night</SelectItem><SelectItem value="morning,lunch,dinner">Morning + Afternoon + Night</SelectItem></SelectContent></Select></div>
-                  <div className="space-y-1.5"><Label className="font-body text-xs">Food Relation</Label>
-                    <Select value={pForm.food_relation || 'none'} onValueChange={v => setPForm({...pForm, food_relation: v === 'none' ? '' : v})}><SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="none">-</SelectItem><SelectItem value="before_food">Before Food</SelectItem><SelectItem value="after_food">After Food</SelectItem><SelectItem value="with_food">With Food</SelectItem></SelectContent></Select></div>
-                </div>
+              <div className="space-y-3">
+                {pItems.map((item, idx) => (
+                  <div key={idx} className="p-3 border border-slate-200 rounded-sm space-y-2 relative">
+                    {pItems.length > 1 && <button type="button" className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-[10px] font-body" onClick={() => removePItem(idx)}>Remove</button>}
+                    <p className="text-[10px] font-body text-slate-400 uppercase tracking-wider">Medicine {idx + 1}</p>
+                    <MedicineSearchSelect value={item.medicine_name} onChange={v => updatePItem(idx, 'medicine_name', v)} />
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="space-y-1"><Label className="font-body text-[10px]">Qty</Label><Input type="number" value={item.quantity} onChange={e => updatePItem(idx, 'quantity', e.target.value)} className="rounded-sm h-8 text-sm" /></div>
+                      <div className="space-y-1"><Label className="font-body text-[10px]">Days *</Label><Input type="number" value={item.days_of_medication} onChange={e => updatePItem(idx, 'days_of_medication', e.target.value)} required className="rounded-sm h-8 text-sm" /></div>
+                      <div className="space-y-1"><Label className="font-body text-[10px]">Dosage</Label><Input value={item.dosage} onChange={e => updatePItem(idx, 'dosage', e.target.value)} className="rounded-sm h-8 text-sm" placeholder="1 tab" /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1"><Label className="font-body text-[10px]">Timing</Label>
+                        <Select value={item.timing || 'none'} onValueChange={v => updatePItem(idx, 'timing', v === 'none' ? '' : v)}><SelectTrigger className="rounded-sm h-8 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectItem value="none">-</SelectItem><SelectItem value="morning">Morning</SelectItem><SelectItem value="lunch">Afternoon</SelectItem><SelectItem value="dinner">Night</SelectItem><SelectItem value="morning,dinner">Morning + Night</SelectItem><SelectItem value="morning,lunch,dinner">All 3</SelectItem></SelectContent></Select></div>
+                      <div className="space-y-1"><Label className="font-body text-[10px]">Food</Label>
+                        <Select value={item.food_relation || 'none'} onValueChange={v => updatePItem(idx, 'food_relation', v === 'none' ? '' : v)}><SelectTrigger className="rounded-sm h-8 text-sm"><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectItem value="none">-</SelectItem><SelectItem value="before_food">Before</SelectItem><SelectItem value="after_food">After</SelectItem><SelectItem value="with_food">With Food</SelectItem></SelectContent></Select></div>
+                    </div>
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" className="rounded-sm text-xs font-body w-full" onClick={addPItem} data-testid="add-another-medicine">
+                  <Plus className="w-3 h-3 mr-1" /> Add Another Medicine
+                </Button>
               </div>
-              <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
-                <Select value={pForm.store_id} onValueChange={v => setPForm({...pForm, store_id: v})} disabled={user?.role === 'STORE_STAFF'}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent></Select></div>
-              <DialogFooter><Button type="submit" className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" disabled={saving}>{saving ? 'Saving...' : 'Record'}</Button></DialogFooter>
+              <DialogFooter><Button type="submit" className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" disabled={saving}>{saving ? 'Saving...' : `Record ${pItems.filter(i => i.medicine_name).length} Medicine(s)`}</Button></DialogFooter>
             </form></DialogContent>
         </Dialog>
       </div>
@@ -256,6 +278,7 @@ export default function CustomerProfilePage() {
           <TabsTrigger value="calendar" className="rounded-sm text-xs font-body">Medicine Calendar ({data.medicine_calendar?.length || 0})</TabsTrigger>
           <TabsTrigger value="purchases" className="rounded-sm text-xs font-body">Purchases ({data.total_invoices})</TabsTrigger>
           <TabsTrigger value="repeat" className="rounded-sm text-xs font-body">Repeat Medicines ({data.repeat_count})</TabsTrigger>
+          <TabsTrigger value="callhistory" className="rounded-sm text-xs font-body">Call History ({data.total_calls})</TabsTrigger>
           <TabsTrigger value="timeline" className="rounded-sm text-xs font-body">Timeline</TabsTrigger>
         </TabsList>
 
@@ -337,6 +360,36 @@ export default function CustomerProfilePage() {
                 <TableCell>{m.is_repeat ? <Badge className="text-[9px] rounded-sm bg-rose-50 text-rose-700"><RefreshCw className="w-2.5 h-2.5 mr-0.5 inline" />Repeat</Badge> : <span className="text-[10px] text-slate-300">Single</span>}</TableCell>
               </TableRow>))}</TableBody>
           </Table></div></Card>
+        </TabsContent>
+
+        {/* Call History */}
+        <TabsContent value="callhistory">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <div className="overflow-auto max-h-[400px]">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b-2 border-slate-100">
+                  {['Date', 'Called By', 'Result', 'Remarks'].map(h => (
+                    <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3">{h}</TableHead>
+                  ))}
+                </TableRow></TableHeader>
+                <TableBody>
+                  {!data.call_logs?.length ? (
+                    <TableRow><TableCell colSpan={4} className="text-center py-12"><Phone className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No calls logged yet</p></TableCell></TableRow>
+                  ) : data.call_logs.map(cl => {
+                    const rc = { reached: 'bg-sky-50 text-sky-700', confirmed: 'bg-emerald-50 text-emerald-700', not_reachable: 'bg-red-50 text-red-700', callback: 'bg-amber-50 text-amber-700', discontinued: 'bg-slate-100 text-slate-600' };
+                    return (
+                      <TableRow key={cl.id} className="hover:bg-slate-50/50">
+                        <TableCell className="text-[12px] text-slate-500">{cl.date ? new Date(cl.date).toLocaleString() : '-'}</TableCell>
+                        <TableCell className="font-body text-[13px] font-medium text-violet-700">{cl.caller_name}</TableCell>
+                        <TableCell><Badge className={`text-[10px] rounded-sm ${rc[cl.call_result] || 'bg-slate-100 text-slate-600'}`}>{cl.call_result?.replace('_', ' ')}</Badge></TableCell>
+                        <TableCell className="text-[12px] text-slate-600 max-w-[300px]">{cl.remarks || '-'}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
         </TabsContent>
 
         {/* Timeline */}

@@ -39,6 +39,7 @@ import StoreCRMDashboardPage from '@/pages/StoreCRMDashboardPage';
 import RepeatPurchasesPage from '@/pages/RepeatPurchasesPage';
 import RCCustomerListPage from '@/pages/RCCustomerListPage';
 import DailyReportPage from '@/pages/DailyReportPage';
+import SalesCallTasksPage from '@/pages/SalesCallTasksPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -105,6 +106,7 @@ function AppRoutes() {
       <Route path="/crm/repeat-purchases" element={<ProtectedRoute><RepeatPurchasesPage /></ProtectedRoute>} />
       <Route path="/crm/rc-customers" element={<ProtectedRoute><RCCustomerListPage /></ProtectedRoute>} />
       <Route path="/crm/daily-report" element={<ProtectedRoute><DailyReportPage /></ProtectedRoute>} />
+      <Route path="/crm/call-tasks" element={<ProtectedRoute><SalesCallTasksPage /></ProtectedRoute>} />
       <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
