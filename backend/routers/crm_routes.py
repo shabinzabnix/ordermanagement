@@ -916,6 +916,12 @@ async def upload_sales_report(
     except Exception:
         pass
 
+    # Auto-sync refills after sales upload
+    try:
+        await _run_refill_sync(db)
+    except Exception:
+        pass
+
     return {
         "message": "Sales report uploaded",
         "total": len(df), "new_records": success, "skipped_duplicate": skipped_duplicate, "failed": failed,
@@ -2602,3 +2608,131 @@ async def get_followups(
 
     dates = sorted(by_date.values(), key=lambda x: x["date"])
     return {"followups": items, "dates": dates, "total": len(items)}
+
+
+# ─── Auto Refill Engine ──────────────────────────────────────
+
+async def _run_refill_sync(db: AsyncSession):
+    """Core refill sync logic — matches sales to active medicines and updates tracking."""
+    now = datetime.now(timezone.utc)
+    updated = 0; overdue_alerts = 0
+
+    active_meds = (await db.execute(
+        select(MedicinePurchase).where(MedicinePurchase.status == "active")
+    )).scalars().all()
+    if not active_meds:
+        return updated, overdue_alerts
+
+    by_customer = {}
+    for m in active_meds:
+        by_customer.setdefault(m.customer_id, []).append(m)
+
+    cids = list(by_customer.keys())
+    cmap = {}
+    if cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(cids)))).scalars().all():
+            cmap[c.id] = c
+
+    for cid, meds in by_customer.items():
+        customer = cmap.get(cid)
+        if not customer: continue
+        for med in meds:
+            latest_sale = (await db.execute(
+                select(SalesRecord).where(
+                    SalesRecord.customer_id == cid,
+                    SalesRecord.product_name.ilike(f"%{med.medicine_name}%"),
+                    SalesRecord.invoice_date > med.purchase_date if med.purchase_date else SalesRecord.invoice_date.isnot(None),
+                ).order_by(SalesRecord.invoice_date.desc()).limit(1)
+            )).scalar_one_or_none()
+
+            if latest_sale:
+                qty = float(latest_sale.quantity or med.quantity or 0)
+                days = med.days_of_medication or 30
+                if qty > 0 and med.quantity and med.quantity > 0:
+                    daily_dose = med.quantity / days if days > 0 else 1
+                    new_days = int(qty / daily_dose) if daily_dose > 0 else days
+                else:
+                    new_days = days
+                med.purchase_date = latest_sale.invoice_date
+                med.quantity = qty
+                med.next_due_date = latest_sale.invoice_date + timedelta(days=new_days)
+                updated += 1
+            elif med.next_due_date and med.next_due_date < now:
+                overdue_alerts += 1
+                if customer.first_store_id:
+                    days_overdue = (now - med.next_due_date).days
+                    if days_overdue in (1, 3, 7):
+                        from routers.notification_routes import notify_role
+                        await notify_role(db, ["STORE_MANAGER", "STORE_STAFF"],
+                            f"Overdue Refill: {customer.customer_name}",
+                            f"{med.medicine_name} was due {days_overdue} day(s) ago. Customer hasn't purchased.",
+                            link=f"/crm/customer/{cid}", entity_type="refill_overdue", entity_id=med.id,
+                            store_id=customer.first_store_id)
+
+    await db.commit()
+    return updated, overdue_alerts
+
+
+@router.post("/crm/auto-refill-sync")
+async def auto_refill_sync(db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    """Manually trigger refill sync."""
+    updated, overdue = await _run_refill_sync(db)
+    return {"message": f"Sync complete. {updated} refills updated, {overdue} overdue alerts.", "updated": updated, "overdue_alerts": overdue}
+
+
+@router.get("/crm/overdue-customers")
+async def overdue_customers(
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Customers who missed their medication refill due date."""
+    sf = _store_filter(user)
+    target_store = sf or (int(store_id) if store_id else None)
+    now = datetime.now(timezone.utc)
+
+    query = select(MedicinePurchase).where(
+        MedicinePurchase.status == "active",
+        MedicinePurchase.next_due_date < now,
+    )
+    if target_store:
+        query = query.where(MedicinePurchase.store_id == target_store)
+
+    items = (await db.execute(query.order_by(MedicinePurchase.next_due_date))).scalars().all()
+
+    cids = set(i.customer_id for i in items)
+    cmap = {}
+    if cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(cids)))).scalars().all():
+            cmap[c.id] = c
+
+    sids = set(i.store_id for i in items)
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    # Check if customer purchased this medicine recently (missed refill = no purchase after due date)
+    result = []
+    for i in items:
+        c = cmap.get(i.customer_id)
+        if not c: continue
+        days_overdue = (now - i.next_due_date).days
+
+        # Check if there's a recent sale after due date
+        recent_sale = (await db.execute(
+            select(func.count(SalesRecord.id)).where(
+                SalesRecord.customer_id == i.customer_id,
+                SalesRecord.product_name.ilike(f"%{i.medicine_name}%"),
+                SalesRecord.invoice_date >= i.next_due_date,
+            )
+        )).scalar() or 0
+
+        if recent_sale == 0:  # Truly missed — no purchase after due date
+            result.append({
+                "id": i.id, "customer_id": i.customer_id,
+                "customer_name": c.customer_name, "mobile": c.mobile_number,
+                "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+                "store_name": smap.get(i.store_id, ""),
+                "medicine": i.medicine_name, "quantity": i.quantity,
+                "due_date": i.next_due_date.isoformat() if i.next_due_date else None,
+                "days_overdue": days_overdue,
+            })
+
+    return {"overdue": result, "total": len(result)}

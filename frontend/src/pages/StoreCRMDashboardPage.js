@@ -10,8 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { Users, UserCheck, AlertTriangle, CalendarClock, TrendingUp, Pill, Phone, ArrowRight, Clock } from 'lucide-react';
+import { Users, UserCheck, AlertTriangle, CalendarClock, TrendingUp, Pill, Phone, ArrowRight, Clock, Receipt, Loader2, IndianRupee } from 'lucide-react';
 import { FollowupButton } from '../components/FollowupButton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 
 export default function StoreCRMDashboardPage() {
   const { user } = useAuth();
@@ -25,6 +26,8 @@ export default function StoreCRMDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [rcCandidates, setRcCandidates] = useState([]);
   const [followups, setFollowups] = useState([]);
+  const [candidateDetail, setCandidateDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -44,6 +47,10 @@ export default function StoreCRMDashboardPage() {
   };
   const loadFollowups = () => {
     api.get('/crm/followups').then(r => setFollowups(r.data.followups || [])).catch(() => {});
+  };
+  const openCandidateDetail = (c) => {
+    setCandidateDetail(null); setDetailLoading(true);
+    api.get(`/crm/customers/${c.customer_id}/call-detail`).then(r => setCandidateDetail({ ...r.data, rc_info: c })).catch(() => toast.error('Failed')).finally(() => setDetailLoading(false));
   };
 
   useEffect(() => { load(); loadPerf(); loadCalls(); loadRcCandidates(); loadFollowups(); }, []);
@@ -287,7 +294,7 @@ export default function StoreCRMDashboardPage() {
                     <TableRow><TableCell colSpan={7} className="text-center py-12"><UserCheck className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No walk-in customers with repeat purchases found</p></TableCell></TableRow>
                   ) : rcCandidates.map(c => (
                     <TableRow key={c.customer_id} className="hover:bg-slate-50/50">
-                      <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => navigate(`/crm/customer/${c.customer_id}`)}>{c.customer_name}</TableCell>
+                      <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => openCandidateDetail(c)}>{c.customer_name}</TableCell>
                       <TableCell className="font-mono text-[11px] text-slate-500">{c.mobile}</TableCell>
                       <TableCell className="text-[12px] text-slate-500">{c.store_name}</TableCell>
                       <TableCell>
@@ -367,6 +374,118 @@ export default function StoreCRMDashboardPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* RC Candidate Detail Popup */}
+      <Dialog open={!!candidateDetail || detailLoading} onOpenChange={v => { if (!v) { setCandidateDetail(null); } }}>
+        <DialogContent className="rounded-sm max-w-2xl max-h-[85vh] overflow-auto p-0">
+          {detailLoading ? (
+            <div className="p-12 text-center"><Loader2 className="w-6 h-6 text-sky-500 animate-spin mx-auto" /><p className="text-sm text-slate-400 mt-2">Loading...</p></div>
+          ) : candidateDetail?.profile ? (() => {
+            const p = candidateDetail.profile;
+            const s = candidateDetail.stats;
+            const rc = candidateDetail.rc_info;
+            const resultColor = { reached: 'bg-sky-50 text-sky-700', confirmed: 'bg-emerald-50 text-emerald-700', not_reachable: 'bg-red-50 text-red-700', callback: 'bg-amber-50 text-amber-700', discontinued: 'bg-slate-100 text-slate-600' };
+            return (
+              <>
+                <DialogHeader className="px-5 pt-5 pb-0"><DialogTitle className="font-heading">{p.customer_name}</DialogTitle></DialogHeader>
+                <div className="px-5 pb-5 space-y-4">
+                  {/* Profile + Stats */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5 text-[12px] font-body">
+                      <div><span className="text-slate-400">Mobile:</span> <span className="font-medium">{p.mobile_number}</span></div>
+                      <div><span className="text-slate-400">Store:</span> <span className="font-medium">{p.store_name}</span></div>
+                      <Badge className="text-[9px] rounded-sm bg-slate-100 text-slate-600">{p.customer_type}</Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { l: 'Total Spent', v: `INR ${s.total_spent.toLocaleString('en-IN')}`, c: 'text-emerald-700' },
+                        { l: 'Invoices', v: s.total_invoices, c: 'text-sky-700' },
+                        { l: 'Items', v: s.total_items, c: 'text-slate-800' },
+                        { l: 'Repeat Meds', v: rc?.repeat_medicines?.length || 0, c: 'text-violet-700' },
+                      ].map(k => (
+                        <div key={k.l} className="p-2 bg-slate-50 rounded-sm"><p className="text-[8px] text-slate-400 uppercase">{k.l}</p><p className={`text-[14px] font-bold tabular-nums ${k.c}`}>{k.v}</p></div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Repeat Medicines */}
+                  {rc?.repeat_medicines?.length > 0 && (
+                    <div className="p-3 bg-violet-50/50 border border-violet-200 rounded-sm">
+                      <p className="text-[10px] font-body text-violet-700 uppercase tracking-wider mb-1.5">Repeat Medicines (Last 90 Days)</p>
+                      {rc.repeat_medicines.map((m, i) => (
+                        <div key={i} className="flex items-center gap-2 py-1 text-[11px] font-body border-b border-violet-100 last:border-0">
+                          <Pill className="w-3 h-3 text-violet-500" />
+                          <span className="font-medium">{m.medicine}</span>
+                          <Badge className="text-[8px] rounded-sm bg-violet-100 text-violet-700">{m.count}x</Badge>
+                          <span className="text-slate-400 ml-auto">INR {m.spent}</span>
+                          {m.avg_interval > 0 && <span className="text-slate-400">~{m.avg_interval}d</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Recent Purchases */}
+                  {candidateDetail.recent_invoices?.length > 0 && (
+                    <div className="p-3 border border-slate-200 rounded-sm">
+                      <p className="text-[10px] font-body text-sky-700 uppercase tracking-wider mb-1.5"><Receipt className="w-3 h-3 inline mr-1" />Recent Invoices</p>
+                      <div className="max-h-[150px] overflow-auto space-y-1.5">
+                        {candidateDetail.recent_invoices.map((inv, i) => (
+                          <div key={i} className="flex justify-between text-[11px] font-body border-b border-slate-50 pb-1">
+                            <span>#{inv.entry_number} | {inv.date ? new Date(inv.date).toLocaleDateString() : '-'} | {inv.items.length} items</span>
+                            <span className="font-medium text-emerald-700">INR {inv.total.toLocaleString('en-IN')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Active Medicines / Refills */}
+                  {candidateDetail.active_medicines?.length > 0 && (
+                    <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-sm">
+                      <p className="text-[10px] font-body text-emerald-700 uppercase tracking-wider mb-1.5">Active Refills</p>
+                      {candidateDetail.active_medicines.map((m, i) => (
+                        <div key={i} className="flex items-center gap-2 py-1 text-[11px] font-body">
+                          <Pill className="w-3 h-3 text-emerald-500" /><span className="font-medium">{m.medicine}</span>
+                          {m.next_due && <Badge className="text-[8px] rounded-sm bg-amber-50 text-amber-700 ml-auto">Due: {new Date(m.next_due).toLocaleDateString()}</Badge>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Call History */}
+                  {candidateDetail.call_history?.length > 0 && (
+                    <div className="p-3 border border-slate-200 rounded-sm">
+                      <p className="text-[10px] font-body text-slate-600 uppercase tracking-wider mb-1.5"><Phone className="w-3 h-3 inline mr-1" />Call History</p>
+                      <div className="max-h-[120px] overflow-auto space-y-1">
+                        {candidateDetail.call_history.map((cl, i) => (
+                          <div key={i} className="flex items-center gap-2 text-[11px] font-body border-b border-slate-50 pb-1">
+                            <Badge className={`text-[8px] rounded-sm ${resultColor[cl.result] || 'bg-slate-100'}`}>{cl.result?.replace('_', ' ')}</Badge>
+                            <span className="text-violet-700 font-medium">{cl.caller}</span>
+                            <span className="text-slate-400 truncate flex-1">{cl.remarks || '-'}</span>
+                            <span className="text-slate-300 text-[9px] shrink-0">{cl.date ? new Date(cl.date).toLocaleDateString() : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 pt-2 border-t border-slate-200">
+                    <Button size="sm" className="bg-rose-500 hover:bg-rose-600 rounded-sm text-xs font-body"
+                      onClick={() => { api.put(`/crm/customers/${p.id}/type`, { customer_type: 'rc' }).then(() => { toast.success('Converted to RC'); setCandidateDetail(null); loadRcCandidates(); }).catch(() => toast.error('Failed')); }}>
+                      <UserCheck className="w-3 h-3 mr-1" /> Convert to RC
+                    </Button>
+                    <FollowupButton customerId={p.id} customerName={p.customer_name} onDone={() => { setCandidateDetail(null); loadFollowups(); }} />
+                    <Button size="sm" variant="outline" className="rounded-sm text-xs font-body ml-auto" onClick={() => { setCandidateDetail(null); navigate(`/crm/customer/${p.id}`); }}>
+                      <ArrowRight className="w-3 h-3 mr-1" /> Full Profile
+                    </Button>
+                  </div>
+                </div>
+              </>
+            );
+          })() : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
