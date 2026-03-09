@@ -347,7 +347,14 @@ export default function CustomerProfilePage() {
                 <div className={`mt-0.5 p-1.5 rounded-full shrink-0 ${t.type === 'purchase' ? 'bg-emerald-50' : t.type === 'call' ? 'bg-violet-50' : 'bg-sky-50'}`}>
                   {t.type === 'purchase' ? <Receipt className="w-3 h-3 text-emerald-600" /> : t.type === 'call' ? <Phone className="w-3 h-3 text-violet-600" /> : <Calendar className="w-3 h-3 text-sky-600" />}
                 </div>
-                <div className="min-w-0 flex-1"><p className="text-[12px] font-body font-medium text-slate-800">{t.title}</p><p className="text-[11px] font-body text-slate-400 mt-0.5">{t.subtitle}</p><p className="text-[10px] font-body text-slate-300 mt-0.5">{t.date ? new Date(t.date).toLocaleString() : ''}</p></div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-body font-medium text-slate-800">{t.title}</p>
+                  <p className="text-[11px] font-body text-slate-400 mt-0.5">{t.subtitle}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {t.caller && <span className="text-[10px] font-body text-violet-500 font-medium">By: {t.caller}</span>}
+                    <span className="text-[10px] font-body text-slate-300">{t.date ? new Date(t.date).toLocaleString() : ''}</span>
+                  </div>
+                </div>
               </div>
             )) : <div className="text-center py-10"><Clock className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-xs text-slate-400">No activity</p></div>}
           </div></CardContent></Card>

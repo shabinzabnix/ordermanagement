@@ -17,6 +17,7 @@ export default function StoreCRMDashboardPage() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [perf, setPerf] = useState(null);
+  const [calls, setCalls] = useState([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [perfDays, setPerfDays] = useState('30');
@@ -32,8 +33,11 @@ export default function StoreCRMDashboardPage() {
   const loadPerf = () => {
     api.get('/crm/staff-performance', { params: { days: perfDays } }).then(r => setPerf(r.data)).catch(() => {});
   };
+  const loadCalls = () => {
+    api.get('/crm/calls', { params: { limit: 50 } }).then(r => setCalls(r.data.calls || [])).catch(() => {});
+  };
 
-  useEffect(() => { load(); loadPerf(); }, []);
+  useEffect(() => { load(); loadPerf(); loadCalls(); }, []);
   useEffect(() => { load(); }, [dateFrom, dateTo]);
   useEffect(() => { loadPerf(); }, [perfDays]);
 
@@ -81,6 +85,7 @@ export default function StoreCRMDashboardPage() {
           <TabsTrigger value="upcoming" className="rounded-sm text-xs font-body" data-testid="tab-upcoming">Upcoming Refills ({data?.upcoming_purchases?.length || 0})</TabsTrigger>
           <TabsTrigger value="rc_purchases" className="rounded-sm text-xs font-body" data-testid="tab-rc-purchases">RC Purchases ({data?.rc_purchases?.length || 0})</TabsTrigger>
           <TabsTrigger value="new_customers" className="rounded-sm text-xs font-body" data-testid="tab-new-customers">New Customers ({data?.new_customers?.length || 0})</TabsTrigger>
+          <TabsTrigger value="calls" className="rounded-sm text-xs font-body" data-testid="tab-calls">Call Log ({calls.length})</TabsTrigger>
           <TabsTrigger value="performance" className="rounded-sm text-xs font-body" data-testid="tab-performance">Staff Performance</TabsTrigger>
         </TabsList>
 
@@ -176,6 +181,40 @@ export default function StoreCRMDashboardPage() {
                       <TableCell><ArrowRight className="w-3.5 h-3.5 text-slate-300" /></TableCell>
                     </TableRow>
                   ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* Call Log */}
+        <TabsContent value="calls">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <div className="overflow-auto max-h-[calc(100vh-380px)]">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white z-10">
+                  <TableRow className="border-b-2 border-slate-100">
+                    {['Customer', 'Mobile', 'Called By', 'Result', 'Remarks', 'Date'].map(h => (
+                      <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3">{h}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {calls.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-12"><Phone className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No calls logged yet</p></TableCell></TableRow>
+                  ) : calls.map(cl => {
+                    const resultColor = { reached: 'bg-sky-50 text-sky-700', confirmed: 'bg-emerald-50 text-emerald-700', not_reachable: 'bg-red-50 text-red-700', callback: 'bg-amber-50 text-amber-700', discontinued: 'bg-slate-100 text-slate-600' };
+                    return (
+                      <TableRow key={cl.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => navigate(`/crm/customer/${cl.customer_id}`)}>
+                        <TableCell className="font-body text-[13px] font-medium text-slate-800">{cl.customer_name}</TableCell>
+                        <TableCell className="font-mono text-[11px] text-slate-500">{cl.mobile_number}</TableCell>
+                        <TableCell className="font-body text-[13px] font-medium text-violet-700">{cl.caller_name || '-'}</TableCell>
+                        <TableCell><Badge className={`text-[10px] rounded-sm ${resultColor[cl.call_result] || 'bg-slate-100 text-slate-600'}`}>{cl.call_result?.replace('_', ' ')}</Badge></TableCell>
+                        <TableCell className="text-[11px] text-slate-500 max-w-[200px] truncate">{cl.remarks || '-'}</TableCell>
+                        <TableCell className="text-[11px] text-slate-400">{cl.created_at ? new Date(cl.created_at).toLocaleString() : '-'}</TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
