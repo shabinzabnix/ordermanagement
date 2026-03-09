@@ -61,13 +61,13 @@ export function AuthProvider({ children }) {
 
   const switchToUser = async (userId) => {
     const res = await api.post(`/auth/impersonate/${userId}`);
-    // Save current admin token for switching back
     localStorage.setItem('pharmacy_admin_token', localStorage.getItem('pharmacy_token'));
     localStorage.setItem('pharmacy_token', res.data.token);
     setToken(res.data.token);
     setUser(res.data.user);
     setImpersonating(true);
-    window.location.href = '/dashboard';
+    const role = res.data.user?.role;
+    window.location.href = ['STORE_STAFF', 'STORE_MANAGER'].includes(role) ? '/store-dashboard' : '/dashboard';
   };
 
   const switchBack = () => {
