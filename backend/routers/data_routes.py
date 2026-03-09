@@ -174,6 +174,8 @@ async def upload_products(
     failed = 0
     errors = []
 
+    # Build all data first, then bulk upsert
+    rows_data = []
     for idx, row in df_mapped.iterrows():
         try:
             product_id = str(row.get("product_id", "")).strip()
@@ -183,9 +185,6 @@ async def upload_products(
                 errors.append(f"Row {idx+2}: Missing product_id")
                 failed += 1
                 continue
-
-            result = await db.execute(select(Product).where(Product.product_id == product_id))
-            existing = result.scalar_one_or_none()
 
             data = {
                 "product_id": product_id,
@@ -201,20 +200,26 @@ async def upload_products(
                 "ptr": float(row.get("ptr", 0)) if pd.notna(row.get("ptr")) else 0,
                 "landing_cost": float(row.get("landing_cost", 0)) if pd.notna(row.get("landing_cost")) else 0,
             }
-
-            if existing:
-                for key, value in data.items():
-                    setattr(existing, key, value)
-                existing.updated_at = datetime.now(timezone.utc)
-            else:
-                db.add(Product(**data))
-
+            rows_data.append(data)
             success += 1
         except Exception as e:
             errors.append(f"Row {idx+2}: {str(e)}")
             failed += 1
 
-    await db.commit()
+    # Bulk upsert using PostgreSQL ON CONFLICT
+    if rows_data:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        BATCH = 100
+        for i in range(0, len(rows_data), BATCH):
+            batch = rows_data[i:i+BATCH]
+            stmt = pg_insert(Product).values(batch)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=['product_id'],
+                set_={k: stmt.excluded[k] for k in ['product_name', 'primary_supplier', 'secondary_supplier', 'least_price_supplier', 'most_qty_supplier', 'category', 'sub_category', 'rep', 'mrp', 'ptr', 'landing_cost']}
+            )
+            await db.execute(stmt)
+            await db.flush()
+        await db.commit()
 
     try:
         upload = UploadHistory(

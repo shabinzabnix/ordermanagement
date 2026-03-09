@@ -117,6 +117,7 @@ async def upload_ho_stock(
         product_names[p.product_id] = p.product_name
 
     success, failed, errors = 0, 0, []
+    rows_data = []
     for idx, row in df_mapped.iterrows():
         try:
             pid = str(row.get("product_id", "")).strip()
@@ -130,21 +131,25 @@ async def upload_ho_stock(
             pname = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
             if not pname or pname == "nan":
                 pname = product_names.get(pid, "")
-            db.add(HOStockBatch(
-                product_id=pid,
-                product_name=pname,
-                batch=batch,
-                mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
-                closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
-                landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
-                expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None,
-            ))
+            rows_data.append({
+                "product_id": pid, "product_name": pname, "batch": batch,
+                "mrp": float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                "closing_stock": float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
+                "landing_cost_value": float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
+                "expiry_date": pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None,
+            })
             success += 1
         except Exception as e:
             errors.append(f"Row {idx+2}: {str(e)}")
             failed += 1
 
-    await db.commit()
+    # Bulk insert in batches
+    if rows_data:
+        BATCH = 100
+        for i in range(0, len(rows_data), BATCH):
+            db.add_all([HOStockBatch(**r) for r in rows_data[i:i+BATCH]])
+            await db.flush()
+        await db.commit()
     try:
         db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.HO_STOCK, uploaded_by=user["user_id"],
             total_records=len(df_mapped), success_records=success, failed_records=failed,
@@ -214,6 +219,7 @@ async def upload_store_stock(
     await db.execute(delete(StoreStockBatch).where(StoreStockBatch.store_id == store_id))
 
     success, failed, errors = 0, 0, []
+    rows_data = []
     for idx, row in df_mapped.iterrows():
         try:
             pname = str(row.get("product_name", "")).strip()
@@ -222,24 +228,16 @@ async def upload_store_stock(
                 errors.append(f"Row {idx+2}: Missing product_name or batch")
                 failed += 1
                 continue
-
             closing_stock = float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0
             packing = float(row.get("packing", 1)) if pd.notna(row.get("packing")) and float(row.get("packing", 0)) > 0 else 1
             closing_stock_strips = closing_stock / packing
-
             ho_pid = str(row.get("ho_product_id", "")).strip() if pd.notna(row.get("ho_product_id")) else None
-            if ho_pid in ("", "nan", "None"):
-                ho_pid = None
-            if ho_pid and ho_pid.endswith(".0"):
-                ho_pid = ho_pid[:-2]
-
+            if ho_pid in ("", "nan", "None"): ho_pid = None
+            if ho_pid and ho_pid.endswith(".0"): ho_pid = ho_pid[:-2]
             store_pid = str(row.get("store_product_id", "")).strip() if pd.notna(row.get("store_product_id")) else None
-            if store_pid and store_pid.endswith(".0"):
-                store_pid = store_pid[:-2]
-
-            db.add(StoreStockBatch(
-                store_id=store_id, ho_product_id=ho_pid,
-                store_product_id=store_pid,
+            if store_pid and store_pid.endswith(".0"): store_pid = store_pid[:-2]
+            rows_data.append(StoreStockBatch(
+                store_id=store_id, ho_product_id=ho_pid, store_product_id=store_pid,
                 product_name=pname, packing=packing, batch=batch,
                 mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
                 sales=float(row.get("sales", 0)) if pd.notna(row.get("sales")) else 0,
@@ -252,7 +250,13 @@ async def upload_store_stock(
             errors.append(f"Row {idx+2}: {str(e)}")
             failed += 1
 
-    await db.commit()
+    # Bulk insert in batches
+    if rows_data:
+        BATCH = 100
+        for i in range(0, len(rows_data), BATCH):
+            db.add_all(rows_data[i:i+BATCH])
+            await db.flush()
+        await db.commit()
     try:
         db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.STORE_STOCK, store_id=store_id, uploaded_by=user["user_id"],
             total_records=len(df_mapped), success_records=success, failed_records=failed,

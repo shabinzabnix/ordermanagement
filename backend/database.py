@@ -9,7 +9,10 @@ load_dotenv(ROOT_DIR / '.env')
 
 DATABASE_URL = os.environ['DATABASE_URL']
 
-engine = create_async_engine(DATABASE_URL, echo=False, pool_size=20, max_overflow=30)
+engine = create_async_engine(
+    DATABASE_URL, echo=False, pool_size=5, max_overflow=10, pool_timeout=30,
+    connect_args={"server_settings": {"statement_timeout": "120000"}},
+)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
