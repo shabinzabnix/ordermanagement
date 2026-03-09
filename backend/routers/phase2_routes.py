@@ -114,6 +114,23 @@ async def aging_report(
         if not ref_date: return 0, None
         return (now - ref_date).days, ref_date
 
+    # Pre-load actual 90-day sales from SalesRecord (by product_name, all stores)
+    from models import SalesRecord as SR
+    actual_sales_90d = {}
+    for r in (await db.execute(
+        select(SR.product_name, func.sum(SR.quantity).label("qty"))
+        .where(SR.invoice_date >= d90)
+        .group_by(SR.product_name)
+    )).all():
+        actual_sales_90d[r[0]] = float(r[1] or 0)
+
+    def classify(product_name, days):
+        """Classify based on actual SalesRecord data: dead=0 sales 90d + 60d old, slow=<5 sales 90d + 30d old."""
+        qty_90d = actual_sales_90d.get(product_name, 0)
+        if qty_90d == 0 and days > 60: return "dead"
+        if qty_90d < 5 and days > 30: return "slow"
+        return "active"
+
     # --- HO Stock ---
     if not location or location == "all" or location == "Head Office":
         ho_q = select(HOStockBatch).where(HOStockBatch.closing_stock > 0)
@@ -122,14 +139,15 @@ async def aging_report(
         for s in (await db.execute(ho_q)).scalars().all():
             days, ref_date = get_age(s.product_id, None, s.created_at)
             b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
-            st = "dead" if days > 60 else "slow" if days > 30 else "active"
+            st = classify(s.product_name, days)
             if bucket and bucket != "all" and b != bucket: continue
             if status and status != "all" and st != status: continue
             items.append({
                 "location": "Head Office", "store_id": None,
                 "product_id": s.product_id, "product_name": s.product_name,
                 "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
-                "days": days, "value": s.landing_cost_value or 0, "sales": 0,
+                "days": days, "value": s.landing_cost_value or 0,
+                "sales_90d": actual_sales_90d.get(s.product_name, 0),
                 "stock_date": ref_date.isoformat() if ref_date else None,
                 "expiry_date": s.expiry_date.isoformat() if s.expiry_date else None,
                 "bucket": b, "status": st,
@@ -145,16 +163,15 @@ async def aging_report(
             pid = s.ho_product_id or s.store_product_id or ""
             days, ref_date = get_age(pid, sid, s.created_at)
             b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
-            is_dead = (s.sales or 0) == 0 and days > 60
-            is_slow = (s.sales or 0) == 0 and days > 30 and not is_dead
-            st = "dead" if is_dead else "slow" if is_slow else "active"
+            st = classify(s.product_name, days)
             if bucket and bucket != "all" and b != bucket: continue
             if status and status != "all" and st != status: continue
             items.append({
                 "location": sname, "store_id": sid,
                 "product_id": pid, "product_name": s.product_name,
                 "batch": s.batch, "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
-                "days": days, "value": s.cost_value or 0, "sales": s.sales or 0,
+                "days": days, "value": s.cost_value or 0,
+                "sales_90d": actual_sales_90d.get(s.product_name, 0),
                 "stock_date": ref_date.isoformat() if ref_date else None,
                 "expiry_date": s.expiry_date.isoformat() if s.expiry_date else None,
                 "bucket": b, "status": st,
@@ -163,20 +180,6 @@ async def aging_report(
     items.sort(key=lambda x: -x["days"])
     total = len(items)
     paged = items[(page - 1) * limit: page * limit]
-
-    # Get 90d sales for paged products
-    pnames = list(set(i["product_name"] for i in paged))
-    sales_90d = {}
-    if pnames:
-        from models import SalesRecord as SR
-        for r in (await db.execute(
-            select(SR.product_name, func.sum(SR.quantity))
-            .where(SR.product_name.in_(pnames), SR.invoice_date >= d90)
-            .group_by(SR.product_name)
-        )).all():
-            sales_90d[r[0]] = round(float(r[1] or 0), 1)
-    for i in paged:
-        i["sales_90d"] = sales_90d.get(i["product_name"], 0)
 
     buckets = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
     dead_count = slow_count = dead_value = slow_value = 0
