@@ -272,6 +272,10 @@ async def get_store_stock(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    # Enforce store for store roles
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        if store_id != user["store_id"]:
+            raise HTTPException(403, "You can only view your assigned store's stock")
     query = select(StoreStockBatch).where(StoreStockBatch.store_id == store_id)
     if search:
         query = query.where(
@@ -812,9 +816,20 @@ async def get_dashboard_stats(
     user_store_id = user.get("store_id") if is_store_staff else None
 
     total_products = (await db.execute(select(func.count(Product.id)))).scalar() or 0
-    total_stores = (await db.execute(select(func.count(Store.id)).where(Store.is_active == True))).scalar() or 0
-    ho_stock_value = (await db.execute(select(func.sum(HOStockBatch.landing_cost_value)))).scalar() or 0
-    ho_stock_units = (await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0
+
+    if user_store_id:
+        total_stores = 1
+        ho_stock_value = 0
+        ho_stock_units = 0
+        # Store-specific stock value
+        store_stock_value = float((await db.execute(select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == user_store_id))).scalar() or 0)
+        store_stock_units = float((await db.execute(select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == user_store_id))).scalar() or 0)
+    else:
+        total_stores = (await db.execute(select(func.count(Store.id)).where(Store.is_active == True))).scalar() or 0
+        ho_stock_value = (await db.execute(select(func.sum(HOStockBatch.landing_cost_value)))).scalar() or 0
+        ho_stock_units = (await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0
+        store_stock_value = ho_stock_value
+        store_stock_units = ho_stock_units
 
     transfer_q = select(func.count(InterStoreTransfer.id)).where(InterStoreTransfer.status == TransferStatus.PENDING)
     purchase_q = select(func.count(PurchaseRequest.id)).where(
@@ -829,12 +844,13 @@ async def get_dashboard_stats(
     pending_transfers = (await db.execute(transfer_q)).scalar() or 0
     pending_purchases = (await db.execute(purchase_q)).scalar() or 0
 
-    recent_uploads = (await db.execute(
-        select(UploadHistory).order_by(UploadHistory.created_at.desc()).limit(5)
-    )).scalars().all()
-    recent_transfers = (await db.execute(
-        select(InterStoreTransfer).order_by(InterStoreTransfer.created_at.desc()).limit(5)
-    )).scalars().all()
+    recent_uploads_q = select(UploadHistory).order_by(UploadHistory.created_at.desc()).limit(5)
+    recent_transfers_q = select(InterStoreTransfer).order_by(InterStoreTransfer.created_at.desc()).limit(5)
+    if user_store_id:
+        recent_uploads_q = recent_uploads_q.where(or_(UploadHistory.store_id == user_store_id, UploadHistory.store_id.is_(None)))
+        recent_transfers_q = recent_transfers_q.where((InterStoreTransfer.requesting_store_id == user_store_id) | (InterStoreTransfer.source_store_id == user_store_id))
+    recent_uploads = (await db.execute(recent_uploads_q)).scalars().all()
+    recent_transfers = (await db.execute(recent_transfers_q)).scalars().all()
 
     sids = set()
     for t in recent_transfers:
@@ -847,8 +863,8 @@ async def get_dashboard_stats(
     return {
         "total_products": total_products,
         "total_stores": total_stores,
-        "ho_stock_value": round(ho_stock_value, 2),
-        "ho_stock_units": ho_stock_units,
+        "ho_stock_value": round(store_stock_value if user_store_id else ho_stock_value, 2),
+        "ho_stock_units": store_stock_units if user_store_id else ho_stock_units,
         "pending_transfers": pending_transfers,
         "pending_purchases": pending_purchases,
         "recent_uploads": [

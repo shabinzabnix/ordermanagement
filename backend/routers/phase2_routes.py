@@ -756,21 +756,24 @@ async def get_chart_data(
     user: dict = Depends(get_current_user),
 ):
     now = datetime.now(timezone.utc)
+    is_store = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
+    user_store_id = user.get("store_id") if is_store else None
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
 
     # 1. Aging distribution buckets
     aging_buckets = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
     aging_values = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
-    for s in (await db.execute(select(HOStockBatch))).scalars().all():
-        if s.closing_stock <= 0:
-            continue
-        days = (now - s.created_at).days if s.created_at else 0
-        b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
-        aging_buckets[b] += float(s.closing_stock or 0)
-        aging_values[b] += float(s.landing_cost_value or 0)
-    for s in (await db.execute(select(StoreStockBatch))).scalars().all():
-        if s.closing_stock_strips <= 0:
-            continue
+    if not user_store_id:
+        for s in (await db.execute(select(HOStockBatch))).scalars().all():
+            if s.closing_stock <= 0: continue
+            days = (now - s.created_at).days if s.created_at else 0
+            b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
+            aging_buckets[b] += float(s.closing_stock or 0)
+            aging_values[b] += float(s.landing_cost_value or 0)
+    ss_chart_q = select(StoreStockBatch)
+    if user_store_id: ss_chart_q = ss_chart_q.where(StoreStockBatch.store_id == user_store_id)
+    for s in (await db.execute(ss_chart_q)).scalars().all():
+        if s.closing_stock_strips <= 0: continue
         days = (now - s.created_at).days if s.created_at else 0
         b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
         aging_buckets[b] += float(s.closing_stock_strips or 0)
@@ -779,14 +782,14 @@ async def get_chart_data(
     aging_chart = [{"bucket": k, "units": round(v, 0), "value": round(aging_values[k], 0)} for k, v in aging_buckets.items()]
 
     # 2. Stock distribution by location
-    ho_total = float((await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0)
     store_dist = []
-    store_stock_q = (await db.execute(
-        select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
-        .group_by(StoreStockBatch.store_id)
-    )).all()
-    if ho_total > 0:
-        store_dist.append({"name": "Head Office", "value": round(ho_total, 0)})
+    if not user_store_id:
+        ho_total = float((await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0)
+        if ho_total > 0:
+            store_dist.append({"name": "Head Office", "value": round(ho_total, 0)})
+    ss_dist_q = select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t")).group_by(StoreStockBatch.store_id)
+    if user_store_id: ss_dist_q = ss_dist_q.where(StoreStockBatch.store_id == user_store_id)
+    store_stock_q = (await db.execute(ss_dist_q)).all()
     for r in store_stock_q:
         v = float(r[1] or 0)  # Access by index instead of attribute
         if v > 0:

@@ -947,6 +947,10 @@ async def store_dashboard(
     user: dict = Depends(get_current_user),
 ):
     """Store-wise dashboard: stock value from ledger, sales from sales uploads, date-wise breakdown."""
+    # Enforce store for store roles
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        if store_id != user["store_id"]:
+            raise HTTPException(403, "You can only view your assigned store's dashboard")
     now = datetime.now(timezone.utc)
     store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
     if not store:
@@ -1064,12 +1068,16 @@ async def store_dashboard(
 @router.get("/intel/store-dashboard-summary")
 async def store_dashboard_summary(
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
+    user: dict = Depends(get_current_user),
 ):
     """All stores summary: stock value + sales value."""
     now = datetime.now(timezone.utc)
     d30 = now - timedelta(days=30)
-    stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
+    store_q = select(Store).where(Store.is_active == True).order_by(Store.store_name)
+    # Store roles only see their store
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        store_q = store_q.where(Store.id == user["store_id"])
+    stores = (await db.execute(store_q)).scalars().all()
 
     result = []
     for s in stores:

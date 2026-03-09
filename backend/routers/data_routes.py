@@ -254,8 +254,11 @@ class StoreUpdate(BaseModel):
 
 @router.get("/stores")
 async def get_stores(db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
-    result = await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))
-    stores = result.scalars().all()
+    query = select(Store).where(Store.is_active == True).order_by(Store.store_name)
+    # Store roles can only see their own store
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        query = query.where(Store.id == user["store_id"])
+    stores = (await db.execute(query)).scalars().all()
     return {
         "stores": [
             {
