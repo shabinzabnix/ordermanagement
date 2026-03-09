@@ -1962,3 +1962,156 @@ async def rc_customers_list(
         "customers": result, "total": total, "page": page, "limit": limit,
         "store_summary": [{"store_id": k, "store_name": v["name"], "rc_count": v["count"]} for k, v in store_summary.items()] if store_summary else [],
     }
+
+
+# ─── Daily CRM Activity Report ────────────────────────────────
+
+@router.get("/crm/daily-report")
+async def daily_crm_report(
+    date: str = Query(None),
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    target_store = sf or (int(store_id) if store_id else None)
+
+    # Parse date (defaults to today)
+    now = datetime.now(timezone.utc)
+    if date:
+        try:
+            day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+
+    # ─── Calls ───
+    call_q = select(CRMCallLog).where(CRMCallLog.created_at >= day_start, CRMCallLog.created_at < day_end)
+    calls = (await db.execute(call_q.order_by(CRMCallLog.created_at.desc()))).scalars().all()
+
+    # Map customer & caller names
+    call_cids = set(cl.customer_id for cl in calls)
+    call_cmap = {}
+    if call_cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(call_cids)))).scalars().all():
+            call_cmap[c.id] = {"name": c.customer_name, "mobile": c.mobile_number}
+
+    call_results = {}
+    call_list = []
+    for cl in calls:
+        r = cl.call_result.value if hasattr(cl.call_result, 'value') else cl.call_result
+        call_results[r] = call_results.get(r, 0) + 1
+        ci = call_cmap.get(cl.customer_id, {})
+        call_list.append({
+            "id": cl.id, "customer_name": ci.get("name", ""), "mobile": ci.get("mobile", ""),
+            "caller_name": cl.caller_name or "", "call_result": r, "remarks": cl.remarks or "",
+            "time": cl.created_at.strftime("%H:%M") if cl.created_at else "",
+        })
+
+    # ─── New Customers (onboarded today) ───
+    nc_q = select(CRMCustomer).where(CRMCustomer.created_at >= day_start, CRMCustomer.created_at < day_end)
+    if target_store:
+        nc_q = nc_q.where(or_(CRMCustomer.first_store_id == target_store, CRMCustomer.assigned_store_id == target_store))
+    new_customers = (await db.execute(nc_q.order_by(CRMCustomer.created_at.desc()))).scalars().all()
+    nc_sids = set(c.first_store_id for c in new_customers if c.first_store_id)
+    nc_smap = {}
+    if nc_sids:
+        nc_smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(nc_sids)))).scalars().all()}
+
+    new_list = [{
+        "id": c.id, "name": c.customer_name, "mobile": c.mobile_number,
+        "type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+        "store": nc_smap.get(c.first_store_id, ""),
+        "time": c.created_at.strftime("%H:%M") if c.created_at else "",
+    } for c in new_customers]
+
+    # ─── Conversions (walkin → RC today) ───
+    # Check audit logs for type conversions today
+    conv_q = select(AuditLog).where(
+        AuditLog.created_at >= day_start, AuditLog.created_at < day_end,
+        AuditLog.action.ilike("%type%"),
+    )
+    conv_logs = (await db.execute(conv_q.order_by(AuditLog.created_at.desc()))).scalars().all()
+    conversions = [{
+        "user_name": a.user_name, "action": a.action,
+        "time": a.created_at.strftime("%H:%M") if a.created_at else "",
+    } for a in conv_logs]
+
+    # ─── Medicines Added Today ───
+    med_q = select(MedicinePurchase).where(
+        MedicinePurchase.created_at >= day_start, MedicinePurchase.created_at < day_end,
+    )
+    if target_store:
+        med_q = med_q.where(MedicinePurchase.store_id == target_store)
+    meds_added = (await db.execute(med_q.order_by(MedicinePurchase.created_at.desc()))).scalars().all()
+    med_cids = set(m.customer_id for m in meds_added)
+    med_cmap = {}
+    if med_cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(med_cids)))).scalars().all():
+            med_cmap[c.id] = c.customer_name
+
+    med_list = [{
+        "id": m.id, "customer_name": med_cmap.get(m.customer_id, ""),
+        "medicine": m.medicine_name, "dosage": m.dosage, "timing": m.timing,
+        "days": m.days_of_medication,
+        "time": m.created_at.strftime("%H:%M") if m.created_at else "",
+    } for m in meds_added]
+
+    # ─── Sales Uploads Today ───
+    from models import UploadHistory, UploadType
+    upload_q = select(UploadHistory).where(
+        UploadHistory.created_at >= day_start, UploadHistory.created_at < day_end,
+    )
+    uploads = (await db.execute(upload_q.order_by(UploadHistory.created_at.desc()))).scalars().all()
+    upload_uids = set(u.uploaded_by for u in uploads if u.uploaded_by)
+    upload_umap = {}
+    if upload_uids:
+        for u in (await db.execute(select(User).where(User.id.in_(upload_uids)))).scalars().all():
+            upload_umap[u.id] = u.full_name
+    upload_list = [{
+        "file": u.file_name, "type": u.upload_type.value if hasattr(u.upload_type, 'value') else u.upload_type,
+        "records": u.total_records, "success": u.success_records, "failed": u.failed_records,
+        "uploaded_by": upload_umap.get(u.uploaded_by, ""),
+        "time": u.created_at.strftime("%H:%M") if u.created_at else "",
+    } for u in uploads]
+
+    # ─── Staff Activity Summary ───
+    staff_activity = {}
+    for cl in calls:
+        name = cl.caller_name or "Unknown"
+        if name not in staff_activity:
+            staff_activity[name] = {"calls": 0, "confirmed": 0, "reached": 0}
+        staff_activity[name]["calls"] += 1
+        r = cl.call_result.value if hasattr(cl.call_result, 'value') else cl.call_result
+        if r == "confirmed": staff_activity[name]["confirmed"] += 1
+        if r == "reached": staff_activity[name]["reached"] += 1
+
+    staff_summary = [{"name": k, **v} for k, v in staff_activity.items()]
+    staff_summary.sort(key=lambda x: -x["calls"])
+
+    # ─── Tasks completed today ───
+    task_q = select(CRMTask).where(CRMTask.status == "completed")
+    tasks_done = (await db.execute(
+        select(func.count(CRMTask.id)).where(CRMTask.status == "completed")
+    )).scalar() or 0
+
+    return {
+        "date": day_start.strftime("%Y-%m-%d"),
+        "summary": {
+            "total_calls": len(calls),
+            "call_results": call_results,
+            "confirmed": call_results.get("confirmed", 0),
+            "new_customers": len(new_list),
+            "conversions": len(conversions),
+            "medicines_added": len(med_list),
+            "uploads": len(upload_list),
+            "tasks_completed": tasks_done,
+        },
+        "calls": call_list,
+        "new_customers": new_list,
+        "conversions": conversions,
+        "medicines_added": med_list,
+        "uploads": upload_list,
+        "staff_summary": staff_summary,
+    }

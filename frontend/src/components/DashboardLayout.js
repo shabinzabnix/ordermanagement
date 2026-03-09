@@ -39,6 +39,7 @@ const navItems = [
   { label: 'Repeat Purchases', path: '/crm/repeat-purchases', icon: Trophy, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'repeat_purchases' },
   { label: 'RC Customers', path: '/crm/rc-customers', icon: UserCheck, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'rc_customers' },
   { label: 'CRM Reports', path: '/crm/reports', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'CRM_STAFF', 'STORE_MANAGER'], svc: 'crm_reports' },
+  { label: 'Daily Report', path: '/crm/daily-report', icon: ClipboardList, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'daily_report' },
   { label: 'History', path: '/crm/history', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm_history' },
   { label: 'Customers', path: '/crm/customers', icon: Users, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm_customers' },
   { label: 'Users', path: '/users', icon: Users, roles: ['ADMIN'], svc: 'users' },
