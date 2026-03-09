@@ -1526,3 +1526,74 @@ async def create_or_update_supplier_profile(
         await db.commit()
         await db.refresh(profile)
         return {"message": "Supplier profile created", "id": profile.id}
+
+
+
+# ─── Sub-Category & Supplier Mapping ──────────────────────────
+
+@router.get("/intel/subcategory-suppliers")
+async def subcategory_suppliers(
+    search: str = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Returns all sub-categories with their suppliers, product counts, and pricing."""
+    # Get all distinct sub_category + supplier combos from products
+    rows = (await db.execute(
+        select(
+            Product.sub_category,
+            Product.category,
+            Product.primary_supplier,
+            func.count(Product.id).label("product_count"),
+            func.avg(Product.mrp).label("avg_mrp"),
+            func.avg(Product.ptr).label("avg_ptr"),
+            func.avg(Product.landing_cost).label("avg_lcost"),
+        )
+        .where(Product.sub_category.isnot(None), Product.sub_category != "", Product.primary_supplier.isnot(None))
+        .group_by(Product.sub_category, Product.category, Product.primary_supplier)
+        .order_by(Product.sub_category, func.count(Product.id).desc())
+    )).all()
+
+    # Group by sub_category
+    sub_cats = {}
+    for r in rows:
+        sc = r[0]
+        if search and search.lower() not in sc.lower() and search.lower() not in (r[2] or "").lower():
+            continue
+        if sc not in sub_cats:
+            sub_cats[sc] = {"sub_category": sc, "category": r[1], "suppliers": [], "total_products": 0}
+        sub_cats[sc]["suppliers"].append({
+            "supplier": r[2], "product_count": int(r[3]),
+            "avg_mrp": round(float(r[4] or 0), 2), "avg_ptr": round(float(r[5] or 0), 2),
+            "avg_lcost": round(float(r[6] or 0), 2),
+        })
+        sub_cats[sc]["total_products"] += int(r[3])
+
+    result = sorted(sub_cats.values(), key=lambda x: -x["total_products"])
+
+    # Enrich with supplier profile data (credit days, return policy)
+    all_suppliers = set()
+    for sc in result:
+        for s in sc["suppliers"]:
+            all_suppliers.add(s["supplier"])
+
+    profile_map = {}
+    if all_suppliers:
+        profiles = (await db.execute(
+            select(SupplierProfile).where(SupplierProfile.supplier_name.in_(all_suppliers))
+        )).scalars().all()
+        for p in profiles:
+            profile_map[p.supplier_name] = {
+                "credit_days": p.credit_days, "contact_person": p.contact_person,
+                "contact_phone": p.contact_phone, "return_policy": p.return_policy,
+                "has_profile": True,
+            }
+
+    for sc in result:
+        for s in sc["suppliers"]:
+            pf = profile_map.get(s["supplier"], {})
+            s["credit_days"] = pf.get("credit_days", 0)
+            s["contact_person"] = pf.get("contact_person", "")
+            s["return_policy"] = pf.get("return_policy", "")
+            s["has_profile"] = pf.get("has_profile", False)
+
+    return {"sub_categories": result, "total": len(result)}

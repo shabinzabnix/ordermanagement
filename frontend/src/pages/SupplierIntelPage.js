@@ -25,6 +25,11 @@ export default function SupplierIntelPage() {
   const limit = 100;
   const timerRef = useRef(null);
 
+  // Sub-category state
+  const [subCats, setSubCats] = useState([]);
+  const [subCatSearch, setSubCatSearch] = useState('');
+  const [expandedSc, setExpandedSc] = useState(null);
+
   // Supplier profile state
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileData, setProfileData] = useState(null);
@@ -45,6 +50,12 @@ export default function SupplierIntelPage() {
     if (debouncedSearch) params.search = debouncedSearch;
     api.get('/intel/supplier-intelligence', { params }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
   }, [page, debouncedSearch]);
+
+  useEffect(() => {
+    if (activeTab === 'subcategory') {
+      api.get('/intel/subcategory-suppliers', { params: subCatSearch ? { search: subCatSearch } : {} }).then(r => setSubCats(r.data.sub_categories || [])).catch(() => {});
+    }
+  }, [activeTab, subCatSearch]);
 
   const openProfile = (supplierName) => {
     setProfileOpen(true); setProfileData(null); setProfileLoading(true); setEditMode(false);
@@ -95,8 +106,9 @@ export default function SupplierIntelPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="rounded-sm">
-          <TabsTrigger value="overview" className="rounded-sm text-xs font-body">Supplier Overview ({data.total_suppliers})</TabsTrigger>
-          <TabsTrigger value="best" className="rounded-sm text-xs font-body">Best Supplier / Product ({data.total_best_per_product})</TabsTrigger>
+          <TabsTrigger value="overview" className="rounded-sm text-xs font-body">Suppliers ({data.total_suppliers})</TabsTrigger>
+          <TabsTrigger value="subcategory" className="rounded-sm text-xs font-body">Sub-Category Map ({subCats.length})</TabsTrigger>
+          <TabsTrigger value="best" className="rounded-sm text-xs font-body">Best / Product ({data.total_best_per_product})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -130,6 +142,71 @@ export default function SupplierIntelPage() {
             </div>
             <Pagination page={page} totalPages={totalSuppPages} total={data.total_suppliers} onPageChange={setPage} label="suppliers" />
           </Card>
+        </TabsContent>
+
+        {/* Sub-Category Map */}
+        <TabsContent value="subcategory" className="space-y-4">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <CardContent className="p-3">
+              <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input placeholder="Search sub-category or supplier..." value={subCatSearch} onChange={e => setSubCatSearch(e.target.value)} className="pl-9 font-body text-sm rounded-sm" /></div>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-2">
+            {subCats.length === 0 ? (
+              <Card className="border-slate-200 rounded-sm"><CardContent className="p-12 text-center"><Package className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400">No sub-categories found</p></CardContent></Card>
+            ) : subCats.slice(0, 50).map(sc => (
+              <Card key={sc.sub_category} className={`border-slate-200 shadow-sm rounded-sm ${expandedSc === sc.sub_category ? 'ring-2 ring-sky-200' : ''}`}>
+                <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50/50"
+                  onClick={() => setExpandedSc(expandedSc === sc.sub_category ? null : sc.sub_category)}>
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <p className="text-[13px] font-heading font-semibold text-slate-800">{sc.sub_category}</p>
+                      <p className="text-[10px] font-body text-slate-400">{sc.category}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 text-[12px] font-body">
+                    <span className="text-slate-500">{sc.total_products} products</span>
+                    <Badge className="text-[10px] rounded-sm bg-sky-50 text-sky-700">{sc.suppliers.length} supplier{sc.suppliers.length > 1 ? 's' : ''}</Badge>
+                  </div>
+                </div>
+
+                {expandedSc === sc.sub_category && (
+                  <div className="border-t border-slate-100">
+                    <Table>
+                      <TableHeader><TableRow className="border-b border-slate-100">
+                        {['Supplier', 'Products', 'Avg MRP', 'Avg PTR', 'Avg L.Cost', 'Credit Days', 'Contact', 'Return Policy', 'Profile'].map(h => (
+                          <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Products', 'Avg MRP', 'Avg PTR', 'Avg L.Cost', 'Credit Days'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                        ))}
+                      </TableRow></TableHeader>
+                      <TableBody>
+                        {sc.suppliers.map((s, i) => (
+                          <TableRow key={i} className="hover:bg-slate-50/50">
+                            <TableCell className="font-body text-[12px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => openProfile(s.supplier)}>{s.supplier}</TableCell>
+                            <TableCell className="text-right text-[12px] tabular-nums font-bold text-sky-700">{s.product_count}</TableCell>
+                            <TableCell className="text-right text-[11px] tabular-nums">{s.avg_mrp.toFixed(2)}</TableCell>
+                            <TableCell className="text-right text-[11px] tabular-nums">{s.avg_ptr.toFixed(2)}</TableCell>
+                            <TableCell className="text-right text-[11px] tabular-nums">{s.avg_lcost.toFixed(2)}</TableCell>
+                            <TableCell className="text-right text-[12px] tabular-nums font-medium">{s.credit_days > 0 ? <span className="text-amber-700">{s.credit_days}d</span> : <span className="text-slate-300">-</span>}</TableCell>
+                            <TableCell className="text-[11px] text-slate-500">{s.contact_person || <span className="text-slate-300">-</span>}</TableCell>
+                            <TableCell className="text-[10px] text-slate-500 max-w-[150px] truncate">{s.return_policy || <span className="text-slate-300">-</span>}</TableCell>
+                            <TableCell>
+                              {s.has_profile ? (
+                                <Badge className="text-[8px] rounded-sm bg-emerald-50 text-emerald-700 cursor-pointer" onClick={() => openProfile(s.supplier)}>View</Badge>
+                              ) : (
+                                <Badge className="text-[8px] rounded-sm bg-amber-50 text-amber-700 cursor-pointer" onClick={() => openProfile(s.supplier)}>Add</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
         </TabsContent>
 
         <TabsContent value="best">
