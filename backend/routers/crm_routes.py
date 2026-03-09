@@ -713,6 +713,10 @@ async def upload_sales_report(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    # Enforce store for store roles
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        if store_id != user["store_id"]:
+            raise HTTPException(403, "You can only upload for your assigned store")
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()

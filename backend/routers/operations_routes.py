@@ -190,6 +190,10 @@ async def upload_store_stock(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF", "STORE_MANAGER")),
 ):
+    # Enforce store for store roles
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        if store_id != user["store_id"]:
+            raise HTTPException(403, "You can only upload for your assigned store")
     result = await db.execute(select(Store).where(Store.id == store_id))
     if not result.scalar_one_or_none():
         raise HTTPException(404, "Store not found")

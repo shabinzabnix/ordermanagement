@@ -17,6 +17,13 @@ import uuid
 router = APIRouter()
 
 
+def _enforce_store(user, store_id):
+    """Enforce store_id for store staff/manager roles."""
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        return user["store_id"]
+    return store_id or None
+
+
 # ─── Unified Intelligence Dashboard ──────────────────────
 
 @router.get("/intel/dashboard")
@@ -1116,6 +1123,10 @@ async def upload_purchase_report(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    # Enforce store for store roles
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
+        if store_id != user["store_id"]:
+            raise HTTPException(403, "You can only upload for your assigned store")
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()
@@ -1259,8 +1270,9 @@ async def list_purchase_records(
 ):
     now = datetime.now(timezone.utc)
     query = select(PurchaseRecord)
-    if store_id:
-        query = query.where(PurchaseRecord.store_id == store_id)
+    effective_store = _enforce_store(user, store_id)
+    if effective_store:
+        query = query.where(PurchaseRecord.store_id == effective_store)
     if supplier:
         query = query.where(PurchaseRecord.supplier_name.ilike(f"%{supplier}%"))
     if search:

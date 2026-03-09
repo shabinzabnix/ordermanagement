@@ -367,6 +367,14 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN")),
 ):
+    # Password strength validation
+    if len(data.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    import re
+    if not re.search(r'[A-Z]', data.password):
+        raise HTTPException(400, "Password must contain at least one uppercase letter")
+    if not re.search(r'[0-9]', data.password):
+        raise HTTPException(400, "Password must contain at least one number")
     result = await db.execute(select(User).where(User.email == data.email))
     if result.scalar_one_or_none():
         raise HTTPException(400, "Email already exists")

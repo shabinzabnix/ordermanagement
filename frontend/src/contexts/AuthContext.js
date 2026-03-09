@@ -1,13 +1,34 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import api from '../lib/api';
 
 const AuthContext = createContext(null);
+const INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 hour
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('pharmacy_token'));
   const [loading, setLoading] = useState(true);
   const [impersonating, setImpersonating] = useState(!!localStorage.getItem('pharmacy_admin_token'));
+  const timerRef = useRef(null);
+
+  const resetInactivityTimer = useCallback(() => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (localStorage.getItem('pharmacy_token')) {
+        localStorage.removeItem('pharmacy_token');
+        localStorage.removeItem('pharmacy_admin_token');
+        window.location.href = '/login?reason=timeout';
+      }
+    }, INACTIVITY_TIMEOUT);
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, resetInactivityTimer));
+    resetInactivityTimer();
+    return () => { events.forEach(e => window.removeEventListener(e, resetInactivityTimer)); clearTimeout(timerRef.current); };
+  }, [token, resetInactivityTimer]);
 
   useEffect(() => {
     if (token) {

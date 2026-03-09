@@ -44,6 +44,23 @@ class User(Base):
     store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
     allowed_services = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
+    failed_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
+    force_password_change = Column(Boolean, default=False)
+    last_login = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class LoginActivity(Base):
+    __tablename__ = "login_activity"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), nullable=False, index=True)
+    user_id = Column(Integer, nullable=True)
+    success = Column(Boolean, default=False)
+    ip_address = Column(String(100))
+    user_agent = Column(String(500))
+    failure_reason = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
