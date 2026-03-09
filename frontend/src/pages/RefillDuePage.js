@@ -17,7 +17,7 @@ import { CalendarClock, Search, Phone, CheckCircle, AlertTriangle, MessageCircle
 const buildWhatsAppMsg = (d) => {
   const dueDateStr = d.next_due_date ? new Date(d.next_due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'soon';
   const status = d.days_until < 0 ? `Overdue by ${Math.abs(d.days_until)} day(s)` : d.days_until === 0 ? 'Due Today' : `Due in ${d.days_until} day(s)`;
-  return `Dear ${d.customer_name} Sir,\n\n` +
+  return `Dear ${d.customer_name} Sir/Madam,\n\n` +
     `This is a gentle reminder from Sahakar Hyper Pharmacy regarding your medication refill.\n\n` +
     `Medicine: ${d.medicine_name}\n` +
     `Refill Due: ${dueDateStr}\n` +
