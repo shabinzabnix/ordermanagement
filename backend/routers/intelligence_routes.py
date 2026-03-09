@@ -850,7 +850,7 @@ async def top_selling_products(
         except: pass
 
     # Store staff sees only their store
-    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         store_id = user["store_id"]
 
     from sqlalchemy import cast, Date

@@ -25,7 +25,7 @@ export default function StoreStockUploadPage() {
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
   // Auto-select store for store_staff
   useEffect(() => {
-    if (user?.role === 'STORE_STAFF' && user?.store_id && !selectedStore) {
+    if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id && !selectedStore) {
       setSelectedStore(String(user.store_id));
     }
   }, [user]);

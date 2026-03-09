@@ -19,7 +19,7 @@ export default function StoreRequestPage() {
   const { user } = useAuth();
   const isHO = user?.role === 'ADMIN' || user?.role === 'HO_STAFF' || user?.role === 'DIRECTOR';
   const isCRM = user?.role === 'CRM_STAFF';
-  const isStore = user?.role === 'STORE_STAFF';
+  const isStore = ['STORE_STAFF','STORE_MANAGER'].includes(user?.role);
   const canApprove = isHO || isCRM;
   const canManage = isHO;
   const [stores, setStores] = useState([]);
@@ -59,7 +59,7 @@ export default function StoreRequestPage() {
   const sugRef = useRef(null);
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); loadData(); }, []);
-  useEffect(() => { if (user?.role === 'STORE_STAFF' && user?.store_id) setStoreId(String(user.store_id)); }, [user]);
+  useEffect(() => { if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id) setStoreId(String(user.store_id)); }, [user]);
 
   const loadData = () => {
     api.get('/po/store-requests').then(r => setRequests(r.data.requests)).catch(() => {});
@@ -430,7 +430,7 @@ export default function StoreRequestPage() {
                   <Select value={reason} onValueChange={setReason}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent><SelectItem value="emergency_purchase">Emergency Purchase</SelectItem><SelectItem value="stock_refill">Stock Refill</SelectItem><SelectItem value="customer_enquiry">Customer Enquiry</SelectItem></SelectContent></Select></div>
                 <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
-                  <Select value={storeId} onValueChange={setStoreId} disabled={user?.role==='STORE_STAFF'}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
+                  <Select value={storeId} onValueChange={setStoreId} disabled={['STORE_STAFF','STORE_MANAGER'].includes(user?.role)}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>{stores.map(s=><SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent></Select></div>
               </div>
               {reason && needsCustomer && (

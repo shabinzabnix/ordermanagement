@@ -28,7 +28,7 @@ export default function TopSellingPage() {
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
   useEffect(() => {
-    if (user?.role === 'STORE_STAFF' && user?.store_id) setSelectedStore(String(user.store_id));
+    if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id) setSelectedStore(String(user.store_id));
   }, [user]);
 
   useEffect(() => {
@@ -76,7 +76,7 @@ export default function TopSellingPage() {
         <CardContent className="p-3 flex gap-3 flex-wrap items-end">
           <div className="space-y-1">
             <label className="text-[10px] font-body text-slate-400 uppercase tracking-wider">Store</label>
-            <Select value={selectedStore} onValueChange={v => { setSelectedStore(v); setPage(1); }} disabled={user?.role === 'STORE_STAFF'}>
+            <Select value={selectedStore} onValueChange={v => { setSelectedStore(v); setPage(1); }} disabled={['STORE_STAFF','STORE_MANAGER'].includes(user?.role)}>
               <SelectTrigger className="w-[200px] font-body text-sm rounded-sm" data-testid="top-store-filter"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Stores</SelectItem>

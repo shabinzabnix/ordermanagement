@@ -32,7 +32,7 @@ export default function PurchaseUploadPage() {
   const [dateTo, setDateTo] = useState('');
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
-  useEffect(() => { if (user?.role === 'STORE_STAFF' && user?.store_id) setSelectedStore(String(user.store_id)); }, [user]);
+  useEffect(() => { if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id) setSelectedStore(String(user.store_id)); }, [user]);
 
   useEffect(() => {
     if (!selectedStore) return;

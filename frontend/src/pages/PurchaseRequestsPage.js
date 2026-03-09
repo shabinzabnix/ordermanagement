@@ -37,7 +37,7 @@ export default function PurchaseRequestsPage() {
 
   const loadPurchases = () => { api.get('/purchases').then(r => setPurchases(r.data.purchases)).catch(() => {}); };
   useEffect(() => { loadPurchases(); api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
-  useEffect(() => { if (user?.role === 'STORE_STAFF' && user?.store_id) setForm(f => ({ ...f, store_id: String(user.store_id) })); }, [user]);
+  useEffect(() => { if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id) setForm(f => ({ ...f, store_id: String(user.store_id) })); }, [user]);
 
   useEffect(() => {
     if (productSearch.length < 2) { setSuggestions([]); return; }
@@ -110,7 +110,7 @@ export default function PurchaseRequestsPage() {
                 </TabsList>
                 <form onSubmit={handleSubmit} className="mt-4 space-y-3">
                   <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
-                    <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})} disabled={user?.role === 'STORE_STAFF'}>
+                    <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})} disabled={['STORE_STAFF','STORE_MANAGER'].includes(user?.role)}>
                       <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select store" /></SelectTrigger>
                       <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
                     </Select></div>

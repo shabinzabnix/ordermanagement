@@ -117,7 +117,7 @@ export default function CustomerProfilePage() {
     api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {});
     api.get('/crm/store-staff').then(r => setStoreStaff(r.data.staff)).catch(() => {});
   }, [id]);
-  useEffect(() => { if (user?.role === 'STORE_STAFF' && user?.store_id) setPForm(f => ({ ...f, store_id: String(user.store_id) })); }, [user]);
+  useEffect(() => { if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id) setPForm(f => ({ ...f, store_id: String(user.store_id) })); }, [user]);
 
   const handleAssignStaff = async (staffId) => {
     try { await api.put(`/crm/customers/${id}/assign-staff`, { staff_id: parseInt(staffId) }); toast.success('Staff assigned'); loadProfile(); }
@@ -180,7 +180,7 @@ export default function CustomerProfilePage() {
         successCount++;
       }
       toast.success(`${successCount} medicine(s) recorded`); setPurchaseOpen(false);
-      setPForm({ store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', purchase_date: '' });
+      setPForm({ store_id: ['STORE_STAFF','STORE_MANAGER'].includes(user?.role) ? String(user?.store_id || '') : '', purchase_date: '' });
       setPItems([emptyItem()]);
       loadProfile();
     } catch (err) { toast.error(err.response?.data?.detail || `Failed after ${successCount} items`); } finally { setSaving(false); }
@@ -246,7 +246,7 @@ export default function CustomerProfilePage() {
             <form onSubmit={handlePurchase} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
-                  <Select value={pForm.store_id} onValueChange={v => setPForm({...pForm, store_id: v})} disabled={user?.role === 'STORE_STAFF'}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
+                  <Select value={pForm.store_id} onValueChange={v => setPForm({...pForm, store_id: v})} disabled={['STORE_STAFF','STORE_MANAGER'].includes(user?.role)}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent></Select></div>
                 <div className="space-y-1.5"><Label className="font-body text-xs">Purchase Date</Label><Input type="date" value={pForm.purchase_date} onChange={e => setPForm({...pForm, purchase_date: e.target.value})} className="rounded-sm" /></div>
               </div>

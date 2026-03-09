@@ -87,7 +87,7 @@ async def product_stock_info(
 ):
     """Get product landing cost + stock across all stores. For store_staff, show only their store."""
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
-    user_store = user.get("store_id") if user.get("role") == "STORE_STAFF" else None
+    user_store = user.get("store_id") if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") else None
 
     products = []
     if product_id:
@@ -236,7 +236,7 @@ async def list_store_requests(
     page: int = Query(1, ge=1), limit: int = Query(50),
     db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
 ):
-    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         store_id = user["store_id"]
     query = select(StoreRequest)
     if store_id:
@@ -628,7 +628,7 @@ async def get_received_items(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         store_id = user["store_id"]
     query = select(StoreRequestItem).join(StoreRequest, StoreRequestItem.request_id == StoreRequest.id).where(
         StoreRequestItem.item_status.in_(["order_placed", "received", "partially_received"])

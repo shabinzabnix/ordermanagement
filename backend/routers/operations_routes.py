@@ -188,7 +188,7 @@ async def upload_store_stock(
     store_id: int = Query(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF", "STORE_MANAGER")),
 ):
     result = await db.execute(select(Store).where(Store.id == store_id))
     if not result.scalar_one_or_none():
@@ -458,7 +458,7 @@ async def get_transfers(
         query = query.where(InterStoreTransfer.status == TransferStatus(status))
     # Role-based filtering: store_staff sees only their store
     effective_store = store_id
-    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         effective_store = user["store_id"]
     if effective_store:
         query = query.where(
@@ -505,7 +505,7 @@ async def get_transfers(
 async def approve_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF", "STORE_MANAGER")),
 ):
     transfer = (await db.execute(select(InterStoreTransfer).where(InterStoreTransfer.id == transfer_id))).scalar_one_or_none()
     if not transfer:
@@ -524,7 +524,7 @@ async def reject_transfer(
     transfer_id: int,
     data: TransferAction,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF")),
+    user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "STORE_STAFF", "STORE_MANAGER")),
 ):
     transfer = (await db.execute(select(InterStoreTransfer).where(InterStoreTransfer.id == transfer_id))).scalar_one_or_none()
     if not transfer:
@@ -620,7 +620,7 @@ async def get_purchase_requests(
         query = query.where(PurchaseRequest.status == PurchaseStatus(status))
     # Role-based filtering: store_staff sees only their store
     effective_store = store_id
-    if user.get("role") == "STORE_STAFF" and user.get("store_id"):
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         effective_store = user["store_id"]
     if effective_store:
         query = query.where(PurchaseRequest.store_id == effective_store)
@@ -804,7 +804,7 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    is_store_staff = user.get("role") == "STORE_STAFF" and user.get("store_id")
+    is_store_staff = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
 
     total_products = (await db.execute(select(func.count(Product.id)))).scalar() or 0

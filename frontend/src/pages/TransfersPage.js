@@ -41,7 +41,7 @@ export default function TransfersPage() {
     api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {});
   }, []);
   useEffect(() => {
-    if (user?.role === 'STORE_STAFF' && user?.store_id) setForm(f => ({ ...f, requesting_store_id: String(user.store_id) }));
+    if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id) setForm(f => ({ ...f, requesting_store_id: String(user.store_id) }));
   }, [user]);
 
   // Product search debounce
@@ -72,7 +72,7 @@ export default function TransfersPage() {
   };
 
   const resetForm = () => {
-    setForm({ requesting_store_id: user?.role === 'STORE_STAFF' ? String(user?.store_id || '') : '', source_store_id: '', product_id: '', product_name: '', batch: '', quantity: '' });
+    setForm({ requesting_store_id: ['STORE_STAFF','STORE_MANAGER'].includes(user?.role) ? String(user?.store_id || '') : '', source_store_id: '', product_id: '', product_name: '', batch: '', quantity: '' });
     setProductSearch('');
     setNetworkStock(null);
     setStep(1);
@@ -201,7 +201,7 @@ export default function TransfersPage() {
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1.5">
                             <Label className="font-body text-[10px] text-slate-500">Requesting Store *</Label>
-                            <Select value={form.requesting_store_id} onValueChange={v => setForm({...form, requesting_store_id: v})} disabled={user?.role === 'STORE_STAFF'}>
+                            <Select value={form.requesting_store_id} onValueChange={v => setForm({...form, requesting_store_id: v})} disabled={['STORE_STAFF','STORE_MANAGER'].includes(user?.role)}>
                               <SelectTrigger className="rounded-sm text-sm"><SelectValue placeholder="Your store" /></SelectTrigger>
                               <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
                             </Select>

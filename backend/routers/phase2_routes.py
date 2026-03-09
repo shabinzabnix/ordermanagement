@@ -204,7 +204,7 @@ async def intelligence_summary(
 ):
     now = datetime.now(timezone.utc)
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
-    is_store_staff = user.get("role") == "STORE_STAFF" and user.get("store_id")
+    is_store_staff = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
 
     dead_items, slow_items, recommendations = [], [], []
