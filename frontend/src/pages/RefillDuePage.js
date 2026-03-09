@@ -12,7 +12,26 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
-import { CalendarClock, Search, Phone, CheckCircle, AlertTriangle } from 'lucide-react';
+import { CalendarClock, Search, Phone, CheckCircle, AlertTriangle, MessageCircle } from 'lucide-react';
+
+const buildWhatsAppMsg = (d) => {
+  const dueDateStr = d.next_due_date ? new Date(d.next_due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'soon';
+  const greeting = `Dear ${d.customer_name},`;
+  const body = `\n\nThis is a gentle reminder from *Sahakar Hyper Pharmacy* regarding your medication refill.\n\n` +
+    `*Medicine:* ${d.medicine_name}\n` +
+    `*Refill Due:* ${dueDateStr}\n` +
+    (d.days_until < 0 ? `*Status:* Overdue by ${Math.abs(d.days_until)} day(s)\n` : d.days_until === 0 ? `*Status:* Due Today\n` : `*Status:* Due in ${d.days_until} day(s)\n`) +
+    `\nPlease visit your nearest store to ensure uninterrupted medication. Your health is our priority.\n\n` +
+    `Warm regards,\n*Sahakar Hyper Pharmacy*\n${d.store_name}`;
+  return greeting + body;
+};
+
+const openWhatsApp = (d) => {
+  let phone = (d.mobile_number || '').replace(/\D/g, '');
+  if (phone.length === 10) phone = '91' + phone;
+  const msg = encodeURIComponent(buildWhatsAppMsg(d));
+  window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+};
 
 export default function RefillDuePage() {
   const { user } = useAuth();
@@ -122,6 +141,8 @@ export default function RefillDuePage() {
                         onClick={() => navigate(`/crm/customer/${d.customer_id}`)} data-testid={`refill-purchase-${d.id}`}><CheckCircle className="w-3 h-3 mr-1" /> Update</Button>
                       <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] font-body"
                         onClick={() => setCallDialog(d)} data-testid={`refill-call-${d.id}`}><Phone className="w-3 h-3 mr-1" /> Call</Button>
+                      <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] font-body text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                        onClick={() => openWhatsApp(d)} data-testid={`refill-wa-${d.id}`}><MessageCircle className="w-3 h-3 mr-1" /> WhatsApp</Button>
                     </div>
                   </TableCell>
                 </TableRow>
