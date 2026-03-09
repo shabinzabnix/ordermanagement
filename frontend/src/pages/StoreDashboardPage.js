@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
@@ -12,6 +13,7 @@ import { Building2, Warehouse, TrendingUp, Users, Package, Calendar, ShoppingBag
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function StoreDashboardPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [stores, setStores] = useState([]);
   const [summary, setSummary] = useState([]);
