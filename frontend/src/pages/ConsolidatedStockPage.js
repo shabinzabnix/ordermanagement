@@ -91,9 +91,9 @@ export default function ConsolidatedStockPage() {
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{p.ho_stock > 0 ? p.ho_stock.toLocaleString() : <span className="text-slate-300">0</span>}</TableCell>
                   {data.stores.map(s => {
                     const qty = p.store_stock[String(s.id)] || 0;
-                    return <TableCell key={s.id} className="text-right font-body text-[12px] tabular-nums">{qty > 0 ? qty.toFixed(0) : <span className="text-slate-300">0</span>}</TableCell>;
+                    return <TableCell key={s.id} className="text-right font-body text-[12px] tabular-nums">{qty > 0 ? (qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(1)) : <span className="text-slate-300">0</span>}</TableCell>;
                   })}
-                  <TableCell className="text-right font-body text-[12px] tabular-nums font-bold text-sky-700">{p.total > 0 ? p.total.toFixed(0) : '0'}</TableCell>
+                  <TableCell className="text-right font-body text-[12px] tabular-nums font-bold text-sky-700">{p.total > 0 ? (p.total % 1 === 0 ? p.total.toFixed(0) : p.total.toFixed(1)) : '0'}</TableCell>
                   <TableCell className="text-right"><Sales90dBadge name={p.product_name} salesMap={salesMap} /></TableCell>
                 </TableRow>
               ))}
