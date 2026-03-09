@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -10,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from '../components/ui/badge';
 import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
-import { Users, Plus, Edit3, Trash2 } from 'lucide-react';
+import { Users, Plus, Edit3, Trash2, LogIn } from 'lucide-react';
 
 const ALL_SERVICES = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -42,6 +43,7 @@ const ALL_SERVICES = [
 ];
 
 export default function UserManagementPage() {
+  const { switchToUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [stores, setStores] = useState([]);
   const [open, setOpen] = useState(false);
@@ -241,6 +243,7 @@ export default function UserManagementPage() {
                   <TableCell><Badge variant={u.is_active ? 'secondary' : 'destructive'} className="text-[10px] rounded-sm">{u.is_active ? 'Active' : 'Inactive'}</Badge></TableCell>
                   <TableCell>
                     <div className="flex gap-1">
+                      <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-sky-600 border-sky-200 hover:bg-sky-50" onClick={() => { if (window.confirm(`Switch to "${u.full_name}"? You can switch back anytime.`)) switchToUser(u.id); }} data-testid={`switch-user-${u.id}`}><LogIn className="w-3 h-3 mr-0.5" />Switch</Button>
                       <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px]" onClick={() => openEditUser(u)} data-testid={`edit-user-${u.id}`}><Edit3 className="w-3 h-3 mr-0.5" />Edit</Button>
                       <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-red-600 hover:bg-red-50" onClick={() => handleDeleteUser(u)} data-testid={`delete-user-${u.id}`}><Trash2 className="w-3 h-3" /></Button>
                     </div>

@@ -71,7 +71,7 @@ const navItems = [
 ];
 
 export default function DashboardLayout({ children }) {
-  const { user, logout } = useAuth();
+  const { user, logout, impersonating, switchBack } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -207,6 +207,13 @@ export default function DashboardLayout({ children }) {
           </DropdownMenu>
           </div>
         </header>
+
+        {impersonating && (
+          <div className="flex items-center justify-between px-6 py-2 bg-amber-500 text-white">
+            <span className="text-[12px] font-body font-medium">Viewing as: {user?.full_name} ({user?.role?.replace('_', ' ')}){user?.store_id ? ` | Store #${user.store_id}` : ''}</span>
+            <button onClick={switchBack} className="text-[11px] font-body font-bold bg-white text-amber-700 px-3 py-1 rounded-sm hover:bg-amber-50 transition-colors" data-testid="switch-back-btn">Switch Back to Admin</button>
+          </div>
+        )}
 
         <main className="flex-1 overflow-auto p-6">
           {children}

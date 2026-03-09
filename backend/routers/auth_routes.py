@@ -57,3 +57,28 @@ async def get_me(
         "store_id": user.store_id,
         "allowed_services": user.allowed_services,
     }
+
+
+from auth import require_roles
+
+
+@router.post("/impersonate/{user_id}")
+async def impersonate_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_roles("ADMIN")),
+):
+    """Admin-only: generate a token to act as another user."""
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not target:
+        raise HTTPException(404, "User not found")
+    role_val = target.role.value if isinstance(target.role, UserRole) else target.role
+    token = create_token(target.id, target.email, role_val, target.full_name, target.store_id)
+    return {
+        "token": token,
+        "user": {
+            "id": target.id, "email": target.email, "full_name": target.full_name,
+            "role": role_val, "store_id": target.store_id,
+            "allowed_services": target.allowed_services,
+        },
+    }
