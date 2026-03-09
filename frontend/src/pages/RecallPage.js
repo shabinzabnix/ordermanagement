@@ -26,6 +26,9 @@ export default function RecallPage() {
   const [storeStaff, setStoreStaff] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ store_id: '', product_id: '', product_name: '', quantity: '', assigned_staff_id: '', remarks: '' });
+  const [productStock, setProductStock] = useState(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const lookupTimer = useRef(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ phase: 'idle', percent: 0 });
@@ -46,6 +49,25 @@ export default function RecallPage() {
   const loadStaff = (storeId) => {
     if (!storeId) { setStoreStaff([]); return; }
     api.get('/crm/store-staff', { params: { store_id: storeId } }).then(r => setStoreStaff(r.data.staff)).catch(() => {});
+  };
+
+  const lookupProduct = (pid) => {
+    setForm(f => ({ ...f, product_id: pid }));
+    clearTimeout(lookupTimer.current);
+    if (!pid || pid.length < 2) { setProductStock(null); return; }
+    lookupTimer.current = setTimeout(() => {
+      setLookingUp(true);
+      api.get('/po/product-stock-info', { params: { product_id: pid.trim() } }).then(r => {
+        const prods = r.data.products || [];
+        if (prods.length > 0) {
+          const p = prods[0];
+          setForm(f => ({ ...f, product_name: p.product_name }));
+          setProductStock(p);
+        } else {
+          setProductStock(null);
+        }
+      }).catch(() => setProductStock(null)).finally(() => setLookingUp(false));
+    }, 400);
   };
 
   const handleCreate = async (e) => {
@@ -101,13 +123,41 @@ export default function RecallPage() {
               <DialogHeader><DialogTitle className="font-heading">Create Recall Request</DialogTitle></DialogHeader>
               <form onSubmit={handleCreate} className="space-y-3">
                 <div className="space-y-1.5"><Label className="font-body text-xs">Store *</Label>
-                  <Select value={form.store_id} onValueChange={v => { setForm({...form, store_id: v}); loadStaff(v); }}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select store" /></SelectTrigger>
+                  <Select value={form.store_id} onValueChange={v => { setForm({...form, store_id: v}); loadStaff(v); setProductStock(null); }}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Select store" /></SelectTrigger>
                     <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent></Select></div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5"><Label className="font-body text-xs">HO ID</Label><Input value={form.product_id} onChange={e => setForm({...form, product_id: e.target.value})} className="rounded-sm" /></div>
+                  <div className="space-y-1.5"><Label className="font-body text-xs">HO ID {lookingUp && <span className="text-sky-500 text-[9px] ml-1">looking up...</span>}</Label>
+                    <Input value={form.product_id} onChange={e => lookupProduct(e.target.value)} className="rounded-sm" placeholder="Enter product ID" /></div>
                   <div className="space-y-1.5"><Label className="font-body text-xs">Quantity *</Label><Input type="number" value={form.quantity} onChange={e => setForm({...form, quantity: e.target.value})} required className="rounded-sm" /></div>
                 </div>
                 <div className="space-y-1.5"><Label className="font-body text-xs">Product Name *</Label><Input value={form.product_name} onChange={e => setForm({...form, product_name: e.target.value})} required className="rounded-sm" /></div>
+                {/* Live Stock Info */}
+                {productStock && (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-body text-slate-400 uppercase tracking-wider">Stock at Stores</span>
+                      <span className="text-[11px] font-body font-medium text-slate-700">Total: {productStock.total_stock} strips</span>
+                    </div>
+                    {productStock.store_stock?.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-1">
+                        {productStock.store_stock.map((s, i) => (
+                          <div key={i} className={`flex items-center justify-between px-2 py-1 rounded-sm text-[11px] font-body ${form.store_id && s.store_id === parseInt(form.store_id) ? 'bg-sky-100 border border-sky-300' : 'bg-white border border-slate-100'}`}>
+                            <span className="text-slate-600">{s.store}</span>
+                            <span className={`font-bold tabular-nums ${s.stock > 0 ? 'text-emerald-700' : 'text-red-500'}`}>{s.stock}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <p className="text-[11px] text-slate-400">No stock at any store</p>}
+                    {form.store_id && (() => {
+                      const storeStock = productStock.store_stock?.find(s => s.store_id === parseInt(form.store_id));
+                      return storeStock ? (
+                        <div className="flex items-center gap-2 pt-1 border-t border-slate-200">
+                          <span className="text-[11px] font-body text-sky-700 font-medium">Selected store stock: {storeStock.stock} strips</span>
+                        </div>
+                      ) : <p className="text-[11px] text-red-500 pt-1 border-t border-slate-200">No stock at selected store</p>;
+                    })()}
+                  </div>
+                )}
                 <div className="space-y-1.5"><Label className="font-body text-xs">Assign to Staff</Label>
                   <Select value={form.assigned_staff_id} onValueChange={v => setForm({...form, assigned_staff_id: v})}><SelectTrigger className="rounded-sm"><SelectValue placeholder="Optional" /></SelectTrigger>
                     <SelectContent>{storeStaff.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent></Select></div>
