@@ -16,6 +16,8 @@ export default function ExpiryRiskPage() {
   const [stores, setStores] = useState([]);
   const [storeFilter, setStoreFilter] = useState('all');
   const [selectedMonth, setSelectedMonth] = useState(null);
+  const [monthDetail, setMonthDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -28,7 +30,14 @@ export default function ExpiryRiskPage() {
     api.get('/intel/expiry-monthly', { params }).then(r => setData(r.data)).catch(() => toast.error('Failed')).finally(() => setLoading(false));
   }, [storeFilter]);
 
-  if (loading) return <div className="space-y-4"><Skeleton className="h-24 rounded-sm" /><Skeleton className="h-96 rounded-sm" /></div>;
+  const openMonth = (m) => {
+    setSelectedMonth(m); setMonthDetail(null); setSearch(''); setDetailLoading(true);
+    const params = { month: m.month };
+    if (storeFilter !== 'all') params.store_id = storeFilter;
+    api.get('/intel/expiry-month-detail', { params }).then(r => setMonthDetail(r.data)).catch(() => toast.error('Failed')).finally(() => setDetailLoading(false));
+  };
+
+  if (loading && !data) return <div className="space-y-4"><Skeleton className="h-24 rounded-sm" /><Skeleton className="h-96 rounded-sm" /></div>;
 
   const s = data?.summary || {};
   const now = new Date();
@@ -44,12 +53,12 @@ export default function ExpiryRiskPage() {
     return { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-600', ring: 'ring-slate-100' };
   };
 
-  // Filter items in selected month
-  const monthItems = selectedMonth?.items?.filter(i => {
+  // Filter detail items by search
+  const monthItems = (monthDetail?.items || []).filter(i => {
     if (!search) return true;
     const sl = search.toLowerCase();
     return i.product_name?.toLowerCase().includes(sl) || i.batch?.toLowerCase().includes(sl) || i.location?.toLowerCase().includes(sl);
-  }) || [];
+  });
 
   // Group by store for the drill-down
   const storeGroups = {};
@@ -66,14 +75,14 @@ export default function ExpiryRiskPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {selectedMonth && (
-            <Button variant="ghost" size="sm" onClick={() => { setSelectedMonth(null); setSearch(''); }} className="rounded-sm"><ArrowLeft className="w-4 h-4" /></Button>
+            <Button variant="ghost" size="sm" onClick={() => { setSelectedMonth(null); setMonthDetail(null); setSearch(''); }} className="rounded-sm"><ArrowLeft className="w-4 h-4" /></Button>
           )}
           <div>
             <h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">
               {selectedMonth ? selectedMonth.label : 'Expiry Risk Monitor'}
             </h2>
             <p className="text-sm font-body text-slate-500 mt-0.5">
-              {selectedMonth ? `${monthItems.length} batches expiring in ${selectedMonth.label}` : 'Batch-wise expiry tracking by month'}
+              {selectedMonth ? `${monthItems.length} batches expiring in ${monthDetail?.label || selectedMonth.label}` : 'Batch-wise expiry tracking by month'}
             </p>
           </div>
         </div>
@@ -119,7 +128,7 @@ export default function ExpiryRiskPage() {
                 const mc = getMonthColor(m);
                 return (
                   <Card key={m.month} className={`${mc.border} ${mc.bg} shadow-sm rounded-sm cursor-pointer hover:ring-2 ${mc.ring} transition-all`}
-                    onClick={() => setSelectedMonth(m)} data-testid={`month-${m.month}`}>
+                    onClick={() => openMonth(m)} data-testid={`month-${m.month}`}>
                     <CardContent className="p-4">
                       <p className={`text-[13px] font-heading font-bold ${mc.text}`}>{m.label}</p>
                       <div className="mt-2 space-y-1">
@@ -145,7 +154,9 @@ export default function ExpiryRiskPage() {
             </CardContent>
           </Card>
 
-          {Object.entries(storeGroups).sort((a, b) => b[1].count - a[1].count).map(([storeName, group]) => (
+          {detailLoading ? (
+            <div className="space-y-3"><Skeleton className="h-12 rounded-sm" /><Skeleton className="h-48 rounded-sm" /></div>
+          ) : Object.entries(storeGroups).sort((a, b) => b[1].count - a[1].count).map(([storeName, group]) => (
             <Card key={storeName} className="border-slate-200 shadow-sm rounded-sm">
               <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
                 <span className="text-[13px] font-heading font-semibold text-slate-800">{storeName}</span>
@@ -186,7 +197,6 @@ export default function ExpiryRiskPage() {
             </Card>
           ))}
         </div>
-      )}
-    </div>
+      )}    </div>
   );
 }
