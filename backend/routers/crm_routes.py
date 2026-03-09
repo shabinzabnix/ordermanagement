@@ -2084,6 +2084,117 @@ async def sales_call_tasks(
     return {"tasks": result, "total": total, "page": page, "limit": limit, "sales_date": day_start.strftime("%Y-%m-%d")}
 
 
+# ─── Full Customer Detail for Call Popup ──────────────────────
+
+class UpdateCustomerReq(BaseModel):
+    customer_name: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    address: Optional[str] = None
+    customer_type: Optional[str] = None
+
+
+@router.put("/crm/customers/{customer_id}/update")
+async def update_customer_details(customer_id: int, data: UpdateCustomerReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    c = (await db.execute(select(CRMCustomer).where(CRMCustomer.id == customer_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "Customer not found")
+    if data.customer_name is not None: c.customer_name = data.customer_name
+    if data.gender is not None: c.gender = data.gender
+    if data.age is not None: c.age = data.age
+    if data.address is not None: c.address = data.address
+    if data.customer_type is not None: c.customer_type = CustomerType(data.customer_type)
+    await _log(db, user, f"Updated customer {c.customer_name}", "crm_customer", customer_id)
+    await db.commit()
+    return {"message": "Customer updated"}
+
+
+@router.get("/crm/customers/{customer_id}/call-detail")
+async def customer_call_detail(customer_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    """Full customer detail for call popup: profile, purchases, medicines, calls, stats."""
+    c = (await db.execute(select(CRMCustomer).where(CRMCustomer.id == customer_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "Customer not found")
+
+    smap = {}
+    if c.first_store_id:
+        s = (await db.execute(select(Store).where(Store.id == c.first_store_id))).scalar_one_or_none()
+        if s: smap[s.id] = s.store_name
+
+    # Total stats from sales
+    stats = (await db.execute(
+        select(
+            func.count(func.distinct(SalesRecord.entry_number)).label("invoices"),
+            func.sum(SalesRecord.total_amount).label("total_spent"),
+            func.count(SalesRecord.id).label("total_items"),
+        ).where(SalesRecord.customer_id == customer_id)
+    )).one()
+    total_invoices = int(stats[0] or 0)
+    total_spent = round(float(stats[1] or 0), 2)
+    total_items = int(stats[2] or 0)
+
+    # Recent purchases (last 10 invoices)
+    recent_sales = (await db.execute(
+        select(SalesRecord).where(SalesRecord.customer_id == customer_id)
+        .order_by(SalesRecord.invoice_date.desc()).limit(30)
+    )).scalars().all()
+
+    invoices = {}
+    for sr in recent_sales:
+        inv_key = sr.entry_number or f"inv_{sr.id}"
+        if inv_key not in invoices:
+            invoices[inv_key] = {"entry_number": sr.entry_number, "date": sr.invoice_date.isoformat() if sr.invoice_date else None, "items": [], "total": 0}
+        invoices[inv_key]["items"].append({"product": sr.product_name, "amount": round(float(sr.total_amount or 0), 2)})
+        invoices[inv_key]["total"] += float(sr.total_amount or 0)
+    invoice_list = sorted(invoices.values(), key=lambda x: x.get("date") or "", reverse=True)[:10]
+    for inv in invoice_list: inv["total"] = round(inv["total"], 2)
+
+    # Active medicines
+    medicines = (await db.execute(
+        select(MedicinePurchase).where(MedicinePurchase.customer_id == customer_id, MedicinePurchase.status == "active")
+        .order_by(MedicinePurchase.next_due_date)
+    )).scalars().all()
+    med_list = [{
+        "id": m.id, "medicine": m.medicine_name, "dosage": m.dosage, "timing": m.timing,
+        "food_relation": m.food_relation, "days": m.days_of_medication, "quantity": m.quantity,
+        "next_due": m.next_due_date.isoformat() if m.next_due_date else None,
+    } for m in medicines]
+
+    # All call history
+    calls = (await db.execute(
+        select(CRMCallLog).where(CRMCallLog.customer_id == customer_id)
+        .order_by(CRMCallLog.created_at.desc()).limit(20)
+    )).scalars().all()
+    call_list = [{
+        "id": cl.id, "caller": cl.caller_name, "result": cl.call_result.value if hasattr(cl.call_result, 'value') else cl.call_result,
+        "remarks": cl.remarks, "date": cl.created_at.isoformat() if cl.created_at else None,
+    } for cl in calls]
+
+    # Assigned staff
+    staff_name = ""
+    if c.assigned_staff_id:
+        su = (await db.execute(select(User).where(User.id == c.assigned_staff_id))).scalar_one_or_none()
+        if su: staff_name = su.full_name
+
+    return {
+        "profile": {
+            "id": c.id, "customer_name": c.customer_name, "mobile_number": c.mobile_number,
+            "gender": c.gender, "age": c.age, "address": c.address,
+            "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+            "store_name": smap.get(c.first_store_id, ""), "store_id": c.first_store_id,
+            "adherence": c.adherence_score or "unknown",
+            "clv_value": round(float(c.clv_value or 0), 2), "clv_tier": c.clv_tier or "unknown",
+            "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
+            "assigned_staff": staff_name, "assigned_staff_id": c.assigned_staff_id,
+            "registration_date": c.registration_date.isoformat() if c.registration_date else None,
+        },
+        "stats": {"total_invoices": total_invoices, "total_spent": total_spent, "total_items": total_items},
+        "recent_invoices": invoice_list,
+        "active_medicines": med_list,
+        "call_history": call_list,
+    }
+
+
 # ─── Daily CRM Activity Report ────────────────────────────────
 
 @router.get("/crm/daily-report")
