@@ -12,26 +12,44 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
-import { CalendarClock, Search, Phone, CheckCircle, AlertTriangle, MessageCircle } from 'lucide-react';
+import { CalendarClock, Search, Phone, CheckCircle, AlertTriangle, MessageCircle, CheckSquare } from 'lucide-react';
+import { Checkbox } from '../components/ui/checkbox';
 
-const buildWhatsAppMsg = (d) => {
-  const dueDateStr = d.next_due_date ? new Date(d.next_due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'soon';
-  const status = d.days_until < 0 ? `Overdue by ${Math.abs(d.days_until)} day(s)` : d.days_until === 0 ? 'Due Today' : `Due in ${d.days_until} day(s)`;
-  return `Dear ${d.customer_name} Sir/Madam,\n\n` +
+const buildCombinedWhatsAppMsg = (customerName, storeName, medicines) => {
+  let medLines = '';
+  medicines.forEach((d, i) => {
+    const dueDateStr = d.next_due_date ? new Date(d.next_due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'soon';
+    const status = d.days_until < 0 ? `Overdue by ${Math.abs(d.days_until)} day(s)` : d.days_until === 0 ? 'Due Today' : `Due in ${d.days_until} day(s)`;
+    medLines += `${i + 1}. ${d.medicine_name}\n   Refill Due: ${dueDateStr} (${status})\n`;
+  });
+  return `Dear ${customerName} Sir/Madam,\n\n` +
     `This is a gentle reminder from Sahakar Hyper Pharmacy regarding your medication refill.\n\n` +
-    `Medicine: ${d.medicine_name}\n` +
-    `Refill Due: ${dueDateStr}\n` +
-    `Status: ${status}\n\n` +
+    `Medicines due for refill:\n\n${medLines}\n` +
     `Please visit your nearest store or avail our Home Delivery service for a hassle-free experience. Just reply to this message or call us to place your order from the comfort of your home.\n\n` +
     `Your health is our priority.\n\n` +
-    `Warm regards,\nSahakar Hyper Pharmacy\n${d.store_name}`;
+    `Warm regards,\nSahakar Hyper Pharmacy\n${storeName}`;
 };
 
 const openWhatsApp = (d) => {
   let phone = (d.mobile_number || '').replace(/\D/g, '');
   if (phone.length === 10) phone = '91' + phone;
-  const msg = encodeURIComponent(buildWhatsAppMsg(d));
+  const msg = encodeURIComponent(buildCombinedWhatsAppMsg(d.customer_name, d.store_name, [d]));
   window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+};
+
+const openCombinedWhatsApp = (selectedItems) => {
+  // Group by customer
+  const byCustomer = {};
+  selectedItems.forEach(d => {
+    if (!byCustomer[d.customer_id]) byCustomer[d.customer_id] = { name: d.customer_name, mobile: d.mobile_number, store: d.store_name, meds: [] };
+    byCustomer[d.customer_id].meds.push(d);
+  });
+  Object.values(byCustomer).forEach(c => {
+    let phone = (c.mobile || '').replace(/\D/g, '');
+    if (phone.length === 10) phone = '91' + phone;
+    const msg = encodeURIComponent(buildCombinedWhatsAppMsg(c.name, c.store, c.meds));
+    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+  });
 };
 
 export default function RefillDuePage() {
@@ -46,6 +64,12 @@ export default function RefillDuePage() {
   const [callDialog, setCallDialog] = useState(null);
   const [callForm, setCallForm] = useState({ call_result: '', remarks: '' });
   const [saving, setSaving] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+
+  const toggleSelect = (id) => { setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
+  const toggleAll = () => { if (selected.size === items.length) setSelected(new Set()); else setSelected(new Set(items.map(i => i.id))); };
+  const selectedItems = items.filter(i => selected.has(i.id));
+  const selectedCustomerCount = new Set(selectedItems.map(i => i.customer_id)).size;
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
 
@@ -105,11 +129,25 @@ export default function RefillDuePage() {
         </CardContent>
       </Card>
 
+      {/* Bulk Action Bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-sm px-4 py-2.5">
+          <CheckSquare className="w-4 h-4 text-emerald-600" />
+          <span className="text-[12px] font-body font-medium text-emerald-800">{selected.size} medicine(s) selected ({selectedCustomerCount} customer{selectedCustomerCount > 1 ? 's' : ''})</span>
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 rounded-sm text-xs font-body h-7 ml-auto"
+            onClick={() => openCombinedWhatsApp(selectedItems)} data-testid="bulk-whatsapp">
+            <MessageCircle className="w-3 h-3 mr-1" /> Send Combined WhatsApp
+          </Button>
+          <Button size="sm" variant="outline" className="rounded-sm text-xs font-body h-7" onClick={() => setSelected(new Set())}>Clear</Button>
+        </div>
+      )}
+
       <Card className="border-slate-200 shadow-sm rounded-sm">
         <div className="overflow-auto max-h-[calc(100vh-300px)]">
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
+                <TableHead className="w-[40px] py-3"><Checkbox checked={items.length > 0 && selected.size === items.length} onCheckedChange={toggleAll} data-testid="select-all" /></TableHead>
                 {['Customer', 'Mobile', 'Store', 'Medicine', 'Last Purchase', 'Due Date', 'In Stock', 'Required', 'Assigned', 'Status', 'Actions'].map(h => (
                   <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['In Stock', 'Required'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
@@ -117,9 +155,10 @@ export default function RefillDuePage() {
             </TableHeader>
             <TableBody>
               {items.length === 0 ? (
-                <TableRow><TableCell colSpan={11} className="text-center py-16"><CalendarClock className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No refills due</p></TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="text-center py-16"><CalendarClock className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No refills due</p></TableCell></TableRow>
               ) : items.map(d => (
-                <TableRow key={d.id} className="hover:bg-slate-50/50" data-testid={`refill-row-${d.id}`}>
+                <TableRow key={d.id} className={`hover:bg-slate-50/50 ${selected.has(d.id) ? 'bg-emerald-50/30' : ''}`} data-testid={`refill-row-${d.id}`}>
+                  <TableCell className="w-[40px]"><Checkbox checked={selected.has(d.id)} onCheckedChange={() => toggleSelect(d.id)} /></TableCell>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => navigate(`/crm/customer/${d.customer_id}`)}>{d.customer_name}</TableCell>
                   <TableCell className="font-mono text-[11px] text-slate-500">{d.mobile_number}</TableCell>
                   <TableCell className="text-[12px] text-slate-500">{d.store_name}</TableCell>
