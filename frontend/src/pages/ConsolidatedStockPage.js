@@ -11,12 +11,16 @@ import { Button } from '../components/ui/button';
 import { downloadExcel } from '../lib/api';
 import { toast } from 'sonner';
 import { useSales90d, Sales90dBadge } from '../hooks/useSales90d';
+import { Pagination } from '../components/Pagination';
 
 export default function ConsolidatedStockPage() {
   const [data, setData] = useState({ consolidated: [], stores: [] });
   const salesMap = useSales90d(data.consolidated.map(p => p.product_name));
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 50;
   const [profileOpen, setProfileOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -33,14 +37,14 @@ export default function ConsolidatedStockPage() {
 
   useEffect(() => {
     setLoading(true);
-    const params = { page: 1, limit: 50 };
+    const params = { page, limit };
     if (search) params.search = search;
     if (category) params.category = category;
     api.get('/stock/consolidated', { params })
-      .then(r => setData(r.data))
+      .then(r => { setData(r.data); setTotal(r.data.total || 0); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [search, category]);
+  }, [search, category, page]);
 
   return (
     <div data-testid="consolidated-stock-page" className="space-y-5">
@@ -110,6 +114,7 @@ export default function ConsolidatedStockPage() {
             </TableBody>
           </Table>
         </div>
+        <Pagination page={page} totalPages={Math.ceil(total / limit)} total={total} onPageChange={setPage} label="products" />
       </Card>
 
       {/* Product Profile Popup */}

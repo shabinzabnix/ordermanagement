@@ -14,6 +14,7 @@ import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
 import { CalendarClock, Search, Phone, CheckCircle, AlertTriangle, MessageCircle, CheckSquare } from 'lucide-react';
 import { Checkbox } from '../components/ui/checkbox';
+import { Pagination } from '../components/Pagination';
 
 const buildCombinedWhatsAppMsg = (customerName, storeName, medicines) => {
   let medLines = '';
@@ -57,6 +58,8 @@ export default function RefillDuePage() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const limit = 50;
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [stores, setStores] = useState([]);
@@ -75,12 +78,12 @@ export default function RefillDuePage() {
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);
 
   useEffect(() => {
-    const params = { page: 1, limit: 100 };
+    const params = { page, limit };
     if (category !== 'all') params.category = category;
     if (storeFilter !== 'all') params.store_id = storeFilter;
     if (search) params.search = search;
     api.get('/crm/refill-due-enhanced', { params }).then(r => { setItems(r.data.items); setTotal(r.data.total); }).catch(() => {});
-  }, [category, storeFilter, search]);
+  }, [category, storeFilter, search, page]);
 
   const handleCall = async (e) => {
     e.preventDefault(); setSaving(true);
@@ -191,9 +194,8 @@ export default function RefillDuePage() {
             </TableBody>
           </Table>
         </div>
+        <Pagination page={page} totalPages={Math.ceil(total / limit)} total={total} onPageChange={setPage} label="refills" />
       </Card>
-
-      {/* Call Dialog */}
       <Dialog open={!!callDialog} onOpenChange={(v) => { if (!v) setCallDialog(null); }}>
         <DialogContent className="rounded-sm">
           <DialogHeader><DialogTitle className="font-heading">Log Call - {callDialog?.customer_name}</DialogTitle></DialogHeader>

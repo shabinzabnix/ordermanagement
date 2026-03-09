@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { Users, UserCheck, AlertTriangle, CalendarClock, TrendingUp, Pill, Phone, ArrowRight, Clock, Receipt, Loader2, IndianRupee } from 'lucide-react';
 import { FollowupButton } from '../components/FollowupButton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Pagination } from '../components/Pagination';
 
 export default function StoreCRMDashboardPage() {
   const { user } = useAuth();
@@ -28,6 +29,13 @@ export default function StoreCRMDashboardPage() {
   const [followups, setFollowups] = useState([]);
   const [candidateDetail, setCandidateDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const PER_PAGE = 20;
+  const [upcomingPage, setUpcomingPage] = useState(1);
+  const [followupPage, setFollowupPage] = useState(1);
+  const [rcPurchasePage, setRcPurchasePage] = useState(1);
+  const [newCustPage, setNewCustPage] = useState(1);
+  const [callPage, setCallPage] = useState(1);
+  const [rcCandPage, setRcCandPage] = useState(1);
 
   const load = () => {
     setLoading(true);
@@ -58,6 +66,8 @@ export default function StoreCRMDashboardPage() {
   useEffect(() => { loadPerf(); }, [perfDays]);
 
   const kpis = data?.kpis || {};
+  const paginate = (arr, page) => (arr || []).slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const totalPg = (arr) => Math.ceil((arr || []).length / PER_PAGE);
 
   return (
     <div data-testid="store-crm-dashboard" className="space-y-5">
@@ -122,7 +132,7 @@ export default function StoreCRMDashboardPage() {
                 <TableBody>
                   {(!data?.upcoming_purchases?.length) ? (
                     <TableRow><TableCell colSpan={7} className="text-center py-12"><CalendarClock className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No upcoming refills</p></TableCell></TableRow>
-                  ) : data.upcoming_purchases.map(p => (
+                  ) : paginate(data.upcoming_purchases, upcomingPage).map(p => (
                     <TableRow key={p.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => navigate(`/crm/customer/${p.customer_id}`)}>
                       <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.customer_name}</TableCell>
                       <TableCell className="font-mono text-[11px] text-slate-500">{p.mobile}</TableCell>
@@ -140,6 +150,7 @@ export default function StoreCRMDashboardPage() {
                 </TableBody>
               </Table>
             </div>
+            <Pagination page={upcomingPage} totalPages={totalPg(data?.upcoming_purchases)} total={data?.upcoming_purchases?.length || 0} onPageChange={setUpcomingPage} label="refills" />
           </Card>
         </TabsContent>
 
@@ -158,7 +169,7 @@ export default function StoreCRMDashboardPage() {
                 <TableBody>
                   {followups.length === 0 ? (
                     <TableRow><TableCell colSpan={9} className="text-center py-12"><CalendarClock className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No follow-ups scheduled</p></TableCell></TableRow>
-                  ) : followups.map(f => (
+                  ) : paginate(followups, followupPage).map(f => (
                     <TableRow key={f.customer_id} className={`hover:bg-slate-50/50 ${f.overdue ? 'bg-red-50/30' : ''}`}>
                       <TableCell className="text-[12px] font-medium text-slate-700">{f.followup_date ? new Date(f.followup_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}</TableCell>
                       <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => navigate(`/crm/customer/${f.customer_id}`)}>{f.customer_name}</TableCell>
@@ -178,6 +189,7 @@ export default function StoreCRMDashboardPage() {
                 </TableBody>
               </Table>
             </div>
+            <Pagination page={followupPage} totalPages={totalPg(followups)} total={followups.length} onPageChange={setFollowupPage} label="follow-ups" />
           </Card>
         </TabsContent>
 
@@ -196,7 +208,7 @@ export default function StoreCRMDashboardPage() {
                 <TableBody>
                   {(!data?.rc_purchases?.length) ? (
                     <TableRow><TableCell colSpan={7} className="text-center py-12"><Pill className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No RC purchases in range</p></TableCell></TableRow>
-                  ) : data.rc_purchases.map(p => (
+                  ) : paginate(data.rc_purchases, rcPurchasePage).map(p => (
                     <TableRow key={p.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => navigate(`/crm/customer/${p.customer_id}`)}>
                       <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.customer_name}</TableCell>
                       <TableCell className="font-body text-[13px] text-slate-700">{p.medicine}</TableCell>
@@ -216,6 +228,7 @@ export default function StoreCRMDashboardPage() {
         {/* New Customers */}
         <TabsContent value="new_customers">
           <Card className="border-slate-200 shadow-sm rounded-sm">
+            <Pagination page={rcPurchasePage} totalPages={totalPg(data?.rc_purchases)} total={data?.rc_purchases?.length || 0} onPageChange={setRcPurchasePage} label="purchases" />
             <div className="overflow-auto max-h-[calc(100vh-380px)]">
               <Table>
                 <TableHeader className="sticky top-0 bg-white z-10">
@@ -228,7 +241,7 @@ export default function StoreCRMDashboardPage() {
                 <TableBody>
                   {(!data?.new_customers?.length) ? (
                     <TableRow><TableCell colSpan={5} className="text-center py-12"><Users className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No new customers in range</p></TableCell></TableRow>
-                  ) : data.new_customers.map(c => (
+                  ) : paginate(data.new_customers, newCustPage).map(c => (
                     <TableRow key={c.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => navigate(`/crm/customer/${c.id}`)}>
                       <TableCell className="font-body text-[13px] font-medium text-slate-800">{c.name}</TableCell>
                       <TableCell className="font-mono text-[11px] text-slate-500">{c.mobile}</TableCell>
@@ -246,6 +259,7 @@ export default function StoreCRMDashboardPage() {
         {/* Call Log */}
         <TabsContent value="calls">
           <Card className="border-slate-200 shadow-sm rounded-sm">
+            <Pagination page={newCustPage} totalPages={totalPg(data?.new_customers)} total={data?.new_customers?.length || 0} onPageChange={setNewCustPage} label="customers" />
             <div className="overflow-auto max-h-[calc(100vh-380px)]">
               <Table>
                 <TableHeader className="sticky top-0 bg-white z-10">
@@ -258,7 +272,7 @@ export default function StoreCRMDashboardPage() {
                 <TableBody>
                   {calls.length === 0 ? (
                     <TableRow><TableCell colSpan={6} className="text-center py-12"><Phone className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No calls logged yet</p></TableCell></TableRow>
-                  ) : calls.map(cl => {
+                  ) : paginate(calls, callPage).map(cl => {
                     const resultColor = { reached: 'bg-sky-50 text-sky-700', confirmed: 'bg-emerald-50 text-emerald-700', not_reachable: 'bg-red-50 text-red-700', callback: 'bg-amber-50 text-amber-700', discontinued: 'bg-slate-100 text-slate-600' };
                     return (
                       <TableRow key={cl.id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => navigate(`/crm/customer/${cl.customer_id}`)}>
@@ -280,6 +294,7 @@ export default function StoreCRMDashboardPage() {
         {/* RC Candidates */}
         <TabsContent value="rc_candidates">
           <Card className="border-slate-200 shadow-sm rounded-sm">
+            <Pagination page={callPage} totalPages={totalPg(calls)} total={calls.length} onPageChange={setCallPage} label="calls" />
             <div className="overflow-auto max-h-[calc(100vh-380px)]">
               <Table>
                 <TableHeader className="sticky top-0 bg-white z-10">
@@ -292,7 +307,7 @@ export default function StoreCRMDashboardPage() {
                 <TableBody>
                   {rcCandidates.length === 0 ? (
                     <TableRow><TableCell colSpan={7} className="text-center py-12"><UserCheck className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No walk-in customers with repeat purchases found</p></TableCell></TableRow>
-                  ) : rcCandidates.map(c => (
+                  ) : paginate(rcCandidates, rcCandPage).map(c => (
                     <TableRow key={c.customer_id} className="hover:bg-slate-50/50">
                       <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => openCandidateDetail(c)}>{c.customer_name}</TableCell>
                       <TableCell className="font-mono text-[11px] text-slate-500">{c.mobile}</TableCell>
@@ -326,6 +341,7 @@ export default function StoreCRMDashboardPage() {
                 </TableBody>
               </Table>
             </div>
+            <Pagination page={rcCandPage} totalPages={totalPg(rcCandidates)} total={rcCandidates.length} onPageChange={setRcCandPage} label="candidates" />
           </Card>
         </TabsContent>
 
