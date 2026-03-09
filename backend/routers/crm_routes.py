@@ -851,12 +851,19 @@ async def upload_sales_report(
             errors.append(f"Row {idx+2}: {str(e)[:80]}")
             failed += 1
 
+    # Verify user exists in DB (token may be stale after data clear)
+    valid_user_id = None
+    user_check = (await db.execute(select(CRMCustomer.id).limit(0))).all()  # just to keep session alive
+    from models import User as UserModel
+    u_exists = (await db.execute(select(UserModel.id).where(UserModel.id == user["user_id"]))).scalar_one_or_none()
+    valid_user_id = u_exists if u_exists else None
+
     # Bulk insert new customers
     for mobile, cname in new_custs_to_add.items():
         db.add(CRMCustomer(
             mobile_number=mobile, customer_name=cname,
             first_store_id=store_id, assigned_store_id=store_id,
-            customer_type=CustomerType.WALKIN, created_by=user["user_id"],
+            customer_type=CustomerType.WALKIN, created_by=valid_user_id,
         ))
     try:
         await db.flush()
