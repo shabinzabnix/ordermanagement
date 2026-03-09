@@ -346,7 +346,7 @@ async def get_users(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN")),
 ):
-    result = await db.execute(select(User).order_by(User.full_name))
+    result = await db.execute(select(User).where(~User.email.like("deleted_%")).order_by(User.full_name))
     users = result.scalars().all()
     return {
         "users": [
@@ -424,9 +424,11 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), user: di
     u = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not u: raise HTTPException(404, "User not found")
     if u.id == user["user_id"]: raise HTTPException(400, "Cannot delete yourself")
-    await db.delete(u)
+    # Soft delete: deactivate instead of hard delete (preserves audit trail)
+    u.is_active = False
+    u.email = f"deleted_{u.id}_{u.email}"
     await db.commit()
-    return {"message": "User deleted"}
+    return {"message": "User deactivated and removed"}
 
 
 # --- Upload History ---
