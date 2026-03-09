@@ -253,13 +253,13 @@ export default function StoreCRMDashboardPage() {
                 </TableBody>
               </Table>
             </div>
+            <Pagination page={newCustPage} totalPages={totalPg(data?.new_customers)} total={data?.new_customers?.length || 0} onPageChange={setNewCustPage} label="customers" />
           </Card>
         </TabsContent>
 
         {/* Call Log */}
         <TabsContent value="calls">
           <Card className="border-slate-200 shadow-sm rounded-sm">
-            <Pagination page={newCustPage} totalPages={totalPg(data?.new_customers)} total={data?.new_customers?.length || 0} onPageChange={setNewCustPage} label="customers" />
             <div className="overflow-auto max-h-[calc(100vh-380px)]">
               <Table>
                 <TableHeader className="sticky top-0 bg-white z-10">
