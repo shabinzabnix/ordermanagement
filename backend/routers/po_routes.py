@@ -227,6 +227,14 @@ async def create_store_request(
 
     await _log(db, user, f"Created store request: {len(items_data)} items, INR {total_value}", "store_request", req.id)
     await db.commit()
+
+    # Notify HO about new store request
+    from routers.notification_routes import notify_role
+    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    store_name = stores_map.get(data.store_id, "")
+    await notify_role(db, ["ADMIN", "HO_STAFF"], f"New Store Request from {store_name}", f"{len(items_data)} items, Est. INR {round(total_value, 2)}", link="/store-request", entity_type="store_request", entity_id=req.id)
+    await db.commit()
+
     return {"id": req.id, "total_value": round(total_value, 2), "items": items_data}
 
 

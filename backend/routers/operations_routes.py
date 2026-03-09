@@ -449,6 +449,14 @@ async def create_transfer(
     db.add(transfer)
     await db.commit()
     await db.refresh(transfer)
+
+    # Notify HO + source store about new transfer request
+    from routers.notification_routes import notify_role
+    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    await notify_role(db, ["ADMIN", "HO_STAFF"], f"New Transfer Request", f"{data.product_name} x{data.quantity} from {stores_map.get(data.source_store_id, '')} to {stores_map.get(data.requesting_store_id, '')}", link="/transfers", entity_type="transfer", entity_id=transfer.id)
+    await notify_role(db, ["STORE_MANAGER", "STORE_STAFF"], f"New Transfer Request", f"{data.product_name} x{data.quantity} requested from your store", link="/transfers", entity_type="transfer", entity_id=transfer.id, store_id=data.source_store_id)
+    await db.commit()
+
     return {"id": transfer.id, "status": "pending", "message": "Transfer request created", "available_stock": available}
 
 

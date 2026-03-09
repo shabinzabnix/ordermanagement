@@ -70,6 +70,8 @@ const navItems = [
   { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['ADMIN'], svc: 'audit_log' },
 ];
 
+import NotificationBell from './NotificationBell';
+
 export default function DashboardLayout({ children }) {
   const { user, logout, impersonating, switchBack } = useAuth();
   const navigate = useNavigate();
@@ -178,29 +180,21 @@ export default function DashboardLayout({ children }) {
               <span className="text-slate-200">|</span>
               <span className="uppercase tracking-wider">{user?.role?.replace('_', ' ')}</span>
             </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="flex items-center gap-2.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
-                data-testid="user-menu-trigger"
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-sky-700 text-xs font-bold font-heading">
-                  {user?.full_name?.[0]?.toUpperCase() || 'U'}
-                </div>
-                <span className="font-body text-[13px] hidden sm:inline">{user?.full_name}</span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel className="font-body text-xs">{user?.email}</DropdownMenuLabel>
-              <DropdownMenuLabel className="font-body text-[10px] text-slate-400 uppercase tracking-wider -mt-1">
-                {user?.role?.replace('_', ' ')}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className="font-body text-xs" data-testid="logout-btn">
-                <LogOut className="mr-2 h-3.5 w-3.5" /> Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <NotificationBell />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2.5 text-sm text-slate-600 hover:text-slate-900 transition-colors" data-testid="user-menu-trigger">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-sky-700 text-xs font-bold font-heading">{user?.full_name?.[0]?.toUpperCase() || 'U'}</div>
+                  <span className="font-body text-[13px] hidden sm:inline">{user?.full_name}</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuLabel className="font-body text-xs">{user?.email}</DropdownMenuLabel>
+                <DropdownMenuLabel className="font-body text-[10px] text-slate-400 uppercase tracking-wider -mt-1">{user?.role?.replace('_', ' ')}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="font-body text-xs" data-testid="logout-btn"><LogOut className="mr-2 h-3.5 w-3.5" /> Sign out</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 

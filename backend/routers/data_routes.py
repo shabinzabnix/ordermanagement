@@ -644,6 +644,29 @@ async def add_comment(data: CommentReq, db: AsyncSession = Depends(get_db), user
         user_name=user.get("full_name", ""), user_role=user.get("role", ""),
         message=data.message,
     ))
+
+    # Notify relevant users about new comment
+    from routers.notification_routes import notify_role
+    from models import InterStoreTransfer, ProductRecall, PurchaseOrder
+    link_map = {"transfer": "/transfers", "recall": "/recalls", "po": "/po-management"}
+    link = link_map.get(data.entity_type, "/")
+    sender = user.get("full_name", "User")
+
+    # Notify HO for store messages, notify store for HO messages
+    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER"):
+        await notify_role(db, ["ADMIN", "HO_STAFF"], f"New message on {data.entity_type} #{data.entity_id}", f"{sender}: {data.message[:100]}", link=link, entity_type=data.entity_type, entity_id=data.entity_id)
+    else:
+        # Find store_id from the entity and notify that store
+        store_id = None
+        if data.entity_type == "transfer":
+            t = (await db.execute(select(InterStoreTransfer).where(InterStoreTransfer.id == data.entity_id))).scalar_one_or_none()
+            if t: store_id = t.requesting_store_id
+        elif data.entity_type == "recall":
+            r = (await db.execute(select(ProductRecall).where(ProductRecall.id == data.entity_id))).scalar_one_or_none()
+            if r: store_id = r.store_id
+        if store_id:
+            await notify_role(db, ["STORE_MANAGER", "STORE_STAFF"], f"New message on {data.entity_type} #{data.entity_id}", f"{sender}: {data.message[:100]}", link=link, entity_type=data.entity_type, entity_id=data.entity_id, store_id=store_id)
+
     await db.commit()
     return {"message": "Comment added"}
 

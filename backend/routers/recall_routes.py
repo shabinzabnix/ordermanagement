@@ -32,6 +32,11 @@ async def create_recall(data: RecallCreateReq, db: AsyncSession = Depends(get_db
     db.add(recall)
     await db.commit()
     await db.refresh(recall)
+
+    from routers.notification_routes import notify_role
+    await notify_role(db, ["STORE_MANAGER", "STORE_STAFF"], "Product Recall Request", f"{data.product_name} x{data.quantity} - return requested by HO", link="/recalls", entity_type="recall", entity_id=recall.id, store_id=data.store_id)
+    await db.commit()
+
     return {"id": recall.id, "message": "Recall request created"}
 
 
