@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { ArrowLeft, Plus, Phone, Pill, Calendar, Clock, Receipt, RefreshCw, StopCircle, User, Edit3, Sun, Moon, Coffee, Search, Loader2 } from 'lucide-react';
+import { FollowupButton } from '../components/FollowupButton';
 
 function MedicineSearchSelect({ value, onChange }) {
   const [query, setQuery] = useState('');
@@ -237,6 +238,7 @@ export default function CustomerProfilePage() {
             <RefreshCw className="w-3 h-3 mr-1" /> Convert to RC
           </Button>
         )}
+        <FollowupButton customerId={id} customerName={c.customer_name} currentDate={c.followup_date} onDone={loadProfile} />
         <Dialog open={callOpen} onOpenChange={setCallOpen}>
           <DialogTrigger asChild><Button variant="outline" className="rounded-sm font-body text-xs"><Phone className="w-3.5 h-3.5 mr-1.5" /> Log Call</Button></DialogTrigger>
           <DialogContent className="rounded-sm"><DialogHeader><DialogTitle className="font-heading">Log CRM Call</DialogTitle></DialogHeader>

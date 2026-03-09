@@ -2015,6 +2015,7 @@ async def sales_call_tasks(
             func.count(SalesRecord.id).label("item_count"),
             func.sum(SalesRecord.total_amount).label("invoice_total"),
             func.max(SalesRecord.entry_number).label("last_invoice"),
+            func.max(SalesRecord.invoice_date).label("invoice_date"),
         )
         .where(SalesRecord.customer_id.isnot(None), SalesRecord.invoice_date >= day_start, SalesRecord.invoice_date < day_end)
         .group_by(SalesRecord.customer_id)
@@ -2081,7 +2082,7 @@ async def sales_call_tasks(
 
     result = []
     for r in rows:
-        cid, item_count, invoice_total, last_invoice = r
+        cid, item_count, invoice_total, last_invoice, inv_date = r
         c = cmap.get(cid)
         if not c: continue
         result.append({
@@ -2091,6 +2092,7 @@ async def sales_call_tasks(
             "store_name": smap.get(c.first_store_id, ""),
             "invoice_total": round(float(invoice_total or 0), 2),
             "item_count": item_count, "last_invoice": last_invoice,
+            "invoice_date": inv_date.isoformat() if inv_date else None,
             "already_called": cid in called_today,
             "active_medicines": med_map.get(cid, []),
             "call_history": (call_history.get(cid, []))[:5],

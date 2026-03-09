@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import { Users, UserCheck, AlertTriangle, CalendarClock, TrendingUp, Pill, Phone, ArrowRight, Clock } from 'lucide-react';
+import { FollowupButton } from '../components/FollowupButton';
 
 export default function StoreCRMDashboardPage() {
   const { user } = useAuth();
@@ -305,10 +306,13 @@ export default function StoreCRMDashboardPage() {
                       <TableCell className="text-right text-[13px] tabular-nums font-bold text-sky-700">{c.total_repeat_purchases}</TableCell>
                       <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {c.total_spent.toLocaleString('en-IN')}</TableCell>
                       <TableCell>
-                        <Button size="sm" variant="outline" className="h-7 px-2.5 rounded-sm text-[11px] font-body text-rose-600 border-rose-200 hover:bg-rose-50"
-                          onClick={() => { api.put(`/crm/customers/${c.customer_id}/type`, { customer_type: 'rc' }).then(() => { toast.success(`${c.customer_name} converted to RC`); loadRcCandidates(); }).catch(() => toast.error('Failed')); }}>
-                          Convert to RC
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] font-body text-rose-600 border-rose-200 hover:bg-rose-50"
+                            onClick={() => { api.put(`/crm/customers/${c.customer_id}/type`, { customer_type: 'rc' }).then(() => { toast.success(`${c.customer_name} converted to RC`); loadRcCandidates(); }).catch(() => toast.error('Failed')); }}>
+                            Convert to RC
+                          </Button>
+                          <FollowupButton customerId={c.customer_id} customerName={c.customer_name} />
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

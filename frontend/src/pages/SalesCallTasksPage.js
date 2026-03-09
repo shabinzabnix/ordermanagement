@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
 import { Phone, CheckCircle, ChevronLeft, ChevronRight, Pill, Clock, User, IndianRupee, Edit3, Receipt, Save } from 'lucide-react';
+import { FollowupButton } from '../components/FollowupButton';
 
 export default function SalesCallTasksPage() {
   const { user } = useAuth();
@@ -117,30 +118,34 @@ export default function SalesCallTasksPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Customer', 'Mobile', 'Type', 'Store', 'Invoice Amt', 'Items', 'Active Meds', 'Status', 'Action'].map(h => (
-                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Invoice Amt', 'Items', 'Active Meds'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                {['Customer', 'Mobile', 'Type', 'Store', 'Invoice #', 'Invoice Date', 'Invoice Amt', 'Items', 'Status', 'Action'].map(h => (
+                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Invoice Amt', 'Items'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {tasks.length === 0 ? (
-                <TableRow><TableCell colSpan={9} className="text-center py-16"><Phone className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">{loading ? 'Loading...' : 'No sales call tasks'}</p></TableCell></TableRow>
+                <TableRow><TableCell colSpan={10} className="text-center py-16"><Phone className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">{loading ? 'Loading...' : 'No sales call tasks'}</p></TableCell></TableRow>
               ) : tasks.map(t => (
                 <TableRow key={t.customer_id} className={`hover:bg-slate-50/50 ${t.already_called ? 'opacity-50' : ''}`} data-testid={`task-row-${t.customer_id}`}>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => navigate(`/crm/customer/${t.customer_id}`)}>{t.customer_name}</TableCell>
                   <TableCell className="font-mono text-[11px] text-slate-500">{t.mobile}</TableCell>
                   <TableCell><Badge className={`text-[9px] rounded-sm ${typeBadge[t.customer_type] || 'bg-slate-100 text-slate-600'}`}>{t.customer_type}</Badge></TableCell>
                   <TableCell className="text-[12px] text-slate-500">{t.store_name}</TableCell>
+                  <TableCell className="font-mono text-[11px] text-slate-500">{t.last_invoice || '-'}</TableCell>
+                  <TableCell className="text-[11px] text-slate-500">{t.invoice_date ? new Date(t.invoice_date).toLocaleDateString() : '-'}</TableCell>
                   <TableCell className="text-right text-[13px] tabular-nums font-medium">INR {t.invoice_total.toLocaleString('en-IN')}</TableCell>
                   <TableCell className="text-right text-[12px] tabular-nums">{t.item_count}</TableCell>
-                  <TableCell className="text-right text-[12px] tabular-nums">{t.active_medicines?.length || 0}</TableCell>
                   <TableCell>
                     {t.already_called ? <Badge className="text-[9px] rounded-sm bg-emerald-50 text-emerald-700"><CheckCircle className="w-2.5 h-2.5 mr-0.5 inline" />Called</Badge> : <Badge className="text-[9px] rounded-sm bg-amber-50 text-amber-700">Pending</Badge>}
                   </TableCell>
                   <TableCell>
-                    <Button size="sm" variant="outline" className="h-7 px-2.5 rounded-sm text-[11px] font-body" onClick={() => openDetail(t)} data-testid={`call-btn-${t.customer_id}`}>
-                      <Phone className="w-3 h-3 mr-1" /> {t.already_called ? 'View' : 'Call'}
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] font-body" onClick={() => openDetail(t)} data-testid={`call-btn-${t.customer_id}`}>
+                        <Phone className="w-3 h-3 mr-0.5" /> {t.already_called ? 'View' : 'Call'}
+                      </Button>
+                      <FollowupButton customerId={t.customer_id} customerName={t.customer_name} />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
