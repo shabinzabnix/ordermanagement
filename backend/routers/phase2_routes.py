@@ -81,13 +81,46 @@ async def aging_report(
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     items = []
 
+    # Pre-load purchase dates: product_id + store_id → earliest purchase date
+    from models import PurchaseRecord
+    purchase_dates = {}
+    pd_rows = (await db.execute(
+        select(PurchaseRecord.product_id, PurchaseRecord.store_id, func.min(PurchaseRecord.purchase_date).label("first_date"))
+        .where(PurchaseRecord.product_id.isnot(None))
+        .group_by(PurchaseRecord.product_id, PurchaseRecord.store_id)
+    )).all()
+    for r in pd_rows:
+        if r[0]:
+            pid_clean = str(r[0]).strip().split('.')[0]
+            purchase_dates[(pid_clean, r[1])] = r[2]
+    # Also HO-level (store_id=None) from all stores
+    pd_ho = (await db.execute(
+        select(PurchaseRecord.product_id, func.min(PurchaseRecord.purchase_date).label("first_date"))
+        .where(PurchaseRecord.product_id.isnot(None))
+        .group_by(PurchaseRecord.product_id)
+    )).all()
+    for r in pd_ho:
+        if r[0]:
+            pid_clean = str(r[0]).strip().split('.')[0]
+            purchase_dates[(pid_clean, None)] = r[1]
+
+    def get_age(product_id, store_id, created_at):
+        """Get aging days from purchase date, fallback to created_at."""
+        pid = str(product_id).strip().split('.')[0] if product_id else None
+        pdate = None
+        if pid:
+            pdate = purchase_dates.get((pid, store_id)) or purchase_dates.get((pid, None))
+        ref_date = pdate or created_at
+        if not ref_date: return 0, None
+        return (now - ref_date).days, ref_date
+
     # --- HO Stock ---
     if not location or location == "all" or location == "Head Office":
         ho_q = select(HOStockBatch).where(HOStockBatch.closing_stock > 0)
         if search:
             ho_q = ho_q.where(HOStockBatch.product_name.ilike(f"%{search}%") | HOStockBatch.product_id.ilike(f"%{search}%"))
         for s in (await db.execute(ho_q)).scalars().all():
-            days = (now - s.created_at).days if s.created_at else 0
+            days, ref_date = get_age(s.product_id, None, s.created_at)
             b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
             st = "dead" if days > 60 else "slow" if days > 30 else "active"
             if bucket and bucket != "all" and b != bucket: continue
@@ -97,7 +130,7 @@ async def aging_report(
                 "product_id": s.product_id, "product_name": s.product_name,
                 "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
                 "days": days, "value": s.landing_cost_value or 0, "sales": 0,
-                "stock_date": s.created_at.isoformat() if s.created_at else None,
+                "stock_date": ref_date.isoformat() if ref_date else None,
                 "bucket": b, "status": st,
             })
 
@@ -108,7 +141,8 @@ async def aging_report(
         if search:
             ss_q = ss_q.where(StoreStockBatch.product_name.ilike(f"%{search}%") | StoreStockBatch.ho_product_id.ilike(f"%{search}%"))
         for s in (await db.execute(ss_q)).scalars().all():
-            days = (now - s.created_at).days if s.created_at else 0
+            pid = s.ho_product_id or s.store_product_id or ""
+            days, ref_date = get_age(pid, sid, s.created_at)
             b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
             is_dead = (s.sales or 0) == 0 and days > 60
             is_slow = (s.sales or 0) == 0 and days > 30 and not is_dead
@@ -117,10 +151,10 @@ async def aging_report(
             if status and status != "all" and st != status: continue
             items.append({
                 "location": sname, "store_id": sid,
-                "product_id": s.ho_product_id or s.store_product_id or "", "product_name": s.product_name,
+                "product_id": pid, "product_name": s.product_name,
                 "batch": s.batch, "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
                 "days": days, "value": s.cost_value or 0, "sales": s.sales or 0,
-                "stock_date": s.created_at.isoformat() if s.created_at else None,
+                "stock_date": ref_date.isoformat() if ref_date else None,
                 "bucket": b, "status": st,
             })
 
