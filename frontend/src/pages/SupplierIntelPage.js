@@ -32,7 +32,9 @@ export default function SupplierIntelPage() {
     api.get('/intel/supplier-intelligence', { params }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
   }, [page, debouncedSearch]);
 
-  if (loading && page === 1) return <div className="space-y-4"><Skeleton className="h-16 rounded-sm" /><Skeleton className="h-96 rounded-sm" /></div>;
+  const [activeTab, setActiveTab] = useState('overview');
+
+  if (loading && !data.suppliers.length && page === 1) return <div className="space-y-4"><Skeleton className="h-16 rounded-sm" /><Skeleton className="h-96 rounded-sm" /></div>;
 
   const topSuppliers = data.suppliers.slice(0, 12).map(s => ({ name: s.supplier?.length > 15 ? s.supplier.slice(0, 15) + '..' : s.supplier, products: s.product_count }));
   const totalSupPages = Math.ceil((data.total_suppliers || 0) / limit);
@@ -72,7 +74,7 @@ export default function SupplierIntelPage() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="overview" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="rounded-sm">
           <TabsTrigger value="overview" className="rounded-sm text-xs font-body">Supplier Overview ({data.total_suppliers})</TabsTrigger>
           <TabsTrigger value="best" className="rounded-sm text-xs font-body">Best Supplier per Product ({data.total_best_per_product})</TabsTrigger>
