@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2, Settings } from 'lucide-react';
 import { UploadProgress } from '../components/UploadProgress';
 import { useSales90d, Sales90dBadge } from '../hooks/useSales90d';
+import { ChatButton } from '../components/ChatPopup';
 
 export default function POManagementPage() {
   const { user } = useAuth();
@@ -309,7 +310,14 @@ export default function POManagementPage() {
                       <TableCell><Badge className={`text-[9px] rounded-sm ${sBadge(po.status)}`}>{po.status}</Badge></TableCell>
                       <TableCell className="text-[11px] font-body text-slate-600">{po.created_by || '-'}</TableCell>
                       <TableCell onClick={e => e.stopPropagation()}>
-                        <Button size="sm" variant="outline" className="h-5 px-2 rounded-sm text-[9px]" onClick={() => openPoDetail(po.id)}>View</Button>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="outline" className="h-5 px-2 rounded-sm text-[9px]" onClick={() => openPoDetail(po.id)}>View</Button>
+                          <ChatButton entityType="po" entityId={po.id} details={[
+                            { label: 'PO #', value: po.po_number }, { label: 'Supplier', value: po.supplier_name },
+                            { label: 'Items', value: po.item_count }, { label: 'Value', value: `INR ${po.total_value?.toLocaleString('en-IN')}` },
+                            { label: 'Status', value: po.status },
+                          ]} />
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

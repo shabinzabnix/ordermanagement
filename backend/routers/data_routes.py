@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from database import get_db
-from models import Product, Store, User, UserRole, UploadHistory, UploadType, SalesRecord
+from models import Product, Store, User, UserRole, UploadHistory, UploadType, SalesRecord, TransactionComment
 from auth import get_current_user, require_roles, hash_password
 from pydantic import BaseModel
 from typing import Optional, List
@@ -613,3 +613,35 @@ async def product_profile(
         "purchases_90d": {"total_qty": total_purchase_qty, "total_amount": round(total_purchase_amt, 2), "by_store": purchases_by_store},
         "transfers": transfer_list,
     }
+
+
+
+# ─── Transaction Comments (generic chat for transfers, POs, recalls) ──
+
+class CommentReq(BaseModel):
+    entity_type: str
+    entity_id: int
+    message: str
+
+
+@router.post("/comments")
+async def add_comment(data: CommentReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    db.add(TransactionComment(
+        entity_type=data.entity_type, entity_id=data.entity_id,
+        user_name=user.get("full_name", ""), user_role=user.get("role", ""),
+        message=data.message,
+    ))
+    await db.commit()
+    return {"message": "Comment added"}
+
+
+@router.get("/comments/{entity_type}/{entity_id}")
+async def get_comments(entity_type: str, entity_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    comments = (await db.execute(
+        select(TransactionComment).where(TransactionComment.entity_type == entity_type, TransactionComment.entity_id == entity_id)
+        .order_by(TransactionComment.created_at)
+    )).scalars().all()
+    return {"comments": [{
+        "id": c.id, "user_name": c.user_name, "user_role": c.user_role, "message": c.message,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
+    } for c in comments]}

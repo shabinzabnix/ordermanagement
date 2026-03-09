@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { ArrowLeftRight, Plus, Check, X, Download, Search, Warehouse } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
 import { useSales90d, Sales90dBadge } from '../hooks/useSales90d';
+import { ChatButton } from '../components/ChatPopup';
 
 export default function TransfersPage() {
   const { user } = useAuth();
@@ -295,14 +296,19 @@ export default function TransfersPage() {
                   <TableCell className="text-[11px] font-body text-slate-600">{t.requested_by || '-'}</TableCell>
                   <TableCell className="text-[11px] text-slate-400">{t.created_at ? new Date(t.created_at).toLocaleDateString() : '-'}</TableCell>
                   <TableCell>
-                    {t.status === 'pending' && (
-                      <div className="flex gap-1">
+                    <div className="flex gap-1">
+                      {t.status === 'pending' && (<>
                         <Button size="sm" variant="outline" className="h-6 w-6 p-0 rounded-sm text-emerald-600 hover:bg-emerald-50"
                           onClick={() => handleAction(t.id, 'approve')} data-testid={`approve-${t.id}`}><Check className="w-3 h-3" /></Button>
                         <Button size="sm" variant="outline" className="h-6 w-6 p-0 rounded-sm text-red-600 hover:bg-red-50"
                           onClick={() => handleAction(t.id, 'reject')} data-testid={`reject-${t.id}`}><X className="w-3 h-3" /></Button>
-                      </div>
-                    )}
+                      </>)}
+                      <ChatButton entityType="transfer" entityId={t.id} details={[
+                        { label: 'Product', value: t.product_name },
+                        { label: 'From → To', value: `${t.source_store_name} → ${t.requesting_store_name}` },
+                        { label: 'Qty', value: t.quantity }, { label: 'Status', value: t.status },
+                      ]} />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

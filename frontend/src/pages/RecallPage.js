@@ -13,6 +13,7 @@ import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
 import { RotateCcw, Plus, Upload, Search, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { UploadProgress } from '../components/UploadProgress';
+import { ChatButton } from '../components/ChatPopup';
 
 export default function RecallPage() {
   const { user } = useAuth();
@@ -238,6 +239,11 @@ export default function RecallPage() {
                       {r.status === 'pending' && <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-sky-600" onClick={() => handleStatus(r.id, 'acknowledged')}><Check className="w-3 h-3 mr-0.5" />Ack</Button>}
                       {r.status === 'acknowledged' && <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-emerald-600" onClick={() => handleStatus(r.id, 'returned')}><Check className="w-3 h-3 mr-0.5" />Returned</Button>}
                       {r.status === 'pending' && <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-red-600" onClick={() => handleStatus(r.id, 'cancelled')}><X className="w-3 h-3 mr-0.5" />Cancel</Button>}
+                      <ChatButton entityType="recall" entityId={r.id} details={[
+                        { label: 'Product', value: r.product_name },
+                        { label: 'Store', value: r.store_name }, { label: 'Qty', value: r.quantity },
+                        { label: 'Assigned', value: r.assigned_staff || '-' }, { label: 'Status', value: r.status },
+                      ]} />
                     </div>
                   </TableCell>
                 </TableRow>
