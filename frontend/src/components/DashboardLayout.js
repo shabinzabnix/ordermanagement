@@ -15,38 +15,59 @@ import {
 } from '../components/ui/dropdown-menu';
 
 const navItems = [
+  // ── Overview
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'dashboard' },
-  { label: 'Store Dash', path: '/store-dashboard', icon: Building2, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'store_dashboard' },
+  { label: 'Store Dashboard', path: '/store-dashboard', icon: Building2, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'store_dashboard' },
   { label: 'Top Selling', path: '/top-selling', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'top_selling' },
-  { label: 'Intelligence', path: '/intel', icon: Brain, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'intelligence' },
-  { label: 'Forecast', path: '/intel/forecast', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'forecast' },
-  { label: 'Expiry Risk', path: '/intel/expiry', icon: ShieldAlert, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'expiry_risk' },
-  { label: 'Suppliers', path: '/intel/suppliers', icon: Truck, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'suppliers' },
+
+  // ── Inventory
+  { section: 'Inventory', roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'] },
   { label: 'Products', path: '/products', icon: Package, roles: ['ADMIN'], svc: 'products' },
   { label: 'Stores', path: '/stores', icon: Building2, roles: ['ADMIN'], svc: 'stores' },
   { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'ho_stock' },
   { label: 'Store Stock', path: '/store-stock', icon: Archive, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'store_stock' },
   { label: 'Consolidated', path: '/consolidated', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'consolidated' },
   { label: 'Aging Report', path: '/aging', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'aging' },
+  { label: 'Expiry Risk', path: '/intel/expiry', icon: ShieldAlert, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'expiry_risk' },
+
+  // ── Operations
+  { section: 'Operations', roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'] },
   { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'transfers' },
   { label: 'Store Request', path: '/store-request', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'purchases' },
   { label: 'PO Manager', path: '/po-management', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'purchases' },
-  { label: 'Recall/Return', path: '/recalls', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'recalls' },
-  { label: 'Purchase Upload', path: '/purchase-report', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'purchase_upload' },
-  { label: 'Store CRM', path: '/crm/store-crm', icon: Heart, roles: ['STORE_STAFF', 'STORE_MANAGER', 'ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'store_crm' },
-  { label: 'Call Tasks', path: '/crm/call-tasks', icon: Phone, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'call_tasks' },
-  { label: 'CRM', path: '/crm', icon: Heart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm' },
+  { label: 'Recall / Return', path: '/recalls', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'recalls' },
+
+  // ── Data Uploads
+  { section: 'Uploads', roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'] },
   { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'CRM_STAFF', 'STORE_MANAGER', 'STORE_STAFF'], svc: 'sales_upload' },
-  { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'refill_due' },
-  { label: 'Repeat Purchases', path: '/crm/repeat-purchases', icon: Trophy, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'repeat_purchases' },
+  { label: 'Purchase Upload', path: '/purchase-report', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'purchase_upload' },
+  { label: 'Upload History', path: '/uploads', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'uploads' },
+
+  // ── CRM
+  { section: 'CRM', roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'] },
+  { label: 'Store CRM', path: '/crm/store-crm', icon: Heart, roles: ['STORE_STAFF', 'STORE_MANAGER', 'ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'store_crm' },
+  { label: 'Customers', path: '/crm/customers', icon: Users, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm_customers' },
   { label: 'RC Customers', path: '/crm/rc-customers', icon: UserCheck, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'rc_customers' },
+  { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'refill_due' },
+  { label: 'Call Tasks', path: '/crm/call-tasks', icon: Phone, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'call_tasks' },
+  { label: 'Repeat Purchases', path: '/crm/repeat-purchases', icon: Trophy, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'repeat_purchases' },
+
+  // ── Reports
+  { section: 'Reports', roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'] },
   { label: 'CRM Reports', path: '/crm/reports', icon: BarChart3, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'CRM_STAFF', 'STORE_MANAGER'], svc: 'crm_reports' },
   { label: 'Daily Report', path: '/crm/daily-report', icon: ClipboardList, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'daily_report' },
-  { label: 'History', path: '/crm/history', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm_history' },
-  { label: 'Customers', path: '/crm/customers', icon: Users, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm_customers' },
+  { label: 'Purchase History', path: '/crm/history', icon: Clock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm_history' },
+
+  // ── Intelligence
+  { section: 'Intelligence', roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'] },
+  { label: 'Intel Center', path: '/intel', icon: Brain, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'intelligence' },
+  { label: 'Forecast', path: '/intel/forecast', icon: TrendingUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'forecast' },
+  { label: 'Suppliers', path: '/intel/suppliers', icon: Truck, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'suppliers' },
+
+  // ── Admin
+  { section: 'Admin', roles: ['ADMIN'] },
   { label: 'Users', path: '/users', icon: Users, roles: ['ADMIN'], svc: 'users' },
   { label: 'Audit Log', path: '/audit-log', icon: ClipboardList, roles: ['ADMIN'], svc: 'audit_log' },
-  { label: 'Uploads', path: '/uploads', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'uploads' },
 ];
 
 export default function DashboardLayout({ children }) {
@@ -57,9 +78,24 @@ export default function DashboardLayout({ children }) {
 
   const userServices = user?.allowed_services ? user.allowed_services.split(',') : null;
   const filteredNav = navItems.filter(item => {
+    if (item.section) {
+      // Show section header if user role is in its roles
+      return item.roles.includes(user?.role);
+    }
     if (!item.roles.includes(user?.role)) return false;
-    if (userServices && !userServices.includes(item.svc)) return false;
+    if (userServices && item.svc && !userServices.includes(item.svc)) return false;
     return true;
+  });
+
+  // Remove section headers that have no visible items after them
+  const cleanedNav = filteredNav.filter((item, idx) => {
+    if (!item.section) return true;
+    // Check if next non-section item exists before the next section
+    for (let i = idx + 1; i < filteredNav.length; i++) {
+      if (filteredNav[i].section) return false; // Another section with nothing between
+      if (filteredNav[i].path) return true; // Found a nav item
+    }
+    return false;
   });
 
   const handleLogout = () => {
@@ -67,7 +103,7 @@ export default function DashboardLayout({ children }) {
     navigate('/login');
   };
 
-  const currentPage = filteredNav.find(n => n.path === location.pathname)?.label || 'Dashboard';
+  const currentPage = cleanedNav.find(n => n.path === location.pathname)?.label || 'Dashboard';
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -95,7 +131,14 @@ export default function DashboardLayout({ children }) {
 
         <ScrollArea className="flex-1 px-2 py-3">
           <nav className="space-y-0.5">
-            {filteredNav.map(item => {
+            {cleanedNav.map((item, idx) => {
+              if (item.section) {
+                return !collapsed ? (
+                  <div key={`section-${item.section}`} className="pt-4 pb-1 px-3 first:pt-0">
+                    <p className="text-[9px] font-body font-semibold uppercase tracking-[0.15em] text-slate-500">{item.section}</p>
+                  </div>
+                ) : <div key={`section-${item.section}`} className="pt-3 pb-1"><Separator className="bg-slate-700/30" /></div>;
+              }
               const isActive = location.pathname === item.path;
               return (
                 <Link
