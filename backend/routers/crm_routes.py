@@ -1753,3 +1753,101 @@ async def refill_due_enhanced(
         })
 
     return {"items": result, "total": total, "page": page, "limit": limit}
+
+
+# ─── Repeat Medicine Purchases ────────────────────────────────
+
+@router.get("/crm/repeat-purchases")
+async def repeat_purchases(
+    store_id: int = Query(None),
+    min_count: int = Query(2, ge=2),
+    search: str = Query(None),
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Customers purchasing the same medicine repeatedly (2+ times)."""
+    sf = _store_filter(user)
+    target_store = sf or (int(store_id) if store_id else None)
+
+    # Aggregate: customer_id + product_name -> count, total_amount, min/max date
+    agg_q = (
+        select(
+            SalesRecord.customer_id,
+            SalesRecord.product_name,
+            SalesRecord.product_id,
+            func.count(SalesRecord.id).label("purchase_count"),
+            func.sum(SalesRecord.total_amount).label("total_spent"),
+            func.sum(SalesRecord.quantity).label("total_qty"),
+            func.min(SalesRecord.invoice_date).label("first_date"),
+            func.max(SalesRecord.invoice_date).label("last_date"),
+        )
+        .where(SalesRecord.customer_id.isnot(None))
+        .group_by(SalesRecord.customer_id, SalesRecord.product_name, SalesRecord.product_id)
+        .having(func.count(SalesRecord.id) >= min_count)
+    )
+    if target_store:
+        agg_q = agg_q.where(SalesRecord.store_id == target_store)
+
+    # Subquery for total count
+    sub = agg_q.subquery()
+    total = (await db.execute(select(func.count()).select_from(sub))).scalar() or 0
+
+    # Fetch page
+    rows = (await db.execute(
+        agg_q.order_by(func.count(SalesRecord.id).desc())
+        .offset((page - 1) * limit).limit(limit)
+    )).all()
+
+    # Get customer names
+    cids = set(r[0] for r in rows if r[0])
+    cmap = {}
+    if cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(cids)))).scalars().all():
+            cmap[c.id] = {
+                "name": c.customer_name, "mobile": c.mobile_number,
+                "type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+                "store_id": c.first_store_id,
+            }
+
+    # Get store names
+    sids = set(ci.get("store_id") for ci in cmap.values() if ci.get("store_id"))
+    smap = {}
+    if sids:
+        smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
+
+    # Check if medicine is tracked (has active MedicinePurchase)
+    tracked_set = set()
+    if cids:
+        tracked = (await db.execute(
+            select(MedicinePurchase.customer_id, MedicinePurchase.medicine_name)
+            .where(MedicinePurchase.customer_id.in_(cids), MedicinePurchase.status == "active")
+        )).all()
+        tracked_set = set((r[0], r[1]) for r in tracked)
+
+    result = []
+    for r in rows:
+        cid, product_name, product_id, count, spent, qty, first_d, last_d = r
+        ci = cmap.get(cid, {})
+        if search:
+            sl = search.lower()
+            if sl not in ci.get("name", "").lower() and sl not in ci.get("mobile", "").lower() and sl not in (product_name or "").lower():
+                continue
+        # Days between first and last purchase
+        span_days = (last_d - first_d).days if first_d and last_d else 0
+        avg_interval = round(span_days / (count - 1), 1) if count > 1 and span_days > 0 else 0
+        is_tracked = (cid, product_name) in tracked_set
+
+        result.append({
+            "customer_id": cid, "customer_name": ci.get("name", ""), "mobile": ci.get("mobile", ""),
+            "customer_type": ci.get("type", "walkin"),
+            "store_name": smap.get(ci.get("store_id"), ""),
+            "product_name": product_name, "product_id": product_id,
+            "purchase_count": count, "total_spent": round(float(spent or 0), 2),
+            "total_qty": float(qty or 0),
+            "first_purchase": first_d.isoformat() if first_d else None,
+            "last_purchase": last_d.isoformat() if last_d else None,
+            "avg_interval_days": avg_interval,
+            "is_tracked": is_tracked,
+        })
+
+    return {"items": result, "total": total, "page": page, "limit": limit}
