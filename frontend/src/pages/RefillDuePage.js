@@ -21,7 +21,8 @@ const buildWhatsAppMsg = (d) => {
     `*Medicine:* ${d.medicine_name}\n` +
     `*Refill Due:* ${dueDateStr}\n` +
     (d.days_until < 0 ? `*Status:* Overdue by ${Math.abs(d.days_until)} day(s)\n` : d.days_until === 0 ? `*Status:* Due Today\n` : `*Status:* Due in ${d.days_until} day(s)\n`) +
-    `\nPlease visit your nearest store to ensure uninterrupted medication. Your health is our priority.\n\n` +
+    `\nPlease visit your nearest store or avail our *Home Delivery* service for a hassle-free experience. Just reply to this message or call us to place your order from the comfort of your home.\n\n` +
+    `Your health is our priority.\n\n` +
     `Warm regards,\n*Sahakar Hyper Pharmacy*\n${d.store_name}`;
   return greeting + body;
 };
