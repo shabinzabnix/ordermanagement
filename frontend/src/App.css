@@ -13,3 +13,6 @@
 .animate-fade-in-delay-3 { animation: fadeIn 0.3s ease-out 0.15s both; }
 .animate-fade-in-delay-4 { animation: fadeIn 0.3s ease-out 0.2s both; }
 .animate-fade-in-delay-5 { animation: fadeIn 0.3s ease-out 0.25s both; }
+
+
+#emergent-badge { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }

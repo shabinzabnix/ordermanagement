@@ -385,6 +385,39 @@ async def create_user(
     return {"id": new_user.id, "email": new_user.email, "full_name": new_user.full_name, "role": new_user.role.value}
 
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    store_id: Optional[int] = None
+    allowed_services: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.put("/users/{user_id}")
+async def update_user(user_id: int, data: UserUpdate, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
+    u = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not u: raise HTTPException(404, "User not found")
+    if data.full_name is not None: u.full_name = data.full_name
+    if data.role is not None: u.role = UserRole(data.role.upper())
+    if data.store_id is not None: u.store_id = data.store_id
+    if data.allowed_services is not None: u.allowed_services = data.allowed_services
+    if data.password: u.password_hash = hash_password(data.password)
+    if data.is_active is not None: u.is_active = data.is_active
+    await db.commit()
+    return {"message": "User updated"}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
+    u = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not u: raise HTTPException(404, "User not found")
+    if u.id == user["user_id"]: raise HTTPException(400, "Cannot delete yourself")
+    await db.delete(u)
+    await db.commit()
+    return {"message": "User deleted"}
+
+
 # --- Upload History ---
 
 @router.get("/uploads")

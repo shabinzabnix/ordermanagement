@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from '../components/ui/badge';
 import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
-import { Users, Plus } from 'lucide-react';
+import { Users, Plus, Edit3, Trash2 } from 'lucide-react';
 
 const ALL_SERVICES = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -48,6 +48,8 @@ export default function UserManagementPage() {
   const [form, setForm] = useState({ email: '', password: '', full_name: '', role: '', store_id: '' });
   const [selectedServices, setSelectedServices] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [editForm, setEditForm] = useState({ full_name: '', role: '', store_id: '', password: '', is_active: true });
 
   const loadUsers = () => { api.get('/users').then(r => setUsers(r.data.users)).catch(() => {}); };
   useEffect(() => {
@@ -83,7 +85,29 @@ export default function UserManagementPage() {
     if (r === 'ADMIN') return 'bg-violet-50 text-violet-700';
     if (r === 'HO_STAFF' || r === 'DIRECTOR') return 'bg-sky-50 text-sky-700';
     if (r === 'CRM_STAFF') return 'bg-rose-50 text-rose-700';
+    if (r === 'STORE_MANAGER') return 'bg-amber-50 text-amber-700';
     return 'bg-emerald-50 text-emerald-700';
+  };
+
+  const openEditUser = (u) => {
+    setEditUser(u);
+    setEditForm({ full_name: u.full_name, role: u.role, store_id: u.store_id ? String(u.store_id) : '', password: '', is_active: u.is_active });
+  };
+  const handleEditUser = async () => {
+    if (!editUser) return; setSaving(true);
+    try {
+      const payload = { full_name: editForm.full_name, role: editForm.role, is_active: editForm.is_active };
+      if (editForm.store_id) payload.store_id = parseInt(editForm.store_id);
+      if (editForm.password) payload.password = editForm.password;
+      await api.put(`/users/${editUser.id}`, payload);
+      toast.success('User updated'); setEditUser(null); loadUsers();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
+    finally { setSaving(false); }
+  };
+  const handleDeleteUser = async (u) => {
+    if (!window.confirm(`Delete user "${u.full_name}" (${u.email})?`)) return;
+    try { await api.delete(`/users/${u.id}`); toast.success('User deleted'); loadUsers(); }
+    catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
   };
 
   return (
@@ -188,14 +212,14 @@ export default function UserManagementPage() {
           <Table>
             <TableHeader>
               <TableRow className="border-b-2 border-slate-100">
-                {['Name', 'Email', 'Role', 'Services', 'Status'].map(h => (
+                {['Name', 'Email', 'Role', 'Services', 'Status', 'Actions'].map(h => (
                   <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3">{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {users.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className="text-center py-16">
+                <TableRow><TableCell colSpan={6} className="text-center py-16">
                   <Users className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">No users</p>
                 </TableCell></TableRow>
@@ -215,12 +239,39 @@ export default function UserManagementPage() {
                     </div>
                   </TableCell>
                   <TableCell><Badge variant={u.is_active ? 'secondary' : 'destructive'} className="text-[10px] rounded-sm">{u.is_active ? 'Active' : 'Inactive'}</Badge></TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px]" onClick={() => openEditUser(u)} data-testid={`edit-user-${u.id}`}><Edit3 className="w-3 h-3 mr-0.5" />Edit</Button>
+                      <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-red-600 hover:bg-red-50" onClick={() => handleDeleteUser(u)} data-testid={`delete-user-${u.id}`}><Trash2 className="w-3 h-3" /></Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </div>
       </Card>
+
+      {/* Edit User Dialog */}
+      <Dialog open={!!editUser} onOpenChange={v => { if (!v) setEditUser(null); }}>
+        <DialogContent className="rounded-sm max-w-md">
+          <DialogHeader><DialogTitle className="font-heading">Edit User: {editUser?.email}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5"><Label className="font-body text-xs">Full Name</Label><Input value={editForm.full_name} onChange={e => setEditForm({...editForm, full_name: e.target.value})} className="rounded-sm" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5"><Label className="font-body text-xs">Role</Label>
+                <Select value={editForm.role} onValueChange={v => setEditForm({...editForm, role: v})}><SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="ADMIN">Admin</SelectItem><SelectItem value="HO_STAFF">HO Staff</SelectItem><SelectItem value="STORE_MANAGER">Store Manager</SelectItem><SelectItem value="STORE_STAFF">Store Staff</SelectItem><SelectItem value="CRM_STAFF">CRM Staff</SelectItem><SelectItem value="DIRECTOR">Director</SelectItem></SelectContent></Select></div>
+              <div className="space-y-1.5"><Label className="font-body text-xs">Store</Label>
+                <Select value={editForm.store_id || 'none'} onValueChange={v => setEditForm({...editForm, store_id: v === 'none' ? '' : v})}><SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">None</SelectItem>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent></Select></div>
+            </div>
+            <div className="space-y-1.5"><Label className="font-body text-xs">New Password (leave blank to keep)</Label><Input type="password" value={editForm.password} onChange={e => setEditForm({...editForm, password: e.target.value})} className="rounded-sm" placeholder="Optional" /></div>
+            <div className="flex items-center gap-2"><Checkbox checked={editForm.is_active} onCheckedChange={v => setEditForm({...editForm, is_active: v})} /><Label className="font-body text-xs">Active</Label></div>
+          </div>
+          <DialogFooter><Button className="bg-sky-500 hover:bg-sky-600 rounded-sm font-body text-xs" onClick={handleEditUser} disabled={saving}>{saving ? 'Saving...' : 'Update User'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

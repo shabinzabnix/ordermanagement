@@ -31,6 +31,7 @@ const navItems = [
   { label: 'Transfers', path: '/transfers', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'transfers' },
   { label: 'Store Request', path: '/store-request', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'purchases' },
   { label: 'PO Manager', path: '/po-management', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'purchases' },
+  { label: 'Recall/Return', path: '/recalls', icon: ArrowLeftRight, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'recalls' },
   { label: 'Purchase Upload', path: '/purchase-report', icon: ShoppingCart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'purchase_upload' },
   { label: 'Store CRM', path: '/crm/store-crm', icon: Heart, roles: ['STORE_STAFF', 'STORE_MANAGER', 'ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'store_crm' },
   { label: 'Call Tasks', path: '/crm/call-tasks', icon: Phone, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'call_tasks' },

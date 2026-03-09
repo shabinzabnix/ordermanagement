@@ -415,3 +415,19 @@ class RequestComment(Base):
     user_role = Column(String(50))
     message = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+
+class ProductRecall(Base):
+    __tablename__ = "product_recalls"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    product_id = Column(String(100), nullable=True, index=True)
+    product_name = Column(String(500), nullable=False)
+    quantity = Column(Float, default=0)
+    assigned_staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status = Column(String(30), default="pending")
+    remarks = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

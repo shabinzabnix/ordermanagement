@@ -14,6 +14,7 @@ from routers.phase2_routes import router as phase2_router
 from routers.crm_routes import router as crm_router
 from routers.intelligence_routes import router as intel_router
 from routers.po_routes import router as po_router
+from routers.recall_routes import router as recall_router
 from sqlalchemy import select
 
 ROOT_DIR = Path(__file__).parent
@@ -57,6 +58,7 @@ app.include_router(phase2_router, prefix="/api", tags=["Phase2"])
 app.include_router(crm_router, prefix="/api", tags=["CRM"])
 app.include_router(intel_router, prefix="/api", tags=["Intelligence"])
 app.include_router(po_router, prefix="/api", tags=["PurchaseOrders"])
+app.include_router(recall_router, prefix="/api", tags=["Recalls"])
 
 
 @app.on_event("startup")
