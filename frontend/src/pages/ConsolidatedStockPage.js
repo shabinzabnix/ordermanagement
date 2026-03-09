@@ -84,9 +84,9 @@ export default function ConsolidatedStockPage() {
                   <BarChart3 className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">No consolidated data. Upload product master and stock data first.</p>
                 </TableCell></TableRow>
-              ) : data.consolidated.map(p => (
-                <TableRow key={p.product_id} className="hover:bg-slate-50/50">
-                  <TableCell className="font-mono text-[11px] text-slate-500">{p.product_id}</TableCell>
+              ) : data.consolidated.map((p, idx) => (
+                <TableRow key={`${p.product_id}-${idx}`} className={`hover:bg-slate-50/50 ${p.is_local ? 'bg-amber-50/30' : ''}`}>
+                  <TableCell className="font-mono text-[11px] text-slate-500">{p.is_local ? <Badge className="text-[8px] rounded-sm bg-amber-100 text-amber-700">LOCAL</Badge> : p.product_id}</TableCell>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.product_name}</TableCell>
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{p.ho_stock > 0 ? p.ho_stock.toLocaleString() : <span className="text-slate-300">0</span>}</TableCell>
                   {data.stores.map(s => {

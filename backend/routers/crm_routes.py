@@ -2352,3 +2352,88 @@ async def daily_crm_report(
         "uploads": upload_list,
         "staff_summary": staff_summary,
     }
+
+
+# ─── Daily Customer & Invoice Details ─────────────────────────
+
+@router.get("/crm/daily-invoices")
+async def daily_invoices(
+    date: str = Query(None),
+    store_id: int = Query(None),
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    target_store = sf or (int(store_id) if store_id else None)
+    now = datetime.now(timezone.utc)
+
+    if date:
+        try: day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except: day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+
+    # Get invoices grouped by entry_number + customer
+    inv_q = (
+        select(
+            SalesRecord.entry_number,
+            SalesRecord.customer_id,
+            SalesRecord.patient_name,
+            SalesRecord.mobile_number,
+            SalesRecord.store_id,
+            func.sum(SalesRecord.total_amount).label("total"),
+            func.count(SalesRecord.id).label("items"),
+            func.min(SalesRecord.invoice_date).label("inv_date"),
+        )
+        .where(SalesRecord.invoice_date >= day_start, SalesRecord.invoice_date < day_end)
+        .group_by(SalesRecord.entry_number, SalesRecord.customer_id, SalesRecord.patient_name, SalesRecord.mobile_number, SalesRecord.store_id)
+    )
+    if target_store:
+        inv_q = inv_q.where(SalesRecord.store_id == target_store)
+
+    total = (await db.execute(select(func.count()).select_from(inv_q.subquery()))).scalar() or 0
+    rows = (await db.execute(
+        inv_q.order_by(func.min(SalesRecord.invoice_date).desc())
+        .offset((page - 1) * limit).limit(limit)
+    )).all()
+
+    # Store names
+    sids = set(r[4] for r in rows if r[4])
+    smap = {}
+    if sids:
+        smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
+
+    # Customer types
+    cids = set(r[1] for r in rows if r[1])
+    ctype_map = {}
+    if cids:
+        for c in (await db.execute(select(CRMCustomer).where(CRMCustomer.id.in_(cids)))).scalars().all():
+            ctype_map[c.id] = c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type
+
+    invoices = []
+    for r in rows:
+        invoices.append({
+            "entry_number": r[0], "customer_id": r[1],
+            "customer_name": r[2] or "Unknown", "mobile": r[3] or "",
+            "store_id": r[4], "store_name": smap.get(r[4], ""),
+            "total_amount": round(float(r[5] or 0), 2), "item_count": int(r[6] or 0),
+            "invoice_date": r[7].isoformat() if r[7] else None,
+            "customer_type": ctype_map.get(r[1], "walkin"),
+        })
+
+    # Summary KPIs
+    total_amount_q = select(func.sum(SalesRecord.total_amount)).where(SalesRecord.invoice_date >= day_start, SalesRecord.invoice_date < day_end)
+    total_customers_q = select(func.count(func.distinct(SalesRecord.customer_id))).where(SalesRecord.invoice_date >= day_start, SalesRecord.invoice_date < day_end, SalesRecord.customer_id.isnot(None))
+    if target_store:
+        total_amount_q = total_amount_q.where(SalesRecord.store_id == target_store)
+        total_customers_q = total_customers_q.where(SalesRecord.store_id == target_store)
+
+    day_total = round(float((await db.execute(total_amount_q)).scalar() or 0), 2)
+    day_customers = (await db.execute(total_customers_q)).scalar() or 0
+
+    return {
+        "invoices": invoices, "total": total, "page": page, "limit": limit,
+        "date": day_start.strftime("%Y-%m-%d"),
+        "summary": {"total_amount": day_total, "total_invoices": total, "total_customers": day_customers},
+    }

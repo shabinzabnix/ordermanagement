@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, and_
+from sqlalchemy import select, func, delete, and_, or_
 from database import get_db
 from models import (
     Product, Store, User, HOStockBatch, StoreStockBatch,
@@ -301,6 +301,7 @@ async def get_consolidated_stock(
 ):
     stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
 
+    # Get registered products from Product Master
     product_query = select(Product)
     if search:
         product_query = product_query.where(
@@ -342,13 +343,43 @@ async def get_consolidated_stock(
             total_stock += qty
         consolidated.append({
             "product_id": p.product_id, "product_name": p.product_name,
-            "category": p.category, "ho_stock": ho, "store_stock": sd, "total": total_stock,
+            "category": p.category, "ho_stock": ho, "store_stock": sd, "total": total_stock, "is_local": False,
         })
+
+    # Also include non-registered local store products (no ho_product_id or not in product master)
+    local_q = (
+        select(StoreStockBatch.product_name, StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
+        .where(or_(StoreStockBatch.ho_product_id.is_(None), ~StoreStockBatch.ho_product_id.in_(pids) if pids else StoreStockBatch.ho_product_id.is_(None)))
+        .where(StoreStockBatch.closing_stock_strips > 0)
+        .group_by(StoreStockBatch.product_name, StoreStockBatch.store_id)
+    )
+    if search:
+        local_q = local_q.where(StoreStockBatch.product_name.ilike(f"%{search}%"))
+
+    local_rows = (await db.execute(local_q)).all()
+    local_products = {}
+    for r in local_rows:
+        pname = r[0]
+        if pname not in local_products:
+            local_products[pname] = {"product_id": "LOCAL", "product_name": pname, "category": "Local Purchase", "ho_stock": 0, "store_stock": {}, "total": 0, "is_local": True}
+        local_products[pname]["store_stock"][str(r[1])] = float(r[2] or 0)
+        local_products[pname]["total"] += float(r[2] or 0)
+
+    local_list = sorted(local_products.values(), key=lambda x: x["product_name"])
+    total_with_local = product_count + len(local_products)
+
+    # Merge: if on first page and there's room, append local products
+    if page == 1 and len(consolidated) < limit:
+        remaining = limit - len(consolidated)
+        consolidated.extend(local_list[:remaining])
+    elif (page - 1) * limit >= product_count:
+        local_offset = (page - 1) * limit - product_count
+        consolidated = local_list[local_offset:local_offset + limit]
 
     return {
         "consolidated": consolidated,
         "stores": [{"id": s.id, "store_name": s.store_name, "store_code": s.store_code} for s in stores],
-        "total": product_count, "page": page, "limit": limit,
+        "total": total_with_local, "page": page, "limit": limit,
     }
 
 
