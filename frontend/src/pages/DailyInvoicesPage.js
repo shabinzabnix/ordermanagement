@@ -57,7 +57,7 @@ export default function DailyInvoicesPage() {
           {isHO && (
             <Select value={storeFilter} onValueChange={v => { setStoreFilter(v); setPage(1); }}>
               <SelectTrigger className="w-[180px] font-body text-sm rounded-sm h-8"><SelectValue placeholder="All Stores" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All Stores</SelectItem>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
+              <SelectContent>{!['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && <SelectItem value="all">All Stores</SelectItem>}{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
             </Select>
           )}
         </div>

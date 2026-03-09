@@ -122,7 +122,7 @@ export default function RefillDuePage() {
             </div>
             <Select value={storeFilter} onValueChange={setStoreFilter}>
               <SelectTrigger className="w-[180px] font-body text-sm rounded-sm"><SelectValue placeholder="All Stores" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All Stores</SelectItem>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
+              <SelectContent>{!['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && <SelectItem value="all">All Stores</SelectItem>}{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
             </Select>
             <div className="relative flex-1 min-w-[200px]"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <Input data-testid="refill-search" placeholder="Search customer, mobile or medicine..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 font-body text-sm rounded-sm" /></div>

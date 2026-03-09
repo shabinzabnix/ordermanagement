@@ -61,7 +61,7 @@ export default function DailyReportPage() {
           {isHO && (
             <Select value={storeFilter} onValueChange={setStoreFilter}>
               <SelectTrigger className="w-[180px] font-body text-sm rounded-sm h-8"><SelectValue placeholder="All Stores" /></SelectTrigger>
-              <SelectContent><SelectItem value="all">All Stores</SelectItem>{stores.map(st => <SelectItem key={st.id} value={String(st.id)}>{st.store_name}</SelectItem>)}</SelectContent>
+              <SelectContent>{!['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && <SelectItem value="all">All Stores</SelectItem>}{stores.map(st => <SelectItem key={st.id} value={String(st.id)}>{st.store_name}</SelectItem>)}</SelectContent>
             </Select>
           )}
         </div>

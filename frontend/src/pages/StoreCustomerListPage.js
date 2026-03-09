@@ -66,10 +66,10 @@ export default function StoreCustomerListPage() {
 
       <Card className="border-slate-200 shadow-sm rounded-sm">
         <CardContent className="p-3 flex gap-3 flex-wrap">
-          <Select value={selectedStore} onValueChange={v => { setSelectedStore(v === 'all' ? '' : v); setPage(1); }}>
+          <Select value={selectedStore} onValueChange={v => { setSelectedStore(v === 'all' ? '' : v); setPage(1); }} disabled={['STORE_STAFF','STORE_MANAGER'].includes(user?.role)}>
             <SelectTrigger className="w-[220px] font-body text-sm rounded-sm" data-testid="customer-store-filter"><SelectValue placeholder="Select Store" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Stores</SelectItem>
+              {!['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && <SelectItem value="all">All Stores</SelectItem>}
               {stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name} ({s.store_code})</SelectItem>)}
             </SelectContent>
           </Select>

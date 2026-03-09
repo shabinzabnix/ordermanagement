@@ -199,7 +199,7 @@ export default function RecallPage() {
         <CardContent className="p-3 flex gap-3 flex-wrap">
           <Select value={storeFilter} onValueChange={v => { setStoreFilter(v); setPage(1); }}>
             <SelectTrigger className="w-[180px] font-body text-sm rounded-sm"><SelectValue placeholder="All Stores" /></SelectTrigger>
-            <SelectContent><SelectItem value="all">All Stores</SelectItem>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
+            <SelectContent>{!['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && <SelectItem value="all">All Stores</SelectItem>}{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
           </Select>
           <div className="flex gap-1.5">
             {['all', 'pending', 'acknowledged', 'returned', 'cancelled'].map(s => (

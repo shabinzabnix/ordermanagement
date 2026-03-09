@@ -80,7 +80,7 @@ export default function TopSellingPage() {
             <Select value={selectedStore} onValueChange={v => { setSelectedStore(v); setPage(1); }} disabled={['STORE_STAFF','STORE_MANAGER'].includes(user?.role)}>
               <SelectTrigger className="w-[200px] font-body text-sm rounded-sm" data-testid="top-store-filter"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Stores</SelectItem>
+                {!['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && <SelectItem value="all">All Stores</SelectItem>}
                 {stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}
               </SelectContent>
             </Select>
