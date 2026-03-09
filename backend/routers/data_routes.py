@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from database import get_db
+from database import get_db, async_session_maker
 from models import Product, Store, User, UserRole, UploadHistory, UploadType, SalesRecord, TransactionComment
 from auth import get_current_user, require_roles, hash_password
 from pydantic import BaseModel
@@ -151,6 +151,7 @@ async def get_sub_categories(
 @router.post("/products/upload")
 async def upload_products(
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN")),
 ):
@@ -206,7 +207,39 @@ async def upload_products(
             errors.append(f"Row {idx+2}: {str(e)}")
             failed += 1
 
-    # Bulk upsert using PostgreSQL ON CONFLICT
+    # For large files, return immediately and process in background
+    if len(rows_data) > 2000:
+        # Save upload history first
+        try:
+            upload = UploadHistory(file_name=file.filename, upload_type=UploadType.PRODUCT_MASTER, uploaded_by=user["user_id"],
+                total_records=len(df_mapped), success_records=success, failed_records=failed)
+            db.add(upload)
+            await db.commit()
+        except Exception:
+            pass
+
+        # Process in background using asyncio task
+        import asyncio
+        async def bg_upsert():
+            async with async_session_maker() as bg_db:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                BATCH = 100
+                for i in range(0, len(rows_data), BATCH):
+                    batch = rows_data[i:i+BATCH]
+                    stmt = pg_insert(Product).values(batch)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=['product_id'],
+                        set_={k: stmt.excluded[k] for k in ['product_name', 'primary_supplier', 'secondary_supplier', 'least_price_supplier', 'most_qty_supplier', 'category', 'sub_category', 'rep', 'mrp', 'ptr', 'landing_cost']}
+                    )
+                    await bg_db.execute(stmt)
+                    await bg_db.flush()
+                await bg_db.commit()
+
+        asyncio.create_task(bg_upsert())
+        return {"message": f"Upload accepted! {success} products being processed in background. Refresh in 1-2 minutes.", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20],
+                "columns_matched": col_info.get("matched", {}), "columns_unmatched": col_info.get("unmatched", [])[:20], "background": True}
+
+    # Small files: process immediately
     if rows_data:
         from sqlalchemy.dialects.postgresql import insert as pg_insert
         BATCH = 100

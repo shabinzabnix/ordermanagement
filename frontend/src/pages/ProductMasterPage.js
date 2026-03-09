@@ -78,6 +78,7 @@ export default function ProductMasterPage() {
     try {
       const res = await api.post('/products/upload', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
         onUploadProgress: (evt) => {
           const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
           setUploadProgress({ phase: 'uploading', percent: pct });
@@ -85,7 +86,11 @@ export default function ProductMasterPage() {
         },
       });
       setUploadProgress({ phase: 'done', percent: 100 });
-      toast.success(`Upload: ${res.data.success}/${res.data.total} records processed`);
+      if (res.data.background) {
+        toast.success(`${res.data.success} products accepted! Processing in background. Refresh in 1-2 minutes.`, { duration: 10000 });
+      } else {
+        toast.success(`Upload: ${res.data.success}/${res.data.total} records processed`);
+      }
       if (res.data.failed > 0) toast.warning(`${res.data.failed} records failed`);
       const matched = res.data.columns_matched || {};
       const unmatched = res.data.columns_unmatched || [];
