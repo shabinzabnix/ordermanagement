@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from '../components/ui/badge';
 import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
-import { Users, Plus, Edit3, Trash2, LogIn } from 'lucide-react';
+import { Users, Plus, Edit3, LogIn, ShieldOff, ShieldCheck } from 'lucide-react';
 
 const ALL_SERVICES = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -106,9 +106,10 @@ export default function UserManagementPage() {
     } catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
     finally { setSaving(false); }
   };
-  const handleDeleteUser = async (u) => {
-    if (!window.confirm(`Delete user "${u.full_name}" (${u.email})?`)) return;
-    try { await api.delete(`/users/${u.id}`); toast.success('User deleted'); loadUsers(); }
+  const handleToggleActive = async (u) => {
+    const action = u.is_active ? 'disable' : 'enable';
+    if (!window.confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} user "${u.full_name}"?`)) return;
+    try { await api.put(`/users/${u.id}`, { is_active: !u.is_active }); toast.success(`User ${action}d`); loadUsers(); }
     catch (err) { toast.error(err.response?.data?.detail || 'Failed'); }
   };
 
@@ -245,7 +246,11 @@ export default function UserManagementPage() {
                     <div className="flex gap-1">
                       <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-sky-600 border-sky-200 hover:bg-sky-50" onClick={() => { if (window.confirm(`Switch to "${u.full_name}"? You can switch back anytime.`)) switchToUser(u.id); }} data-testid={`switch-user-${u.id}`}><LogIn className="w-3 h-3 mr-0.5" />Switch</Button>
                       <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px]" onClick={() => openEditUser(u)} data-testid={`edit-user-${u.id}`}><Edit3 className="w-3 h-3 mr-0.5" />Edit</Button>
-                      <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-red-600 hover:bg-red-50" onClick={() => handleDeleteUser(u)} data-testid={`delete-user-${u.id}`}><Trash2 className="w-3 h-3" /></Button>
+                      {u.is_active ? (
+                        <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-red-600 hover:bg-red-50" onClick={() => handleToggleActive(u)} data-testid={`disable-user-${u.id}`}><ShieldOff className="w-3 h-3 mr-0.5" />Disable</Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="h-6 px-2 rounded-sm text-[10px] text-emerald-600 hover:bg-emerald-50" onClick={() => handleToggleActive(u)} data-testid={`enable-user-${u.id}`}><ShieldCheck className="w-3 h-3 mr-0.5" />Enable</Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
