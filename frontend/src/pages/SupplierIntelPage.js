@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -13,18 +13,24 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export default function SupplierIntelPage() {
   const [data, setData] = useState({ suppliers: [], best_per_product: [], total_suppliers: 0, total_best_per_product: 0 });
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const limit = 100;
+  const timerRef = useRef(null);
 
-  const loadData = () => {
+  const handleSearch = (val) => {
+    setSearch(val);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { setDebouncedSearch(val); setPage(1); }, 500);
+  };
+
+  useEffect(() => {
     setLoading(true);
     const params = { page, limit };
-    if (search) params.search = search;
+    if (debouncedSearch) params.search = debouncedSearch;
     api.get('/intel/supplier-intelligence', { params }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
-  };
-  useEffect(() => { loadData(); }, [page]);
-  useEffect(() => { setPage(1); loadData(); }, [search]);
+  }, [page, debouncedSearch]);
 
   if (loading && page === 1) return <div className="space-y-4"><Skeleton className="h-16 rounded-sm" /><Skeleton className="h-96 rounded-sm" /></div>;
 
@@ -62,7 +68,7 @@ export default function SupplierIntelPage() {
       <Card className="border-slate-200 shadow-sm rounded-sm">
         <CardContent className="p-3">
           <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <Input placeholder="Search suppliers or products..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 font-body text-sm rounded-sm" data-testid="supplier-search" /></div>
+            <Input placeholder="Search suppliers or products..." value={search} onChange={e => handleSearch(e.target.value)} className="pl-9 font-body text-sm rounded-sm" data-testid="supplier-search" /></div>
         </CardContent>
       </Card>
 

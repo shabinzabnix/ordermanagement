@@ -541,70 +541,75 @@ async def get_task_queue(
 async def supplier_intelligence(
     search: str = Query(None),
     page: int = Query(1, ge=1),
-    limit: int = Query(100, ge=1, le=99999),
+    limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
-    """Analyze suppliers from Product Master: price trends, best supplier per product."""
-    products = (await db.execute(select(Product))).scalars().all()
-    supplier_stats = {}  # supplier_name -> {products, total_ptr, total_lcost, count}
+    """Analyze suppliers from Product Master using SQL aggregation."""
+    from sqlalchemy import union_all, literal_column, case
 
-    for p in products:
-        for supplier in [p.primary_supplier, p.secondary_supplier, p.least_price_supplier, p.most_qty_supplier]:
-            if not supplier or supplier.strip() == "":
-                continue
-            s = supplier.strip()
-            if s not in supplier_stats:
-                supplier_stats[s] = {"products": 0, "total_ptr": 0, "total_lcost": 0, "product_list": []}
-            supplier_stats[s]["products"] += 1
-            supplier_stats[s]["total_ptr"] += float(p.ptr or 0)
-            supplier_stats[s]["total_lcost"] += float(p.landing_cost or 0)
-            supplier_stats[s]["product_list"].append(p.product_name)
+    # Build a union of all supplier columns into a single (supplier, product_id, product_name, ptr, lcost, mrp) set
+    sup_queries = []
+    for col in [Product.primary_supplier, Product.secondary_supplier, Product.least_price_supplier, Product.most_qty_supplier]:
+        sup_queries.append(
+            select(col.label("supplier"), Product.product_id, Product.product_name, Product.ptr, Product.landing_cost, Product.mrp)
+            .where(col.isnot(None), col != "")
+        )
+    all_sup = union_all(*sup_queries).subquery()
 
-    suppliers = []
-    for name, data in supplier_stats.items():
-        n = data["products"]
-        suppliers.append({
-            "supplier": name, "product_count": n,
-            "avg_ptr": round(data["total_ptr"] / n, 2) if n > 0 else 0,
-            "avg_landing_cost": round(data["total_lcost"] / n, 2) if n > 0 else 0,
-            "sample_products": data["product_list"][:5],
-        })
-    suppliers.sort(key=lambda x: -x["product_count"])
-
-    # Best supplier per product (lowest PTR)
-    best_per_product = []
-    for p in products:
-        candidates = []
-        if p.primary_supplier:
-            candidates.append({"supplier": p.primary_supplier, "ptr": p.ptr or 0, "lcost": p.landing_cost or 0})
-        if p.least_price_supplier and p.least_price_supplier != p.primary_supplier:
-            candidates.append({"supplier": p.least_price_supplier, "ptr": p.ptr or 0, "lcost": p.landing_cost or 0})
-        if candidates:
-            best = min(candidates, key=lambda x: x["ptr"]) if candidates else None
-            if best:
-                best_per_product.append({
-                    "product_id": p.product_id, "product_name": p.product_name,
-                    "best_supplier": best["supplier"], "ptr": best["ptr"], "landing_cost": best["lcost"],
-                    "mrp": p.mrp or 0, "margin_pct": round((1 - best["ptr"] / p.mrp) * 100, 1) if p.mrp and p.mrp > 0 else 0,
-                })
-
-    # Apply search filter
+    # ── Supplier Overview (aggregated) ──
+    sup_agg = (
+        select(
+            all_sup.c.supplier,
+            func.count(func.distinct(all_sup.c.product_id)).label("product_count"),
+            func.avg(all_sup.c.ptr).label("avg_ptr"),
+            func.avg(all_sup.c.landing_cost).label("avg_lcost"),
+        )
+        .group_by(all_sup.c.supplier)
+    )
     if search:
-        sl = search.lower()
-        suppliers = [s for s in suppliers if sl in s["supplier"].lower()]
-        best_per_product = [b for b in best_per_product if sl in b["product_name"].lower() or sl in b["best_supplier"].lower() or sl in (b.get("product_id") or "").lower()]
+        sup_agg = sup_agg.where(all_sup.c.supplier.ilike(f"%{search}%"))
 
-    # Paginate
-    total_suppliers = len(suppliers)
-    total_best = len(best_per_product)
-    start = (page - 1) * limit
+    total_suppliers = (await db.execute(select(func.count()).select_from(sup_agg.subquery()))).scalar() or 0
+    sup_rows = (await db.execute(
+        sup_agg.order_by(func.count(func.distinct(all_sup.c.product_id)).desc())
+        .offset((page - 1) * limit).limit(limit)
+    )).all()
+
+    suppliers = [{
+        "supplier": r[0], "product_count": int(r[1]),
+        "avg_ptr": round(float(r[2] or 0), 2), "avg_landing_cost": round(float(r[3] or 0), 2),
+    } for r in sup_rows]
+
+    # ── Best Supplier per Product (lowest PTR from primary/least_price) ──
+    best_q = select(
+        Product.product_id, Product.product_name,
+        func.coalesce(Product.least_price_supplier, Product.primary_supplier).label("best_supplier"),
+        Product.ptr, Product.landing_cost, Product.mrp,
+    ).where(func.coalesce(Product.least_price_supplier, Product.primary_supplier).isnot(None))
+
+    if search:
+        sl = f"%{search}%"
+        best_q = best_q.where(
+            Product.product_name.ilike(sl) | Product.primary_supplier.ilike(sl) |
+            Product.least_price_supplier.ilike(sl) | Product.product_id.ilike(sl)
+        )
+
+    total_best = (await db.execute(select(func.count()).select_from(best_q.subquery()))).scalar() or 0
+    best_rows = (await db.execute(
+        best_q.order_by(Product.product_name).offset((page - 1) * limit).limit(limit)
+    )).all()
+
+    best_per_product = [{
+        "product_id": r[0], "product_name": r[1], "best_supplier": r[2],
+        "ptr": round(float(r[3] or 0), 2), "landing_cost": round(float(r[4] or 0), 2),
+        "mrp": round(float(r[5] or 0), 2),
+        "margin_pct": round((1 - float(r[3] or 0) / float(r[5])) * 100, 1) if r[5] and float(r[5]) > 0 else 0,
+    } for r in best_rows]
 
     return {
-        "suppliers": suppliers[start:start + limit],
-        "total_suppliers": total_suppliers,
-        "best_per_product": best_per_product[start:start + limit],
-        "total_best_per_product": total_best,
+        "suppliers": suppliers, "total_suppliers": total_suppliers,
+        "best_per_product": best_per_product, "total_best_per_product": total_best,
         "page": page, "limit": limit,
     }
 
