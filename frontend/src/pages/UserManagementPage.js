@@ -158,9 +158,9 @@ export default function UserManagementPage() {
                   </Select>
                 </div>
               </div>
-              {(form.role === 'STORE_STAFF' || form.role === 'STORE_MANAGER' || form.role === 'CRM_STAFF') && (
+              {(form.role === 'STORE_STAFF' || form.role === 'STORE_MANAGER') && (
                 <div className="space-y-1.5">
-                  <Label className="font-body text-xs">Assigned Store</Label>
+                  <Label className="font-body text-xs">Assigned Store *</Label>
                   <Select value={form.store_id} onValueChange={v => setForm({...form, store_id: v})}>
                     <SelectTrigger className="rounded-sm" data-testid="user-store-select"><SelectValue placeholder="Select store" /></SelectTrigger>
                     <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
@@ -168,8 +168,8 @@ export default function UserManagementPage() {
                 </div>
               )}
 
-              {/* Service Access Selection - only for Admin, HO Staff, CRM Staff */}
-              {form.role && form.role !== 'STORE_STAFF' && (
+              {/* Service Access Selection - only for Admin, HO Staff, CRM Staff, Director */}
+              {form.role && !['STORE_STAFF', 'STORE_MANAGER'].includes(form.role) && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="font-body text-xs font-medium">Allowed Services / Modules</Label>
@@ -195,8 +195,8 @@ export default function UserManagementPage() {
               </div>
               )}
 
-              {form.role === 'STORE_STAFF' && (
-                <p className="text-[11px] font-body text-slate-500 bg-slate-50 p-3 rounded-sm">Store Staff gets access to all store-related modules for their assigned store automatically.</p>
+              {['STORE_STAFF', 'STORE_MANAGER'].includes(form.role) && (
+                <p className="text-[11px] font-body text-slate-500 bg-slate-50 p-3 rounded-sm">{form.role === 'STORE_MANAGER' ? 'Store Manager' : 'Store Staff'} gets access to all store-related modules for their assigned store automatically.</p>
               )}
 
               <DialogFooter>
