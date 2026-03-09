@@ -520,3 +520,96 @@ async def product_sales_90d(
         }
 
     return {"sales": sales}
+
+
+
+# ─── Product Profile Detail ───────────────────────────────────
+
+@router.get("/products/{product_id}/profile")
+async def product_profile(
+    product_id: str,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    from models import HOStockBatch, StoreStockBatch, Store, InterStoreTransfer, SalesRecord, PurchaseRecord
+    now = datetime.now(timezone.utc)
+    d90 = now - timedelta(days=90)
+
+    product = (await db.execute(select(Product).where(Product.product_id == product_id))).scalar_one_or_none()
+    if not product:
+        return {"error": "Product not found"}
+
+    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+
+    # Supplier info
+    suppliers = []
+    if product.primary_supplier: suppliers.append({"type": "Primary", "name": product.primary_supplier})
+    if product.secondary_supplier: suppliers.append({"type": "Secondary", "name": product.secondary_supplier})
+    if product.least_price_supplier: suppliers.append({"type": "Least Price", "name": product.least_price_supplier})
+    if product.most_qty_supplier: suppliers.append({"type": "Most Qty", "name": product.most_qty_supplier})
+
+    # HO Stock
+    ho_stock = float((await db.execute(select(func.sum(HOStockBatch.closing_stock)).where(HOStockBatch.product_id == product_id))).scalar() or 0)
+
+    # Store stock breakdown
+    store_stocks = []
+    ss_q = (await db.execute(
+        select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock"))
+        .where(StoreStockBatch.ho_product_id == product_id)
+        .group_by(StoreStockBatch.store_id)
+    )).all()
+    for r in ss_q:
+        store_stocks.append({"store": stores_map.get(r[0], ""), "stock": round(float(r[1] or 0), 1)})
+
+    # Sales (90d) by store
+    sales_by_store = []
+    sr_q = (await db.execute(
+        select(SalesRecord.store_id, func.sum(SalesRecord.quantity).label("qty"), func.sum(SalesRecord.total_amount).label("amt"), func.count(SalesRecord.id).label("cnt"))
+        .where(SalesRecord.product_name == product.product_name, SalesRecord.invoice_date >= d90)
+        .group_by(SalesRecord.store_id)
+    )).all()
+    total_sales_qty = 0; total_sales_amt = 0
+    for r in sr_q:
+        qty = round(float(r[1] or 0), 1); amt = round(float(r[2] or 0), 2)
+        sales_by_store.append({"store": stores_map.get(r[0], ""), "qty": qty, "amount": amt, "invoices": int(r[3] or 0)})
+        total_sales_qty += qty; total_sales_amt += amt
+
+    # Purchases (90d) by store
+    purchases_by_store = []
+    pr_q = (await db.execute(
+        select(PurchaseRecord.store_id, func.sum(PurchaseRecord.quantity).label("qty"), func.sum(PurchaseRecord.total_amount).label("amt"))
+        .where(PurchaseRecord.product_id == product_id, PurchaseRecord.purchase_date >= d90)
+        .group_by(PurchaseRecord.store_id)
+    )).all()
+    total_purchase_qty = 0; total_purchase_amt = 0
+    for r in pr_q:
+        qty = round(float(r[1] or 0), 1); amt = round(float(r[2] or 0), 2)
+        purchases_by_store.append({"store": stores_map.get(r[0], ""), "qty": qty, "amount": amt})
+        total_purchase_qty += qty; total_purchase_amt += amt
+
+    # Recent transfers
+    transfers = (await db.execute(
+        select(InterStoreTransfer).where(InterStoreTransfer.product_id == product_id)
+        .order_by(InterStoreTransfer.created_at.desc()).limit(10)
+    )).scalars().all()
+    transfer_list = [{
+        "from": stores_map.get(t.source_store_id, ""), "to": stores_map.get(t.requesting_store_id, ""),
+        "qty": t.quantity, "status": t.status.value if hasattr(t.status, 'value') else t.status,
+        "date": t.created_at.isoformat() if t.created_at else None,
+    } for t in transfers]
+
+    # Margin calculation
+    margin_pct = round((1 - (product.ptr or 0) / product.mrp) * 100, 1) if product.mrp and product.mrp > 0 else 0
+
+    return {
+        "product": {
+            "product_id": product.product_id, "product_name": product.product_name,
+            "category": product.category, "sub_category": product.sub_category, "rep": product.rep,
+            "mrp": product.mrp or 0, "ptr": product.ptr or 0, "landing_cost": product.landing_cost or 0,
+            "margin_pct": margin_pct,
+        },
+        "suppliers": suppliers,
+        "stock": {"ho": ho_stock, "stores": store_stocks, "total": ho_stock + sum(s["stock"] for s in store_stocks)},
+        "sales_90d": {"total_qty": total_sales_qty, "total_amount": round(total_sales_amt, 2), "by_store": sales_by_store},
+        "purchases_90d": {"total_qty": total_purchase_qty, "total_amount": round(total_purchase_amt, 2), "by_store": purchases_by_store},
+        "transfers": transfer_list,
+    }

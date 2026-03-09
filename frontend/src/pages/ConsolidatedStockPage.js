@@ -5,7 +5,8 @@ import { Card, CardContent } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
-import { Search, BarChart3, Download } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Search, BarChart3, Download, Package, Truck, TrendingUp, ArrowLeftRight, Loader2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { downloadExcel } from '../lib/api';
 import { toast } from 'sonner';
@@ -16,6 +17,15 @@ export default function ConsolidatedStockPage() {
   const salesMap = useSales90d(data.consolidated.map(p => p.product_name));
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  const openProfile = (productId) => {
+    if (!productId || productId === 'LOCAL') return;
+    setProfileOpen(true); setProfile(null); setProfileLoading(true);
+    api.get(`/products/${productId}/profile`).then(r => setProfile(r.data)).catch(() => toast.error('Failed')).finally(() => setProfileLoading(false));
+  };
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -87,7 +97,7 @@ export default function ConsolidatedStockPage() {
               ) : data.consolidated.map((p, idx) => (
                 <TableRow key={`${p.product_id}-${idx}`} className={`hover:bg-slate-50/50 ${p.is_local ? 'bg-amber-50/30' : ''}`}>
                   <TableCell className="font-mono text-[11px] text-slate-500">{p.is_local ? <Badge className="text-[8px] rounded-sm bg-amber-100 text-amber-700">LOCAL</Badge> : p.product_id}</TableCell>
-                  <TableCell className="font-body text-[13px] font-medium text-slate-800">{p.product_name}</TableCell>
+                  <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600 hover:underline" onClick={() => openProfile(p.product_id)}>{p.product_name}</TableCell>
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{p.ho_stock > 0 ? p.ho_stock.toLocaleString() : <span className="text-slate-300">0</span>}</TableCell>
                   {data.stores.map(s => {
                     const qty = p.store_stock[String(s.id)] || 0;
@@ -101,6 +111,95 @@ export default function ConsolidatedStockPage() {
           </Table>
         </div>
       </Card>
+
+      {/* Product Profile Popup */}
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="rounded-sm max-w-2xl max-h-[85vh] overflow-auto p-0">
+          {profileLoading ? (
+            <div className="p-12 text-center"><Loader2 className="w-6 h-6 text-sky-500 animate-spin mx-auto" /><p className="text-sm text-slate-400 mt-2">Loading product details...</p></div>
+          ) : profile?.product ? (
+            <>
+              <DialogHeader className="px-5 pt-5 pb-0"><DialogTitle className="font-heading">{profile.product.product_name}</DialogTitle></DialogHeader>
+              <div className="px-5 pb-5 space-y-4">
+                {/* Pricing & IDs */}
+                <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                  {[
+                    { l: 'MRP', v: `${profile.product.mrp.toFixed(2)}` },
+                    { l: 'PTR', v: `${profile.product.ptr.toFixed(2)}` },
+                    { l: 'L.Cost', v: `${profile.product.landing_cost.toFixed(2)}` },
+                    { l: 'Margin', v: `${profile.product.margin_pct}%`, c: profile.product.margin_pct > 20 ? 'text-emerald-700' : 'text-amber-700' },
+                    { l: 'Category', v: profile.product.category || '-' },
+                    { l: 'HO ID', v: profile.product.product_id },
+                  ].map(k => (
+                    <div key={k.l} className="p-2 bg-slate-50 rounded-sm"><p className="text-[8px] text-slate-400 uppercase">{k.l}</p><p className={`text-[13px] font-bold tabular-nums ${k.c || 'text-slate-800'}`}>{k.v}</p></div>
+                  ))}
+                </div>
+
+                {/* Suppliers */}
+                {profile.suppliers?.length > 0 && (
+                  <div className="p-3 bg-sky-50/50 border border-sky-200 rounded-sm">
+                    <p className="text-[10px] font-body text-sky-700 uppercase tracking-wider mb-1.5 flex items-center gap-1"><Truck className="w-3 h-3" /> Suppliers</p>
+                    <div className="grid grid-cols-2 gap-1">
+                      {profile.suppliers.map((s, i) => (
+                        <div key={i} className="text-[11px] font-body"><span className="text-slate-400">{s.type}:</span> <span className="font-medium text-slate-700">{s.name}</span></div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Stock */}
+                <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-sm">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-body text-emerald-700 uppercase tracking-wider flex items-center gap-1"><Package className="w-3 h-3" /> Stock</p>
+                    <span className="text-[13px] font-bold text-emerald-800 tabular-nums">Total: {profile.stock.total.toFixed(1)}</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
+                    <div className="text-[11px] font-body p-1.5 bg-white rounded-sm border border-emerald-100"><span className="text-slate-400">HO:</span> <span className="font-bold tabular-nums">{profile.stock.ho}</span></div>
+                    {profile.stock.stores.map((s, i) => (
+                      <div key={i} className="text-[11px] font-body p-1.5 bg-white rounded-sm border border-emerald-100"><span className="text-slate-400">{s.store}:</span> <span className="font-bold tabular-nums">{s.stock}</span></div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sales & Purchases 90d side by side */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 border border-slate-200 rounded-sm">
+                    <p className="text-[10px] font-body text-sky-700 uppercase tracking-wider mb-1.5 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Sales (90d)</p>
+                    <div className="flex justify-between text-[12px] font-body mb-1"><span className="text-slate-500">Qty:</span><span className="font-bold tabular-nums">{profile.sales_90d.total_qty}</span></div>
+                    <div className="flex justify-between text-[12px] font-body mb-2"><span className="text-slate-500">Amount:</span><span className="font-bold tabular-nums text-emerald-700">INR {profile.sales_90d.total_amount.toLocaleString('en-IN')}</span></div>
+                    {profile.sales_90d.by_store?.map((s, i) => (
+                      <div key={i} className="flex justify-between text-[10px] font-body text-slate-500 py-0.5 border-t border-slate-50"><span>{s.store}</span><span className="tabular-nums">{s.qty} qty | INR {s.amount}</span></div>
+                    ))}
+                  </div>
+                  <div className="p-3 border border-slate-200 rounded-sm">
+                    <p className="text-[10px] font-body text-violet-700 uppercase tracking-wider mb-1.5 flex items-center gap-1"><Package className="w-3 h-3" /> Purchases (90d)</p>
+                    <div className="flex justify-between text-[12px] font-body mb-1"><span className="text-slate-500">Qty:</span><span className="font-bold tabular-nums">{profile.purchases_90d.total_qty}</span></div>
+                    <div className="flex justify-between text-[12px] font-body mb-2"><span className="text-slate-500">Amount:</span><span className="font-bold tabular-nums text-violet-700">INR {profile.purchases_90d.total_amount.toLocaleString('en-IN')}</span></div>
+                    {profile.purchases_90d.by_store?.map((s, i) => (
+                      <div key={i} className="flex justify-between text-[10px] font-body text-slate-500 py-0.5 border-t border-slate-50"><span>{s.store}</span><span className="tabular-nums">{s.qty} qty | INR {s.amount}</span></div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Transfers */}
+                {profile.transfers?.length > 0 && (
+                  <div className="p-3 border border-slate-200 rounded-sm">
+                    <p className="text-[10px] font-body text-amber-700 uppercase tracking-wider mb-1.5 flex items-center gap-1"><ArrowLeftRight className="w-3 h-3" /> Recent Transfers</p>
+                    {profile.transfers.map((t, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[11px] font-body py-1 border-t border-slate-50 first:border-0">
+                        <span className="text-slate-600">{t.from}</span><span className="text-slate-300">&rarr;</span><span className="text-slate-600">{t.to}</span>
+                        <span className="tabular-nums font-medium ml-auto">{t.qty}</span>
+                        <Badge className={`text-[8px] rounded-sm ${t.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : t.status === 'rejected' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{t.status}</Badge>
+                        <span className="text-[9px] text-slate-300">{t.date ? new Date(t.date).toLocaleDateString() : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : <div className="p-12 text-center text-sm text-slate-400">Product not found</div>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

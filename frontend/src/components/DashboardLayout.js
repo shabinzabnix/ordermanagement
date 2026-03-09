@@ -36,7 +36,7 @@ const navItems = [
   { label: 'Store CRM', path: '/crm/store-crm', icon: Heart, roles: ['STORE_STAFF', 'STORE_MANAGER', 'ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'store_crm' },
   { label: 'Call Tasks', path: '/crm/call-tasks', icon: Phone, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'call_tasks' },
   { label: 'CRM', path: '/crm', icon: Heart, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'crm' },
-  { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'CRM_STAFF', 'STORE_MANAGER'], svc: 'sales_upload' },
+  { label: 'Sales Upload', path: '/crm/sales-upload', icon: FileUp, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'CRM_STAFF', 'STORE_MANAGER', 'STORE_STAFF'], svc: 'sales_upload' },
   { label: 'Refill Due', path: '/crm/refill-due', icon: CalendarClock, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'refill_due' },
   { label: 'Repeat Purchases', path: '/crm/repeat-purchases', icon: Trophy, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'repeat_purchases' },
   { label: 'RC Customers', path: '/crm/rc-customers', icon: UserCheck, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER', 'CRM_STAFF'], svc: 'rc_customers' },

@@ -899,6 +899,17 @@ async def upload_sales_report(
     except Exception as e:
         await db.rollback()
         raise HTTPException(500, f"Failed to save sales records: {str(e)[:200]}")
+
+    # Save upload history
+    try:
+        from models import UploadHistory, UploadType
+        db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.STORE_STOCK, store_id=store_id,
+            uploaded_by=valid_user_id, total_records=len(df), success_records=success, failed_records=failed,
+            error_details=f"Sales upload. New customers: {new_customers}, Dupes skipped: {skipped_duplicate}"))
+        await db.commit()
+    except Exception:
+        pass
+
     return {
         "message": "Sales report uploaded",
         "total": len(df), "new_records": success, "skipped_duplicate": skipped_duplicate, "failed": failed,
