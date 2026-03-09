@@ -477,3 +477,22 @@ class Notification(Base):
     entity_id = Column(Integer, nullable=True)
     is_read = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class SupplierProfile(Base):
+    __tablename__ = "supplier_profiles"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    supplier_name = Column(String(500), unique=True, nullable=False, index=True)
+    contact_person = Column(String(255), nullable=True)
+    contact_phone = Column(String(50), nullable=True)
+    contact_email = Column(String(255), nullable=True)
+    address = Column(Text, nullable=True)
+    gst_number = Column(String(50), nullable=True)
+    credit_days = Column(Integer, default=0)
+    sub_categories = Column(Text, nullable=True)
+    return_policy = Column(Text, nullable=True)
+    payment_terms = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

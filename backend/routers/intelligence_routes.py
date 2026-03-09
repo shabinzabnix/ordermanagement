@@ -6,7 +6,7 @@ from models import (
     Product, Store, HOStockBatch, StoreStockBatch,
     InterStoreTransfer, PurchaseRequest, SalesRecord, PurchaseRecord,
     CRMCustomer, MedicinePurchase, CRMTask, CRMCallLog,
-    TransferStatus, PurchaseStatus, CustomerType,
+    TransferStatus, PurchaseStatus, CustomerType, SupplierProfile,
 )
 from auth import get_current_user, require_roles
 from datetime import datetime, timezone, timedelta
@@ -1418,3 +1418,111 @@ async def export_purchase_records(
                {"label": "Supplier", "key": "supplier"}, {"label": "Product ID", "key": "product_id"},
                {"label": "Product", "key": "product"}, {"label": "Qty", "key": "qty"}, {"label": "Amount", "key": "amount"}]
     return _excel(rows, headers, "purchase_records.xlsx")
+
+
+# ─── Supplier Profiles ────────────────────────────────────────
+
+from pydantic import BaseModel as PydanticBase
+from typing import Optional as Opt
+
+
+class SupplierProfileReq(PydanticBase):
+    supplier_name: str
+    contact_person: Opt[str] = None
+    contact_phone: Opt[str] = None
+    contact_email: Opt[str] = None
+    address: Opt[str] = None
+    gst_number: Opt[str] = None
+    credit_days: Opt[int] = 0
+    sub_categories: Opt[str] = None
+    return_policy: Opt[str] = None
+    payment_terms: Opt[str] = None
+    notes: Opt[str] = None
+
+
+@router.get("/intel/supplier-profiles")
+async def list_supplier_profiles(
+    search: str = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    query = select(SupplierProfile).where(SupplierProfile.is_active == True)
+    if search:
+        query = query.where(SupplierProfile.supplier_name.ilike(f"%{search}%") | SupplierProfile.contact_person.ilike(f"%{search}%"))
+    profiles = (await db.execute(query.order_by(SupplierProfile.supplier_name))).scalars().all()
+    return {"profiles": [{
+        "id": p.id, "supplier_name": p.supplier_name, "contact_person": p.contact_person,
+        "contact_phone": p.contact_phone, "contact_email": p.contact_email,
+        "address": p.address, "gst_number": p.gst_number, "credit_days": p.credit_days,
+        "sub_categories": p.sub_categories.split(",") if p.sub_categories else [],
+        "return_policy": p.return_policy, "payment_terms": p.payment_terms, "notes": p.notes,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    } for p in profiles]}
+
+
+@router.get("/intel/supplier-profiles/{supplier_name}")
+async def get_supplier_profile(
+    supplier_name: str,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    p = (await db.execute(select(SupplierProfile).where(SupplierProfile.supplier_name == supplier_name))).scalar_one_or_none()
+
+    # Products from this supplier
+    products = (await db.execute(
+        select(Product).where(
+            (Product.primary_supplier == supplier_name) | (Product.secondary_supplier == supplier_name) |
+            (Product.least_price_supplier == supplier_name) | (Product.most_qty_supplier == supplier_name)
+        ).limit(50)
+    )).scalars().all()
+
+    # Sub-categories from products
+    sub_cats = set()
+    for prod in products:
+        if prod.sub_category: sub_cats.add(prod.sub_category)
+        if prod.category: sub_cats.add(prod.category)
+
+    # 90d purchase stats
+    d90 = datetime.now(timezone.utc) - timedelta(days=90)
+    purchase_stats = (await db.execute(
+        select(func.sum(PurchaseRecord.total_amount), func.sum(PurchaseRecord.quantity), func.count(PurchaseRecord.id))
+        .where(PurchaseRecord.supplier_name == supplier_name, PurchaseRecord.purchase_date >= d90)
+    )).one()
+
+    profile_data = None
+    if p:
+        profile_data = {
+            "id": p.id, "supplier_name": p.supplier_name, "contact_person": p.contact_person,
+            "contact_phone": p.contact_phone, "contact_email": p.contact_email,
+            "address": p.address, "gst_number": p.gst_number, "credit_days": p.credit_days,
+            "sub_categories": p.sub_categories.split(",") if p.sub_categories else [],
+            "return_policy": p.return_policy, "payment_terms": p.payment_terms, "notes": p.notes,
+        }
+
+    return {
+        "profile": profile_data,
+        "supplier_name": supplier_name,
+        "product_count": len(products),
+        "sub_categories": sorted(sub_cats),
+        "products": [{"product_id": pr.product_id, "product_name": pr.product_name, "category": pr.category,
+                       "sub_category": pr.sub_category, "mrp": pr.mrp or 0, "ptr": pr.ptr or 0, "landing_cost": pr.landing_cost or 0} for pr in products],
+        "purchase_90d": {"amount": round(float(purchase_stats[0] or 0), 2), "qty": round(float(purchase_stats[1] or 0), 0), "invoices": int(purchase_stats[2] or 0)},
+    }
+
+
+@router.post("/intel/supplier-profiles")
+async def create_or_update_supplier_profile(
+    data: SupplierProfileReq,
+    db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN", "HO_STAFF")),
+):
+    existing = (await db.execute(select(SupplierProfile).where(SupplierProfile.supplier_name == data.supplier_name))).scalar_one_or_none()
+    if existing:
+        for k, v in data.dict(exclude_unset=True).items():
+            if k != 'supplier_name': setattr(existing, k, v)
+        existing.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"message": "Supplier profile updated", "id": existing.id}
+    else:
+        profile = SupplierProfile(**data.dict())
+        db.add(profile)
+        await db.commit()
+        await db.refresh(profile)
+        return {"message": "Supplier profile created", "id": profile.id}
