@@ -1719,7 +1719,7 @@ async def refill_due_enhanced(
         if medicine_names:
             # Match by product name in store stock
             for mn in medicine_names:
-                stock_q = select(func.sum(StoreStockBatch.closing_stock)).where(
+                stock_q = select(func.sum(StoreStockBatch.closing_stock_strips)).where(
                     StoreStockBatch.store_id == target_store,
                     StoreStockBatch.product_name.ilike(f"%{mn}%"),
                 )

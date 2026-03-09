@@ -102,7 +102,7 @@ async def product_stock_info(
         lcost = p.landing_cost or p.ptr or 0
 
         # Stock per store
-        ss_q = select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock")).where(
+        ss_q = select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock")).where(
             StoreStockBatch.ho_product_id == p.product_id).group_by(StoreStockBatch.store_id)
         if user_store:
             ss_q = ss_q.where(StoreStockBatch.store_id == user_store)
@@ -174,9 +174,9 @@ async def create_store_request(
         est_value = round(lcost * item.quantity, 2)
         total_value += est_value
 
-        # Current store stock
+        # Current store stock (in strips)
         store_stock = float((await db.execute(
-            select(func.sum(StoreStockBatch.closing_stock)).where(and_(
+            select(func.sum(StoreStockBatch.closing_stock_strips)).where(and_(
                 StoreStockBatch.store_id == data.store_id,
                 StoreStockBatch.ho_product_id == item.product_id,
             ))
@@ -290,7 +290,7 @@ async def request_stock_info(
     for it in items:
         # Stock across all stores
         stock_q = (await db.execute(
-            select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock"))
+            select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock"))
             .where(StoreStockBatch.ho_product_id == it.product_id)
             .group_by(StoreStockBatch.store_id)
         )).all() if it.product_id else []
@@ -486,7 +486,7 @@ async def purchase_review(
         store_stock = []
         if it.product_id:
             ss_q = (await db.execute(
-                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock"))
+                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock"))
                 .where(StoreStockBatch.ho_product_id == it.product_id)
                 .group_by(StoreStockBatch.store_id)
             )).all()
@@ -711,7 +711,7 @@ async def get_po_detail(po_id: int, db: AsyncSession = Depends(get_db), user: di
         store_stock = []
         if it.product_id:
             ss_q = (await db.execute(
-                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock).label("stock"))
+                select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock"))
                 .where(StoreStockBatch.ho_product_id == it.product_id)
                 .group_by(StoreStockBatch.store_id)
             )).all()
