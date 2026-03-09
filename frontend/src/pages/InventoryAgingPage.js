@@ -115,15 +115,15 @@ export default function InventoryAgingPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Location', 'Product', 'ID', 'Batch', 'Stock', 'MRP', 'Stock Date', 'Age (Days)', '90d Sales', 'Value', 'Status'].map(h => (
+                {['Location', 'Product', 'ID', 'Batch', 'Stock', 'MRP', 'Stock Date', 'Age (Days)', 'Expiry', '90d Sales', 'Value', 'Status'].map(h => (
                   <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Stock', 'MRP', 'Age (Days)', '90d Sales', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? [...Array(8)].map((_, i) => <TableRow key={i}>{[...Array(11)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-50 rounded animate-pulse" /></TableCell>)}</TableRow>) :
+              {loading ? [...Array(8)].map((_, i) => <TableRow key={i}>{[...Array(12)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-50 rounded animate-pulse" /></TableCell>)}</TableRow>) :
                !data?.items?.length ? (
-                <TableRow><TableCell colSpan={11} className="text-center py-16"><Clock className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No aging data</p></TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="text-center py-16"><Clock className="w-10 h-10 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No aging data</p></TableCell></TableRow>
               ) : data.items.map((i, idx) => (
                 <TableRow key={idx} className={`hover:bg-slate-50/50 ${i.status === 'dead' ? 'bg-red-50/20' : i.status === 'slow' ? 'bg-orange-50/20' : ''}`}>
                   <TableCell className="text-[11px] text-slate-500">{i.location}</TableCell>
@@ -134,6 +134,7 @@ export default function InventoryAgingPage() {
                   <TableCell className="text-right text-[11px] tabular-nums">{(i.mrp || 0).toFixed(2)}</TableCell>
                   <TableCell className="text-[11px] text-slate-500">{i.stock_date ? new Date(i.stock_date).toLocaleDateString() : '-'}</TableCell>
                   <TableCell className="text-right"><span className={`text-[12px] tabular-nums font-medium ${i.days > 90 ? 'text-red-600' : i.days > 60 ? 'text-orange-600' : i.days > 30 ? 'text-amber-600' : 'text-slate-500'}`}>{i.days}d</span></TableCell>
+                  <TableCell className="text-[11px] text-slate-500">{i.expiry_date ? new Date(i.expiry_date).toLocaleDateString() : <span className="text-slate-300">-</span>}</TableCell>
                   <TableCell className="text-right text-[12px] tabular-nums">{i.sales_90d > 0 ? <span className="text-sky-700 font-medium">{i.sales_90d}</span> : <span className="text-slate-300">0</span>}</TableCell>
                   <TableCell className="text-right text-[11px] tabular-nums">INR {(i.value || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})}</TableCell>
                   <TableCell><Badge className={`text-[9px] rounded-sm ${statusBadge(i.status)}`}>{i.status}</Badge></TableCell>

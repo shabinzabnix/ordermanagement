@@ -131,6 +131,7 @@ async def aging_report(
                 "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
                 "days": days, "value": s.landing_cost_value or 0, "sales": 0,
                 "stock_date": ref_date.isoformat() if ref_date else None,
+                "expiry_date": s.expiry_date.isoformat() if s.expiry_date else None,
                 "bucket": b, "status": st,
             })
 
@@ -155,6 +156,7 @@ async def aging_report(
                 "batch": s.batch, "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
                 "days": days, "value": s.cost_value or 0, "sales": s.sales or 0,
                 "stock_date": ref_date.isoformat() if ref_date else None,
+                "expiry_date": s.expiry_date.isoformat() if s.expiry_date else None,
                 "bucket": b, "status": st,
             })
 
