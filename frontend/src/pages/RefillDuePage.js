@@ -16,15 +16,15 @@ import { CalendarClock, Search, Phone, CheckCircle, AlertTriangle, MessageCircle
 
 const buildWhatsAppMsg = (d) => {
   const dueDateStr = d.next_due_date ? new Date(d.next_due_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'soon';
-  const greeting = `Dear ${d.customer_name},`;
-  const body = `\n\nThis is a gentle reminder from *Sahakar Hyper Pharmacy* regarding your medication refill.\n\n` +
-    `*Medicine:* ${d.medicine_name}\n` +
-    `*Refill Due:* ${dueDateStr}\n` +
-    (d.days_until < 0 ? `*Status:* Overdue by ${Math.abs(d.days_until)} day(s)\n` : d.days_until === 0 ? `*Status:* Due Today\n` : `*Status:* Due in ${d.days_until} day(s)\n`) +
-    `\nPlease visit your nearest store or avail our *Home Delivery* service for a hassle-free experience. Just reply to this message or call us to place your order from the comfort of your home.\n\n` +
+  const status = d.days_until < 0 ? `Overdue by ${Math.abs(d.days_until)} day(s)` : d.days_until === 0 ? 'Due Today' : `Due in ${d.days_until} day(s)`;
+  return `Dear ${d.customer_name},\n\n` +
+    `This is a gentle reminder from Sahakar Hyper Pharmacy regarding your medication refill.\n\n` +
+    `Medicine: ${d.medicine_name}\n` +
+    `Refill Due: ${dueDateStr}\n` +
+    `Status: ${status}\n\n` +
+    `Please visit your nearest store or avail our Home Delivery service for a hassle-free experience. Just reply to this message or call us to place your order from the comfort of your home.\n\n` +
     `Your health is our priority.\n\n` +
-    `Warm regards,\n*Sahakar Hyper Pharmacy*\n${d.store_name}`;
-  return greeting + body;
+    `Warm regards,\nSahakar Hyper Pharmacy\n${d.store_name}`;
 };
 
 const openWhatsApp = (d) => {
