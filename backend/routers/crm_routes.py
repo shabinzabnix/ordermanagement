@@ -2437,3 +2437,81 @@ async def daily_invoices(
         "date": day_start.strftime("%Y-%m-%d"),
         "summary": {"total_amount": day_total, "total_invoices": total, "total_customers": day_customers},
     }
+
+
+# ─── RC Conversion Candidates ─────────────────────────────────
+
+@router.get("/crm/rc-candidates")
+async def rc_candidates(
+    store_id: int = Query(None),
+    min_purchases: int = Query(2, ge=2),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    """Walk-in customers who bought the same medicine 2+ times in 90 days — candidates for RC conversion."""
+    sf = _store_filter(user)
+    target_store = sf or (int(store_id) if store_id else None)
+    now = datetime.now(timezone.utc)
+    d90 = now - timedelta(days=90)
+
+    # Find walkin customers with repeat medicine purchases in 90 days
+    agg_q = (
+        select(
+            SalesRecord.customer_id,
+            SalesRecord.product_name,
+            func.count(SalesRecord.id).label("purchase_count"),
+            func.sum(SalesRecord.total_amount).label("total_spent"),
+            func.min(SalesRecord.invoice_date).label("first_date"),
+            func.max(SalesRecord.invoice_date).label("last_date"),
+        )
+        .where(SalesRecord.customer_id.isnot(None), SalesRecord.invoice_date >= d90)
+        .group_by(SalesRecord.customer_id, SalesRecord.product_name)
+        .having(func.count(SalesRecord.id) >= min_purchases)
+    )
+    if target_store:
+        agg_q = agg_q.where(SalesRecord.store_id == target_store)
+
+    rows = (await db.execute(agg_q.order_by(func.count(SalesRecord.id).desc()))).all()
+
+    # Filter to only walkin customers
+    cids = set(r[0] for r in rows if r[0])
+    cmap = {}
+    if cids:
+        for c in (await db.execute(
+            select(CRMCustomer).where(CRMCustomer.id.in_(cids), CRMCustomer.customer_type == CustomerType.WALKIN)
+        )).scalars().all():
+            cmap[c.id] = {"name": c.customer_name, "mobile": c.mobile_number, "store_id": c.first_store_id}
+
+    sids = set(ci["store_id"] for ci in cmap.values() if ci.get("store_id"))
+    smap = {}
+    if sids:
+        smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
+
+    # Build grouped result: customer → list of repeat medicines
+    candidates = {}
+    for r in rows:
+        cid = r[0]
+        if cid not in cmap:
+            continue
+        ci = cmap[cid]
+        if cid not in candidates:
+            candidates[cid] = {
+                "customer_id": cid, "customer_name": ci["name"], "mobile": ci["mobile"],
+                "store_name": smap.get(ci.get("store_id"), ""),
+                "repeat_medicines": [], "total_repeat_purchases": 0, "total_spent": 0,
+            }
+        span = (r[5] - r[4]).days if r[4] and r[5] else 0
+        candidates[cid]["repeat_medicines"].append({
+            "medicine": r[1], "count": int(r[2]),
+            "spent": round(float(r[3] or 0), 2),
+            "first": r[4].isoformat() if r[4] else None,
+            "last": r[5].isoformat() if r[5] else None,
+            "avg_interval": round(span / (int(r[2]) - 1), 1) if int(r[2]) > 1 and span > 0 else 0,
+        })
+        candidates[cid]["total_repeat_purchases"] += int(r[2])
+        candidates[cid]["total_spent"] += float(r[3] or 0)
+
+    result = sorted(candidates.values(), key=lambda x: -x["total_repeat_purchases"])
+    for r in result:
+        r["total_spent"] = round(r["total_spent"], 2)
+
+    return {"candidates": result[:100], "total": len(result)}

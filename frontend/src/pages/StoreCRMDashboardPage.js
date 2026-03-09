@@ -22,6 +22,7 @@ export default function StoreCRMDashboardPage() {
   const [dateTo, setDateTo] = useState('');
   const [perfDays, setPerfDays] = useState('30');
   const [loading, setLoading] = useState(true);
+  const [rcCandidates, setRcCandidates] = useState([]);
 
   const load = () => {
     setLoading(true);
@@ -36,8 +37,11 @@ export default function StoreCRMDashboardPage() {
   const loadCalls = () => {
     api.get('/crm/calls', { params: { limit: 50 } }).then(r => setCalls(r.data.calls || [])).catch(() => {});
   };
+  const loadRcCandidates = () => {
+    api.get('/crm/rc-candidates').then(r => setRcCandidates(r.data.candidates || [])).catch(() => {});
+  };
 
-  useEffect(() => { load(); loadPerf(); loadCalls(); }, []);
+  useEffect(() => { load(); loadPerf(); loadCalls(); loadRcCandidates(); }, []);
   useEffect(() => { load(); }, [dateFrom, dateTo]);
   useEffect(() => { loadPerf(); }, [perfDays]);
 
@@ -86,6 +90,7 @@ export default function StoreCRMDashboardPage() {
           <TabsTrigger value="rc_purchases" className="rounded-sm text-xs font-body" data-testid="tab-rc-purchases">RC Purchases ({data?.rc_purchases?.length || 0})</TabsTrigger>
           <TabsTrigger value="new_customers" className="rounded-sm text-xs font-body" data-testid="tab-new-customers">New Customers ({data?.new_customers?.length || 0})</TabsTrigger>
           <TabsTrigger value="calls" className="rounded-sm text-xs font-body" data-testid="tab-calls">Call Log ({calls.length})</TabsTrigger>
+          <TabsTrigger value="rc_candidates" className="rounded-sm text-xs font-body" data-testid="tab-rc-candidates">RC Candidates ({rcCandidates.length})</TabsTrigger>
           <TabsTrigger value="performance" className="rounded-sm text-xs font-body" data-testid="tab-performance">Staff Performance</TabsTrigger>
         </TabsList>
 
@@ -215,6 +220,55 @@ export default function StoreCRMDashboardPage() {
                       </TableRow>
                     );
                   })}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* RC Candidates */}
+        <TabsContent value="rc_candidates">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <div className="overflow-auto max-h-[calc(100vh-380px)]">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white z-10">
+                  <TableRow className="border-b-2 border-slate-100">
+                    {['Customer', 'Mobile', 'Store', 'Repeat Medicines', 'Total Purchases', 'Total Spent', 'Action'].map(h => (
+                      <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3 ${['Total Purchases', 'Total Spent'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rcCandidates.length === 0 ? (
+                    <TableRow><TableCell colSpan={7} className="text-center py-12"><UserCheck className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No walk-in customers with repeat purchases found</p></TableCell></TableRow>
+                  ) : rcCandidates.map(c => (
+                    <TableRow key={c.customer_id} className="hover:bg-slate-50/50">
+                      <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => navigate(`/crm/customer/${c.customer_id}`)}>{c.customer_name}</TableCell>
+                      <TableCell className="font-mono text-[11px] text-slate-500">{c.mobile}</TableCell>
+                      <TableCell className="text-[12px] text-slate-500">{c.store_name}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1 max-w-[280px]">
+                          {c.repeat_medicines.slice(0, 3).map((m, i) => (
+                            <div key={i} className="flex items-center gap-1.5 text-[11px] font-body">
+                              <Pill className="w-3 h-3 text-sky-500 shrink-0" />
+                              <span className="text-slate-700 truncate">{m.medicine}</span>
+                              <Badge className="text-[8px] rounded-sm bg-sky-50 text-sky-700 shrink-0">{m.count}x</Badge>
+                              {m.avg_interval > 0 && <span className="text-slate-400 text-[9px] shrink-0">~{m.avg_interval}d</span>}
+                            </div>
+                          ))}
+                          {c.repeat_medicines.length > 3 && <span className="text-[9px] text-slate-400">+{c.repeat_medicines.length - 3} more</span>}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right text-[13px] tabular-nums font-bold text-sky-700">{c.total_repeat_purchases}</TableCell>
+                      <TableCell className="text-right text-[12px] tabular-nums font-medium">INR {c.total_spent.toLocaleString('en-IN')}</TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="outline" className="h-7 px-2.5 rounded-sm text-[11px] font-body text-rose-600 border-rose-200 hover:bg-rose-50"
+                          onClick={() => { api.put(`/crm/customers/${c.customer_id}/type`, { customer_type: 'rc' }).then(() => { toast.success(`${c.customer_name} converted to RC`); loadRcCandidates(); }).catch(() => toast.error('Failed')); }}>
+                          Convert to RC
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
