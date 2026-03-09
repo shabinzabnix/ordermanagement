@@ -78,6 +78,14 @@ async def startup():
         except Exception:
             pass
         try:
+            await conn.execute(text("ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'SALES_REPORT'"))
+        except Exception:
+            pass
+        try:
+            await conn.execute(text("ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'PURCHASE_REPORT'"))
+        except Exception:
+            pass
+        try:
             await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'STORE_MANAGER'"))
         except Exception:
             pass

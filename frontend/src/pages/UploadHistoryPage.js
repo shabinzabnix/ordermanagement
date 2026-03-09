@@ -52,6 +52,8 @@ export default function UploadHistoryPage() {
               <SelectItem value="product_master">Product Master</SelectItem>
               <SelectItem value="ho_stock">HO Stock</SelectItem>
               <SelectItem value="store_stock">Store Stock</SelectItem>
+              <SelectItem value="sales_report">Sales Report</SelectItem>
+              <SelectItem value="purchase_report">Purchase Report</SelectItem>
             </SelectContent>
           </Select>
         </div>

@@ -1235,7 +1235,7 @@ async def upload_purchase_report(
     # Save upload history
     try:
         from models import UploadHistory, UploadType
-        db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.STORE_STOCK, store_id=store_id,
+        db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.PURCHASE_REPORT, store_id=store_id,
             uploaded_by=user["user_id"], total_records=len(df), success_records=success, failed_records=failed,
             error_details=f"Purchase upload. Dupes skipped: {skipped}"))
         await db.commit()

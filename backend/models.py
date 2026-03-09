@@ -30,6 +30,8 @@ class UploadType(str, enum.Enum):
     PRODUCT_MASTER = "product_master"
     HO_STOCK = "ho_stock"
     STORE_STOCK = "store_stock"
+    SALES_REPORT = "sales_report"
+    PURCHASE_REPORT = "purchase_report"
 
 
 class User(Base):

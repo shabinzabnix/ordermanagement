@@ -903,7 +903,7 @@ async def upload_sales_report(
     # Save upload history
     try:
         from models import UploadHistory, UploadType
-        db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.STORE_STOCK, store_id=store_id,
+        db.add(UploadHistory(file_name=file.filename, upload_type=UploadType.SALES_REPORT, store_id=store_id,
             uploaded_by=valid_user_id, total_records=len(df), success_records=success, failed_records=failed,
             error_details=f"Sales upload. New customers: {new_customers}, Dupes skipped: {skipped_duplicate}"))
         await db.commit()
