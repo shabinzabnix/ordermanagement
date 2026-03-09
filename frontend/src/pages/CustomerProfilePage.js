@@ -205,6 +205,14 @@ export default function CustomerProfilePage() {
     catch { toast.error('Failed'); } finally { setSaving(false); }
   };
 
+  const [followupDate, setFollowupDate] = useState('');
+  const [followupNotes, setFollowupNotes] = useState('');
+  const handleSetFollowup = async () => {
+    if (!followupDate) return;
+    try { await api.put(`/crm/customers/${id}/followup`, { followup_date: followupDate, followup_notes: followupNotes }); toast.success('Follow-up date set'); setFollowupDate(''); setFollowupNotes(''); loadProfile(); }
+    catch { toast.error('Failed'); }
+  };
+
   if (loading) return <div className="space-y-4">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-32 rounded-sm" />)}</div>;
   if (!data) return <p className="text-slate-500">Customer not found</p>;
   const c = data.customer;
@@ -334,6 +342,25 @@ export default function CustomerProfilePage() {
           )}
         </div>
       )}
+
+      {/* Follow-up */}
+      <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-sm px-4 py-2.5 flex-wrap">
+        <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+        <span className="text-[12px] font-body text-slate-600">Follow-up:</span>
+        {c.followup_date ? (
+          <>
+            <Badge className={`text-[11px] rounded-sm ${new Date(c.followup_date) < new Date() ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+              {new Date(c.followup_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </Badge>
+            {c.followup_notes && <span className="text-[11px] text-slate-500 italic">{c.followup_notes}</span>}
+          </>
+        ) : <span className="text-[11px] text-slate-400 italic">Not scheduled</span>}
+        <div className="flex items-center gap-2 ml-auto">
+          <Input type="date" value={followupDate} onChange={e => setFollowupDate(e.target.value)} className="w-[140px] h-7 rounded-sm text-xs" />
+          <Input value={followupNotes} onChange={e => setFollowupNotes(e.target.value)} placeholder="Notes..." className="w-[160px] h-7 rounded-sm text-xs" />
+          <Button size="sm" className="bg-sky-500 hover:bg-sky-600 rounded-sm text-xs h-7 px-2.5" onClick={handleSetFollowup} disabled={!followupDate}>Set</Button>
+        </div>
+      </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-3 md:grid-cols-6 gap-3">

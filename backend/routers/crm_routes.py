@@ -362,6 +362,8 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
             "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
             "assigned_staff_id": c.assigned_staff_id,
             "assigned_staff_name": assigned_staff_name,
+            "followup_date": c.followup_date.isoformat() if c.followup_date else None,
+            "followup_notes": c.followup_notes or "",
         },
         "medicine_calendar": medicine_calendar,
         "invoices": invoice_list[:50],
@@ -2530,3 +2532,71 @@ async def rc_candidates(
         r["total_spent"] = round(r["total_spent"], 2)
 
     return {"candidates": result[:100], "total": len(result)}
+
+
+# ─── Customer Follow-up ──────────────────────────────────────
+
+class FollowupReq(BaseModel):
+    followup_date: str
+    followup_notes: Optional[str] = None
+
+
+@router.put("/crm/customers/{customer_id}/followup")
+async def set_followup(customer_id: int, data: FollowupReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    c = (await db.execute(select(CRMCustomer).where(CRMCustomer.id == customer_id))).scalar_one_or_none()
+    if not c: raise HTTPException(404, "Customer not found")
+    c.followup_date = datetime.fromisoformat(data.followup_date).replace(tzinfo=timezone.utc)
+    c.followup_notes = data.followup_notes
+    await _log(db, user, f"Set followup for {c.customer_name} on {data.followup_date}", "crm_followup", customer_id)
+    await db.commit()
+    return {"message": "Follow-up date set"}
+
+
+@router.get("/crm/followups")
+async def get_followups(
+    date_from: str = Query(None), date_to: str = Query(None),
+    store_id: int = Query(None),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+    now = datetime.now(timezone.utc)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    d_from = today if not date_from else datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    d_to = today + timedelta(days=14) if not date_to else datetime.strptime(date_to, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+
+    query = select(CRMCustomer).where(CRMCustomer.followup_date.isnot(None), CRMCustomer.followup_date >= d_from, CRMCustomer.followup_date < d_to)
+    if sf:
+        query = query.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+    elif store_id:
+        query = query.where(or_(CRMCustomer.first_store_id == store_id, CRMCustomer.assigned_store_id == store_id))
+
+    customers = (await db.execute(query.order_by(CRMCustomer.followup_date))).scalars().all()
+
+    sids = set(c.first_store_id for c in customers if c.first_store_id)
+    smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()} if sids else {}
+
+    staff_ids = set(c.assigned_staff_id for c in customers if c.assigned_staff_id)
+    staff_map = {u.id: u.full_name for u in (await db.execute(select(User).where(User.id.in_(staff_ids)))).scalars().all()} if staff_ids else {}
+
+    # Group by date
+    by_date = {}
+    items = []
+    for c in customers:
+        d_key = c.followup_date.strftime("%Y-%m-%d")
+        days_until = (c.followup_date - now).days
+        item = {
+            "customer_id": c.id, "customer_name": c.customer_name, "mobile": c.mobile_number,
+            "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+            "store_name": smap.get(c.first_store_id, ""),
+            "followup_date": c.followup_date.isoformat(), "followup_notes": c.followup_notes or "",
+            "assigned_staff": staff_map.get(c.assigned_staff_id, ""),
+            "days_until": days_until, "overdue": days_until < 0,
+        }
+        items.append(item)
+        if d_key not in by_date:
+            by_date[d_key] = {"date": d_key, "label": c.followup_date.strftime("%a, %d %b %Y"), "count": 0}
+        by_date[d_key]["count"] += 1
+
+    dates = sorted(by_date.values(), key=lambda x: x["date"])
+    return {"followups": items, "dates": dates, "total": len(items)}

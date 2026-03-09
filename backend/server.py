@@ -143,6 +143,8 @@ async def startup():
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_transfer_status ON inter_store_transfers(status)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ho_stock_expiry ON ho_stock_batches(expiry_date) WHERE expiry_date IS NOT NULL"))
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS assigned_staff_id INTEGER REFERENCES users(id)"))
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS followup_date TIMESTAMP WITH TIME ZONE"))
+            await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS followup_notes TEXT"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INTEGER DEFAULT 0"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP WITH TIME ZONE"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS force_password_change BOOLEAN DEFAULT FALSE"))

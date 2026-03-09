@@ -23,6 +23,7 @@ export default function StoreCRMDashboardPage() {
   const [perfDays, setPerfDays] = useState('30');
   const [loading, setLoading] = useState(true);
   const [rcCandidates, setRcCandidates] = useState([]);
+  const [followups, setFollowups] = useState([]);
 
   const load = () => {
     setLoading(true);
@@ -40,8 +41,11 @@ export default function StoreCRMDashboardPage() {
   const loadRcCandidates = () => {
     api.get('/crm/rc-candidates').then(r => setRcCandidates(r.data.candidates || [])).catch(() => {});
   };
+  const loadFollowups = () => {
+    api.get('/crm/followups').then(r => setFollowups(r.data.followups || [])).catch(() => {});
+  };
 
-  useEffect(() => { load(); loadPerf(); loadCalls(); loadRcCandidates(); }, []);
+  useEffect(() => { load(); loadPerf(); loadCalls(); loadRcCandidates(); loadFollowups(); }, []);
   useEffect(() => { load(); }, [dateFrom, dateTo]);
   useEffect(() => { loadPerf(); }, [perfDays]);
 
@@ -87,6 +91,7 @@ export default function StoreCRMDashboardPage() {
       <Tabs defaultValue="upcoming" className="space-y-4">
         <TabsList className="rounded-sm">
           <TabsTrigger value="upcoming" className="rounded-sm text-xs font-body" data-testid="tab-upcoming">Upcoming Refills ({data?.upcoming_purchases?.length || 0})</TabsTrigger>
+          <TabsTrigger value="followups" className="rounded-sm text-xs font-body" data-testid="tab-followups">Follow-ups ({followups.length})</TabsTrigger>
           <TabsTrigger value="rc_purchases" className="rounded-sm text-xs font-body" data-testid="tab-rc-purchases">RC Purchases ({data?.rc_purchases?.length || 0})</TabsTrigger>
           <TabsTrigger value="new_customers" className="rounded-sm text-xs font-body" data-testid="tab-new-customers">New Customers ({data?.new_customers?.length || 0})</TabsTrigger>
           <TabsTrigger value="calls" className="rounded-sm text-xs font-body" data-testid="tab-calls">Call Log ({calls.length})</TabsTrigger>
@@ -122,6 +127,44 @@ export default function StoreCRMDashboardPage() {
                         </Badge>
                       </TableCell>
                       <TableCell><ArrowRight className="w-3.5 h-3.5 text-slate-300" /></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* Follow-ups */}
+        <TabsContent value="followups">
+          <Card className="border-slate-200 shadow-sm rounded-sm">
+            <div className="overflow-auto max-h-[calc(100vh-380px)]">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white z-10">
+                  <TableRow className="border-b-2 border-slate-100">
+                    {['Date', 'Customer', 'Mobile', 'Type', 'Store', 'Notes', 'Assigned', 'Status', ''].map(h => (
+                      <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 py-3">{h}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {followups.length === 0 ? (
+                    <TableRow><TableCell colSpan={9} className="text-center py-12"><CalendarClock className="w-8 h-8 text-slate-200 mx-auto mb-2" /><p className="text-sm text-slate-400 font-body">No follow-ups scheduled</p></TableCell></TableRow>
+                  ) : followups.map(f => (
+                    <TableRow key={f.customer_id} className={`hover:bg-slate-50/50 ${f.overdue ? 'bg-red-50/30' : ''}`}>
+                      <TableCell className="text-[12px] font-medium text-slate-700">{f.followup_date ? new Date(f.followup_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}</TableCell>
+                      <TableCell className="font-body text-[13px] font-medium text-slate-800 cursor-pointer hover:text-sky-600" onClick={() => navigate(`/crm/customer/${f.customer_id}`)}>{f.customer_name}</TableCell>
+                      <TableCell className="font-mono text-[11px] text-slate-500">{f.mobile}</TableCell>
+                      <TableCell><Badge className={`text-[9px] rounded-sm ${f.customer_type === 'rc' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{f.customer_type}</Badge></TableCell>
+                      <TableCell className="text-[12px] text-slate-500">{f.store_name}</TableCell>
+                      <TableCell className="text-[11px] text-slate-500 max-w-[200px] truncate">{f.followup_notes || '-'}</TableCell>
+                      <TableCell className="text-[11px] text-violet-700 font-medium">{f.assigned_staff || '-'}</TableCell>
+                      <TableCell>
+                        <Badge className={`text-[10px] rounded-sm ${f.overdue ? 'bg-red-100 text-red-700' : f.days_until === 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {f.overdue ? `${Math.abs(f.days_until)}d overdue` : f.days_until === 0 ? 'Today' : `In ${f.days_until}d`}
+                        </Badge>
+                      </TableCell>
+                      <TableCell><ArrowRight className="w-3.5 h-3.5 text-slate-300 cursor-pointer" onClick={() => navigate(`/crm/customer/${f.customer_id}`)} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

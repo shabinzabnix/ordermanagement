@@ -252,6 +252,8 @@ class CRMCustomer(Base):
     clv_tier = Column(String(20), default="unknown")
     chronic_tags = Column(Text, nullable=True)
     assigned_staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    followup_date = Column(DateTime(timezone=True), nullable=True)
+    followup_notes = Column(Text, nullable=True)
     registration_date = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
