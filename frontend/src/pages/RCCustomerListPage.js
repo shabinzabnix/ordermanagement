@@ -19,7 +19,8 @@ export default function RCCustomerListPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [stores, setStores] = useState([]);
-  const [storeFilter, setStoreFilter] = useState('all');
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
+  const [storeFilter, setStoreFilter] = useState(isStore && user?.store_id ? String(user.store_id) : 'all');
   const [storeSummary, setStoreSummary] = useState([]);
   const [loading, setLoading] = useState(true);
   const limit = 50;

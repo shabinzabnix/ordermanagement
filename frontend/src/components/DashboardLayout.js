@@ -114,16 +114,12 @@ export default function DashboardLayout({ children }) {
         <div className="flex h-16 items-center justify-between px-4">
           {!collapsed && (
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 bg-sky-500 rounded-sm flex items-center justify-center">
-                <Pill className="w-4 h-4 text-white" />
-              </div>
+              <img src="/logo.png" alt="SHP" className="w-8 h-8 rounded-sm object-contain" />
               <span className="font-heading text-sm font-bold tracking-tight">Sahakar Pharma</span>
             </div>
           )}
           {collapsed && (
-            <div className="w-8 h-8 bg-sky-500 rounded-sm flex items-center justify-center mx-auto">
-              <Pill className="w-4 h-4 text-white" />
-            </div>
+            <img src="/logo.png" alt="SHP" className="w-8 h-8 rounded-sm object-contain mx-auto" />
           )}
         </div>
 

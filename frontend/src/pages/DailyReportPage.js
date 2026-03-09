@@ -18,7 +18,8 @@ export default function DailyReportPage() {
   const [data, setData] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [stores, setStores] = useState([]);
-  const [storeFilter, setStoreFilter] = useState('all');
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
+  const [storeFilter, setStoreFilter] = useState(isStore && user?.store_id ? String(user.store_id) : 'all');
   const [loading, setLoading] = useState(true);
 
   const isHO = ['ADMIN', 'HO_STAFF', 'DIRECTOR'].includes(user?.role);

@@ -15,7 +15,8 @@ export default function StoreDashboardPage() {
   const navigate = useNavigate();
   const [stores, setStores] = useState([]);
   const [summary, setSummary] = useState([]);
-  const [selectedStore, setSelectedStore] = useState('');
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
+  const [selectedStore, setSelectedStore] = useState(isStore && user?.store_id ? String(user.store_id) : '');
   const [storeData, setStoreData] = useState(null);
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);

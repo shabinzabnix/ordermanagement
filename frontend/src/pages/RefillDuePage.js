@@ -60,7 +60,8 @@ export default function RefillDuePage() {
   const [category, setCategory] = useState('all');
   const [search, setSearch] = useState('');
   const [stores, setStores] = useState([]);
-  const [storeFilter, setStoreFilter] = useState('all');
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
+  const [storeFilter, setStoreFilter] = useState(isStore && user?.store_id ? String(user.store_id) : 'all');
   const [callDialog, setCallDialog] = useState(null);
   const [callForm, setCallForm] = useState({ call_result: '', remarks: '' });
   const [saving, setSaving] = useState(false);

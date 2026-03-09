@@ -43,9 +43,7 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-br from-[#0F172A] via-[#0F172A]/80 to-sky-900/30" />
         <div className="relative z-10 text-center px-12">
           <div className="flex items-center justify-center gap-3 mb-8">
-            <div className="w-14 h-14 bg-sky-500 rounded-sm flex items-center justify-center shadow-lg shadow-sky-500/20">
-              <Pill className="w-7 h-7 text-white" />
-            </div>
+            <img src="/logo.png" alt="SHP" className="w-20 h-20 rounded-sm object-contain shadow-lg" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-heading font-bold text-white mb-4 tracking-tight">
             Sahakar Hyper<br />Pharmacy
@@ -66,9 +64,7 @@ export default function LoginPage() {
       <div className="flex-1 flex items-center justify-center p-8 bg-slate-50">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-sky-500 rounded-sm flex items-center justify-center">
-              <Pill className="w-5 h-5 text-white" />
-            </div>
+            <img src="/logo.png" alt="SHP" className="w-10 h-10 rounded-sm object-contain" />
             <span className="text-xl font-heading font-bold text-slate-900">Sahakar Pharma</span>
           </div>
           <Card className="border-slate-200 shadow-sm rounded-sm">
@@ -123,7 +119,7 @@ export default function LoginPage() {
                 </Button>
               </form>
               <p className="text-[11px] text-slate-400 text-center mt-5 font-body">
-                Default credentials: admin@sahakar.com / admin123
+                Sahakar Hyper Pharmacy - Inventory Intelligence Platform
               </p>
             </CardContent>
           </Card>

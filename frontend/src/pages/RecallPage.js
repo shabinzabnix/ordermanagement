@@ -18,11 +18,12 @@ import { ChatButton } from '../components/ChatPopup';
 export default function RecallPage() {
   const { user } = useAuth();
   const isHO = ['ADMIN', 'HO_STAFF'].includes(user?.role);
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
   const [recalls, setRecalls] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [stores, setStores] = useState([]);
-  const [storeFilter, setStoreFilter] = useState('all');
+  const [storeFilter, setStoreFilter] = useState(isStore && user?.store_id ? String(user.store_id) : 'all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [storeStaff, setStoreStaff] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);

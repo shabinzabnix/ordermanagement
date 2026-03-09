@@ -23,7 +23,8 @@ export default function SalesCallTasksPage() {
   const [salesDate, setSalesDate] = useState('');
   const [date, setDate] = useState('');
   const [stores, setStores] = useState([]);
-  const [storeFilter, setStoreFilter] = useState('all');
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
+  const [storeFilter, setStoreFilter] = useState(isStore && user?.store_id ? String(user.store_id) : 'all');
   const [loading, setLoading] = useState(true);
   const [detailCustomer, setDetailCustomer] = useState(null);
   const [fullDetail, setFullDetail] = useState(null);

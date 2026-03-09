@@ -30,7 +30,8 @@ export default function CRMReportsPage() {
   const [invDate, setInvDate] = useState(new Date().toISOString().split('T')[0]);
   const [invPage, setInvPage] = useState(1);
   const [stores, setStores] = useState([]);
-  const [invStore, setInvStore] = useState('all');
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
+  const [invStore, setInvStore] = useState(isStore && user?.store_id ? String(user.store_id) : 'all');
   const invLimit = 50;
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); }, []);

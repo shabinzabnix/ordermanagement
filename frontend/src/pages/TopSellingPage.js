@@ -15,7 +15,8 @@ import { TrendingUp, Search, Download, ChevronLeft, ChevronRight, Package } from
 export default function TopSellingPage() {
   const { user } = useAuth();
   const [stores, setStores] = useState([]);
-  const [selectedStore, setSelectedStore] = useState('all');
+  const isStore = ['STORE_STAFF', 'STORE_MANAGER'].includes(user?.role);
+  const [selectedStore, setSelectedStore] = useState(isStore && user?.store_id ? String(user.store_id) : 'all');
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [search, setSearch] = useState('');
