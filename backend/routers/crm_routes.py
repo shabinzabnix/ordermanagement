@@ -1851,3 +1851,114 @@ async def repeat_purchases(
         })
 
     return {"items": result, "total": total, "page": page, "limit": limit}
+
+
+# ─── RC Customers List (store-wise) ──────────────────────────
+
+@router.get("/crm/rc-customers")
+async def rc_customers_list(
+    store_id: int = Query(None),
+    search: str = Query(None),
+    page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
+):
+    sf = _store_filter(user)
+
+    query = select(CRMCustomer).where(
+        CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC])
+    )
+    if sf:
+        query = query.where(or_(CRMCustomer.first_store_id == sf, CRMCustomer.assigned_store_id == sf))
+    elif store_id:
+        query = query.where(or_(CRMCustomer.first_store_id == store_id, CRMCustomer.assigned_store_id == store_id))
+
+    if search:
+        query = query.where(or_(
+            CRMCustomer.customer_name.ilike(f"%{search}%"),
+            CRMCustomer.mobile_number.ilike(f"%{search}%"),
+        ))
+
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
+    customers = (await db.execute(
+        query.order_by(CRMCustomer.customer_name).offset((page - 1) * limit).limit(limit)
+    )).scalars().all()
+
+    cids = [c.id for c in customers]
+    sids = set()
+    staff_ids = set()
+    for c in customers:
+        if c.first_store_id: sids.add(c.first_store_id)
+        if c.assigned_store_id: sids.add(c.assigned_store_id)
+        if c.assigned_staff_id: staff_ids.add(c.assigned_staff_id)
+
+    smap = {}
+    if sids:
+        smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
+    staff_map = {}
+    if staff_ids:
+        for u in (await db.execute(select(User).where(User.id.in_(staff_ids)))).scalars().all():
+            staff_map[u.id] = u.full_name
+
+    # Active medicines count + overdue count per customer
+    med_info = {}
+    overdue_info = {}
+    now = datetime.now(timezone.utc)
+    if cids:
+        med_q = (await db.execute(
+            select(MedicinePurchase.customer_id, func.count(MedicinePurchase.id))
+            .where(MedicinePurchase.customer_id.in_(cids), MedicinePurchase.status == "active")
+            .group_by(MedicinePurchase.customer_id)
+        )).all()
+        med_info = {r[0]: r[1] for r in med_q}
+
+        overdue_q = (await db.execute(
+            select(MedicinePurchase.customer_id, func.count(MedicinePurchase.id))
+            .where(MedicinePurchase.customer_id.in_(cids), MedicinePurchase.status == "active", MedicinePurchase.next_due_date < now)
+            .group_by(MedicinePurchase.customer_id)
+        )).all()
+        overdue_info = {r[0]: r[1] for r in overdue_q}
+
+    # Total spent per customer
+    spent_info = {}
+    if cids:
+        spent_q = (await db.execute(
+            select(SalesRecord.customer_id, func.sum(SalesRecord.total_amount))
+            .where(SalesRecord.customer_id.in_(cids))
+            .group_by(SalesRecord.customer_id)
+        )).all()
+        spent_info = {r[0]: round(float(r[1] or 0), 2) for r in spent_q}
+
+    # Store-wise summary (for HO view)
+    store_summary = {}
+    if not sf:
+        ss_q = (await db.execute(
+            select(CRMCustomer.first_store_id, func.count(CRMCustomer.id))
+            .where(CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]))
+            .group_by(CRMCustomer.first_store_id)
+        )).all()
+        for r in ss_q:
+            sid = r[0]
+            if sid:
+                store_summary[sid] = {"count": r[1], "name": smap.get(sid, "")}
+
+    result = []
+    for c in customers:
+        result.append({
+            "id": c.id, "customer_name": c.customer_name, "mobile_number": c.mobile_number,
+            "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
+            "store_name": smap.get(c.first_store_id, ""),
+            "store_id": c.first_store_id,
+            "active_medicines": med_info.get(c.id, 0),
+            "overdue_count": overdue_info.get(c.id, 0),
+            "total_spent": spent_info.get(c.id, 0),
+            "assigned_staff": staff_map.get(c.assigned_staff_id, "") if c.assigned_staff_id else "",
+            "chronic_tags": c.chronic_tags.split(",") if c.chronic_tags else [],
+            "adherence": c.adherence_score or "unknown",
+            "clv_value": round(float(c.clv_value or 0), 2),
+            "registration_date": c.registration_date.isoformat() if c.registration_date else None,
+        })
+
+    return {
+        "customers": result, "total": total, "page": page, "limit": limit,
+        "store_summary": [{"store_id": k, "store_name": v["name"], "rc_count": v["count"]} for k, v in store_summary.items()] if store_summary else [],
+    }
