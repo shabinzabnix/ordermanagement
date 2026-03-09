@@ -14,6 +14,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { toast } from 'sonner';
 import { FileText, Plus, Check, X, Search, Upload, Truck, Package, Trash2, Settings } from 'lucide-react';
 import { UploadProgress } from '../components/UploadProgress';
+import { useSales90d, Sales90dBadge } from '../hooks/useSales90d';
 
 export default function POManagementPage() {
   const { user } = useAuth();
@@ -41,6 +42,7 @@ export default function POManagementPage() {
   const [manualCost, setManualCost] = useState('');
   // PO Detail popup
   const [poDetail, setPoDetail] = useState(null);
+  const poSalesMap = useSales90d(poDetail?.items?.map(i => i.product_name) || []);
   const [editItems, setEditItems] = useState([]);
   const [editSupplier, setEditSupplier] = useState('');
   const [editRemarks, setEditRemarks] = useState('');
@@ -510,8 +512,8 @@ export default function POManagementPage() {
               <div className="max-h-[350px] overflow-auto">
                 <Table>
                   <TableHeader className="sticky top-0 bg-white z-10"><TableRow className="border-b border-slate-100">
-                    {['Product', 'ID', 'Stock (All Stores)', poDetail.po.status === 'draft' ? 'Qty' : 'Qty', poDetail.po.status === 'draft' ? 'L.Cost' : 'L.Cost', 'Value', poDetail.po.status === 'draft' ? '' : ''].filter(Boolean).map(h => (
-                      <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty', 'L.Cost', 'Value'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                    {['Product', 'ID', '90d Sales', 'Stock (All Stores)', poDetail.po.status === 'draft' ? 'Qty' : 'Qty', poDetail.po.status === 'draft' ? 'L.Cost' : 'L.Cost', 'Value', poDetail.po.status === 'draft' ? '' : ''].filter(Boolean).map(h => (
+                      <TableHead key={h} className={`text-[9px] uppercase tracking-wider font-bold text-slate-400 py-2 ${['Qty', 'L.Cost', 'Value', '90d Sales'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                     ))}
                   </TableRow></TableHeader>
                   <TableBody>
@@ -519,6 +521,7 @@ export default function POManagementPage() {
                       <TableRow key={i}>
                         <TableCell className="text-[12px] font-medium text-slate-800 py-1.5 max-w-[200px] truncate">{it.product_name}</TableCell>
                         <TableCell className="font-mono text-[10px] text-slate-400">{it.product_id || '-'}</TableCell>
+                        <TableCell className="text-right"><Sales90dBadge name={it.product_name} salesMap={poSalesMap} /></TableCell>
                         <TableCell className="py-1">
                           <div className="flex gap-0.5 flex-wrap">{it.store_stock?.length > 0
                             ? it.store_stock.map((s, j) => <Badge key={j} variant="secondary" className="text-[7px] rounded-sm px-1">{s.store}:{s.stock}</Badge>)

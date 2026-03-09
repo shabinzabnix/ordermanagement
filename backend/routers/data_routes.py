@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from database import get_db
-from models import Product, Store, User, UserRole, UploadHistory, UploadType
+from models import Product, Store, User, UserRole, UploadHistory, UploadType, SalesRecord
 from auth import get_current_user, require_roles, hash_password
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime, timezone
+from typing import Optional, List
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 from io import BytesIO
 import json
@@ -445,3 +445,45 @@ async def delete_upload(
     await db.delete(upload)
     await db.commit()
     return {"message": "Upload record deleted"}
+
+
+
+# ─── Product 90-Day Sales Lookup ──────────────────────────────
+
+class Sales90dReq(BaseModel):
+    product_names: List[str]
+
+
+@router.post("/products/sales-90d")
+async def product_sales_90d(
+    data: Sales90dReq,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Returns 90-day total sales qty for given product names across all stores."""
+    if not data.product_names:
+        return {"sales": {}}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    names = data.product_names[:500]  # cap at 500
+
+    rows = (await db.execute(
+        select(
+            SalesRecord.product_name,
+            func.sum(SalesRecord.quantity).label("total_qty"),
+            func.sum(SalesRecord.total_amount).label("total_amount"),
+            func.count(SalesRecord.id).label("sale_count"),
+        )
+        .where(SalesRecord.product_name.in_(names), SalesRecord.invoice_date >= cutoff)
+        .group_by(SalesRecord.product_name)
+    )).all()
+
+    sales = {}
+    for r in rows:
+        sales[r[0]] = {
+            "qty": round(float(r[1] or 0), 1),
+            "amount": round(float(r[2] or 0), 2),
+            "count": int(r[3] or 0),
+        }
+
+    return {"sales": sales}

@@ -12,10 +12,12 @@ import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 import { ArrowLeftRight, Plus, Check, X, Download, Search, Warehouse } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
+import { useSales90d, Sales90dBadge } from '../hooks/useSales90d';
 
 export default function TransfersPage() {
   const { user } = useAuth();
   const [transfers, setTransfers] = useState([]);
+  const salesMap = useSales90d(transfers.map(t => t.product_name));
   const [stores, setStores] = useState([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ requesting_store_id: '', source_store_id: '', product_id: '', product_name: '', batch: '', quantity: '' });
@@ -270,7 +272,7 @@ export default function TransfersPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['ID', 'Product', 'From', 'To', 'Qty', 'Status', 'Requested By', 'Date', 'Actions'].map(h => (
+                {['ID', 'Product', '90d Sales', 'From', 'To', 'Qty', 'Status', 'Requested By', 'Date', 'Actions'].map(h => (
                   <TableHead key={h} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3">{h}</TableHead>
                 ))}
               </TableRow>
@@ -285,6 +287,7 @@ export default function TransfersPage() {
                 <TableRow key={t.id} className="hover:bg-slate-50/50" data-testid={`transfer-row-${t.id}`}>
                   <TableCell className="font-mono text-[11px] text-slate-500">#{t.id}</TableCell>
                   <TableCell className="font-body text-[13px] font-medium text-slate-800">{t.product_name}</TableCell>
+                  <TableCell className="text-right"><Sales90dBadge name={t.product_name} salesMap={salesMap} /></TableCell>
                   <TableCell className="text-[12px] font-body text-slate-500">{t.source_store_name}</TableCell>
                   <TableCell className="text-[12px] font-body text-slate-500">{t.requesting_store_name}</TableCell>
                   <TableCell className="text-[12px] tabular-nums">{t.quantity}</TableCell>

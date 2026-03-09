@@ -11,9 +11,11 @@ import { toast } from 'sonner';
 import { Upload, Search, ChevronLeft, ChevronRight, Package, Download } from 'lucide-react';
 import { downloadExcel } from '../lib/api';
 import { UploadProgress } from '../components/UploadProgress';
+import { useSales90d, Sales90dBadge } from '../hooks/useSales90d';
 
 export default function ProductMasterPage() {
   const [products, setProducts] = useState([]);
+  const salesMap = useSales90d(products.map(p => p.product_name));
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -188,8 +190,8 @@ export default function ProductMasterPage() {
           <Table>
             <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow className="border-b-2 border-slate-100">
-                {['Product ID', 'Product Name', 'Category', 'Sub Category', 'Rep', 'Primary Supplier', 'Secondary Supplier', 'Least Price', 'Most Qty', 'MRP', 'PTR', 'L.Cost'].map(h => (
-                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['MRP', 'PTR', 'L.Cost'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
+                {['Product ID', 'Product Name', 'Category', 'Sub Category', 'Rep', 'Primary Supplier', 'Secondary Supplier', 'Least Price', 'Most Qty', 'MRP', 'PTR', 'L.Cost', '90d Sales'].map(h => (
+                  <TableHead key={h} className={`text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 ${['MRP', 'PTR', 'L.Cost', '90d Sales'].includes(h) ? 'text-right' : ''}`}>{h}</TableHead>
                 ))}
               </TableRow>
             </TableHeader>
@@ -215,6 +217,7 @@ export default function ProductMasterPage() {
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{(p.mrp || 0).toFixed(2)}</TableCell>
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{(p.ptr || 0).toFixed(2)}</TableCell>
                   <TableCell className="text-right font-body text-[12px] tabular-nums">{(p.landing_cost || 0).toFixed(2)}</TableCell>
+                  <TableCell className="text-right"><Sales90dBadge name={p.product_name} salesMap={salesMap} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>

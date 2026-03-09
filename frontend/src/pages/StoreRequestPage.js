@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { ShoppingCart, Search, Trash2, Plus, Package, MessageCircle, Send, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { useSales90d } from '../hooks/useSales90d';
 
 export default function StoreRequestPage() {
   const { user } = useAuth();
@@ -53,6 +54,7 @@ export default function StoreRequestPage() {
   const [reconciling, setReconciling] = useState(false);
   // HO review
   const [allItems, setAllItems] = useState([]);
+  const salesMap = useSales90d(allItems.map(i => i.product_name));
   const [reviewFilter, setReviewFilter] = useState('all');
   const sugRef = useRef(null);
 
@@ -233,10 +235,10 @@ export default function StoreRequestPage() {
                   </div>
                   {/* Info Grid */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-0 border-b border-slate-100">
-                    {[{l:'Store',v:it.store_name},{l:'Qty',v:it.quantity},{l:'L.Cost',v:`INR ${(it.landing_cost||0).toFixed(2)}`},{l:'Value',v:`INR ${(it.quantity*(it.landing_cost||0)).toFixed(2)}`}].map(d => (
+                    {[{l:'Store',v:it.store_name},{l:'Qty',v:it.quantity},{l:'L.Cost',v:`INR ${(it.landing_cost||0).toFixed(2)}`},{l:'Value',v:`INR ${(it.quantity*(it.landing_cost||0)).toFixed(2)}`},{l:'90d Sales',v:salesMap[it.product_name]?.qty || 0, c:'text-sky-700'}].map(d => (
                       <div key={d.l} className="px-4 py-2 border-r border-slate-100 last:border-r-0">
                         <p className="text-[9px] font-body text-slate-400 uppercase">{d.l}</p>
-                        <p className="text-[13px] font-heading font-semibold text-slate-800">{d.v}</p>
+                        <p className={`text-[13px] font-heading font-semibold ${d.c || 'text-slate-800'}`}>{d.v}</p>
                       </div>
                     ))}
                   </div>

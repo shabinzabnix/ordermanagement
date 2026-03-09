@@ -9,9 +9,11 @@ import { Search, BarChart3, Download } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { downloadExcel } from '../lib/api';
 import { toast } from 'sonner';
+import { useSales90d, Sales90dBadge } from '../hooks/useSales90d';
 
 export default function ConsolidatedStockPage() {
   const [data, setData] = useState({ consolidated: [], stores: [] });
+  const salesMap = useSales90d(data.consolidated.map(p => p.product_name));
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [categories, setCategories] = useState([]);
@@ -73,6 +75,7 @@ export default function ConsolidatedStockPage() {
                   <TableHead key={s.id} className="text-[10px] uppercase tracking-wider font-bold text-slate-400 font-body py-3 text-right">{s.store_code || s.store_name}</TableHead>
                 ))}
                 <TableHead className="text-[10px] uppercase tracking-wider font-bold text-sky-500 font-body py-3 text-right">TOTAL</TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wider font-bold text-amber-500 font-body py-3 text-right">90d Sales</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -91,6 +94,7 @@ export default function ConsolidatedStockPage() {
                     return <TableCell key={s.id} className="text-right font-body text-[12px] tabular-nums">{qty > 0 ? qty.toFixed(0) : <span className="text-slate-300">0</span>}</TableCell>;
                   })}
                   <TableCell className="text-right font-body text-[12px] tabular-nums font-bold text-sky-700">{p.total > 0 ? p.total.toFixed(0) : '0'}</TableCell>
+                  <TableCell className="text-right"><Sales90dBadge name={p.product_name} salesMap={salesMap} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>
