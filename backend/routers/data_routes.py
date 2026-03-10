@@ -174,21 +174,30 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
     key = data.upload_id
     chunk_bytes = base64.b64decode(data.chunk_data)
     tmp_path = UPLOAD_TMP / f"{key}.tmp"
+    meta_path = UPLOAD_TMP / f"{key}.meta"
 
     if key not in _chunk_meta:
-        _chunk_meta[key] = {"received": set(), "filename": data.filename, "total": data.total_chunks,
-                            "upload_type": data.upload_type, "store_id": data.store_id, "user_id": user["user_id"]}
-        # Create/truncate temp file
+        meta = {"received": set(), "filename": data.filename, "total": data.total_chunks,
+                "upload_type": data.upload_type, "store_id": data.store_id, "user_id": user["user_id"]}
+        _chunk_meta[key] = meta
         tmp_path.write_bytes(b"")
+    else:
+        meta = _chunk_meta[key]
 
     # Write chunk at correct offset
     with open(tmp_path, "r+b" if tmp_path.exists() else "wb") as f:
         f.seek(data.chunk_index * 600000)
         f.write(chunk_bytes)
-    _chunk_meta[key]["received"].add(data.chunk_index)
+    meta["received"].add(data.chunk_index)
 
-    if len(_chunk_meta[key]["received"]) >= data.total_chunks:
-        info = _chunk_meta.pop(key)
+    # Also persist meta to disk in case of restart
+    import json as jlib
+    meta_path.write_text(jlib.dumps({"filename": meta["filename"], "total": meta["total"],
+        "upload_type": meta["upload_type"], "store_id": meta["store_id"], "user_id": meta["user_id"],
+        "received": list(meta["received"])}))
+
+    if len(meta["received"]) >= data.total_chunks:
+        _chunk_meta.pop(key, None)
         file_path = str(tmp_path)
 
         async def bg():
@@ -199,14 +208,15 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
 
                 content = Path(file_path).read_bytes()
                 Path(file_path).unlink(missing_ok=True)  # Clean up temp file
-                log.info(f"Processing chunked: {info['filename']}, {len(content)} bytes, type={info['upload_type']}")
+                Path(file_path.replace('.tmp', '.meta')).unlink(missing_ok=True)
+                log.info(f"Processing chunked: {meta['filename']}, {len(content)} bytes, type={meta['upload_type']}")
 
                 df = pd.read_excel(BytesIO(content))
                 if df.empty:
                     del content
                     return
                 async with async_session_maker() as bg_db:
-                    if info["upload_type"] == "products":
+                    if meta["upload_type"] == "products":
                         df_mapped, missing, _ = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
                         if missing: log.error(f"Missing: {missing}"); return
                         rows_data = []
@@ -229,9 +239,9 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                             stmt = pg_insert(Product).values(rows_data[i:i+100])
                             stmt = stmt.on_conflict_do_update(index_elements=['product_id'], set_={k: stmt.excluded[k] for k in ['product_name','primary_supplier','secondary_supplier','least_price_supplier','most_qty_supplier','category','sub_category','rep','mrp','ptr','landing_cost']})
                             await bg_db.execute(stmt); await bg_db.flush()
-                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.PRODUCT_MASTER, uploaded_by=info["user_id"], total_records=len(df), success_records=len(rows_data), failed_records=len(df)-len(rows_data)))
+                        bg_db.add(UploadHistory(file_name=meta["filename"], upload_type=UploadType.PRODUCT_MASTER, uploaded_by=meta["user_id"], total_records=len(df), success_records=len(rows_data), failed_records=len(df)-len(rows_data)))
 
-                    elif info["upload_type"] == "ho_stock":
+                    elif meta["upload_type"] == "ho_stock":
                         df_mapped, missing, _ = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
                         if missing: return
                         pnames = {p.product_id: p.product_name for p in (await bg_db.execute(select(Product))).scalars().all()}
@@ -248,10 +258,10 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                                 landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
                                 expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
                         for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
-                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.HO_STOCK, uploaded_by=info["user_id"], total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
+                        bg_db.add(UploadHistory(file_name=meta["filename"], upload_type=UploadType.HO_STOCK, uploaded_by=meta["user_id"], total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
 
-                    elif info["upload_type"] == "store_stock" and info.get("store_id"):
-                        sid = info["store_id"]
+                    elif meta["upload_type"] == "store_stock" and meta.get("store_id"):
+                        sid = meta["store_id"]
                         df_mapped, missing, _ = map_columns(df, STORE_STOCK_COLUMNS, STORE_STOCK_REQUIRED)
                         if missing: return
                         await bg_db.execute(delete(StoreStockBatch).where(StoreStockBatch.store_id == sid))
@@ -269,10 +279,10 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                                 closing_stock=cs, closing_stock_strips=cs/pk, cost_value=float(row.get("cost_value", 0)) if pd.notna(row.get("cost_value")) else 0,
                                 expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
                         for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
-                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.STORE_STOCK, store_id=sid, uploaded_by=info["user_id"], total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
+                        bg_db.add(UploadHistory(file_name=meta["filename"], upload_type=UploadType.STORE_STOCK, store_id=sid, uploaded_by=meta["user_id"], total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
 
-                    elif info["upload_type"] == "sales" and info.get("store_id"):
-                        sid = info["store_id"]
+                    elif meta["upload_type"] == "sales" and meta.get("store_id"):
+                        sid = meta["store_id"]
                         from models import SalesRecord, CRMCustomer, CustomerType
                         from routers.crm_routes import SALES_COLUMNS
 
@@ -292,6 +302,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                         df_final.columns = [str(c).strip().lower().replace('_', ' ') for c in df_final.columns]
                         mapped = {c: SALES_COLUMNS[c] for c in df_final.columns if c in SALES_COLUMNS}
                         df_final = df_final.rename(columns=mapped)
+                        df_final = df_final.loc[:, ~df_final.columns.duplicated()]
 
                         success, skipped, failed, new_cust = 0, 0, 0, 0
                         existing_mobiles = {}
@@ -304,30 +315,36 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                         new_custs = {}
                         rows = []
                         for _, row in df_final.iterrows():
-                            pname = str(row.get("patient_name", "")).strip() if pd.notna(row.get("patient_name")) else ""
-                            mobile = str(row.get("mobile_number", "")).strip().replace(".0", "") if pd.notna(row.get("mobile_number")) else ""
-                            product = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
-                            if not product or product == "nan": failed += 1; continue
-                            entry = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else ""
-                            if entry.endswith(".0"): entry = entry[:-2]
-                            if (entry, product) in existing_entries: skipped += 1; continue
+                            try:
+                                pname = str(row.get("patient_name", "") or "").strip()
+                                mobile = str(row.get("mobile_number", "") or "").strip().replace(".0", "")
+                                product = str(row.get("product_name", "") or "").strip()
+                                if not product or product == "nan": failed += 1; continue
+                                entry = str(row.get("entry_number", "") or "").strip()
+                                if entry.endswith(".0"): entry = entry[:-2]
+                                if (entry, product) in existing_entries: skipped += 1; continue
 
-                            inv_date = None
-                            if pd.notna(row.get("invoice_date")):
-                                try: inv_date = pd.Timestamp(row["invoice_date"]).to_pydatetime().replace(tzinfo=timezone.utc)
-                                except: pass
+                                inv_date = None
+                                raw_date = row.get("invoice_date")
+                                if raw_date is not None and str(raw_date) != "nan":
+                                    try: inv_date = pd.Timestamp(raw_date).to_pydatetime().replace(tzinfo=timezone.utc)
+                                    except: pass
 
-                            cid = existing_mobiles.get(mobile)
-                            if not cid and mobile and len(mobile) >= 10:
-                                if mobile not in new_custs:
-                                    new_custs[mobile] = pname or "Unknown"
+                                cid = existing_mobiles.get(mobile)
+                                if not cid and mobile and len(mobile) >= 10:
+                                    if mobile not in new_custs: new_custs[mobile] = pname or "Unknown"
 
-                            rows.append(SalesRecord(store_id=sid, patient_name=pname, mobile_number=mobile,
-                                product_name=product, product_id=str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
-                                entry_number=entry, invoice_date=inv_date,
-                                total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
-                                quantity=float(row.get("qty", row.get("quantity", 0))) if pd.notna(row.get("qty", row.get("quantity"))) else 0))
-                            success += 1
+                                raw_total = row.get("total_amount")
+                                total_amt = float(raw_total) if raw_total is not None and str(raw_total) != "nan" else 0
+                                raw_qty = row.get("qty", row.get("quantity"))
+                                qty = float(raw_qty) if raw_qty is not None and str(raw_qty) != "nan" else 0
+
+                                rows.append(SalesRecord(store_id=sid, patient_name=pname, mobile_number=mobile,
+                                    product_name=product, product_id=str(row.get("product_id", "") or "").strip() or None,
+                                    entry_number=entry, invoice_date=inv_date, total_amount=total_amt, quantity=qty))
+                                success += 1
+                            except Exception:
+                                failed += 1
 
                         # Create new customers
                         for mob, cname in new_custs.items():
@@ -344,12 +361,12 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                             if r.mobile_number: r.customer_id = existing_mobiles.get(r.mobile_number)
 
                         for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
-                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.SALES_REPORT, store_id=sid, uploaded_by=info["user_id"],
+                        bg_db.add(UploadHistory(file_name=meta["filename"], upload_type=UploadType.SALES_REPORT, store_id=sid, uploaded_by=meta["user_id"],
                             total_records=len(df_final), success_records=success, failed_records=failed,
                             error_details=f"New customers: {new_cust}, Skipped: {skipped}"))
 
-                    elif info["upload_type"] == "purchase" and info.get("store_id"):
-                        sid = info["store_id"]
+                    elif meta["upload_type"] == "purchase" and meta.get("store_id"):
+                        sid = meta["store_id"]
                         from models import PurchaseRecord
 
                         # Try multiple header rows
@@ -359,7 +376,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                             "supplier": "supplier_name", "supplier name": "supplier_name", "party name": "supplier_name",
                             "ho id": "product_id", "product id": "product_id", "id": "product_id",
                             "name": "product_name", "product name": "product_name", "product": "product_name", "item name": "product_name",
-                            "total": "total_amount", "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount", "net": "total_amount",
+                            "total": "total_amount", "total amount": "total_amount", "amount": "total_amount",
                             "qty": "quantity", "quantity": "quantity",
                             "batch": "batch", "batch no": "batch",
                             "expiry": "expiry_date", "expiary": "expiry_date", "expiry date": "expiry_date",
@@ -378,6 +395,8 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                         df_p.columns = [str(c).strip().lower().replace('_', ' ') for c in df_p.columns]
                         mapped = {c: purchase_cols[c] for c in df_p.columns if c in purchase_cols}
                         df_p = df_p.rename(columns=mapped)
+                        # Remove duplicate columns (keep first)
+                        df_p = df_p.loc[:, ~df_p.columns.duplicated()]
 
                         success, skipped, failed = 0, 0, 0
                         existing = set()
@@ -386,38 +405,48 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
 
                         rows = []
                         for _, row in df_p.iterrows():
-                            product = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
-                            supplier = str(row.get("supplier_name", "")).strip() if pd.notna(row.get("supplier_name")) else ""
-                            if not product or product == "nan": failed += 1; continue
-                            entry = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else ""
-                            if entry.endswith(".0"): entry = entry[:-2]
-                            if (entry, product) in existing: skipped += 1; continue
+                            try:
+                                product = str(row.get("product_name", "") or "").strip()
+                                supplier = str(row.get("supplier_name", "") or "").strip()
+                                if not product or product == "nan": failed += 1; continue
+                                entry = str(row.get("entry_number", "") or "").strip()
+                                if entry.endswith(".0"): entry = entry[:-2]
+                                if (entry, product) in existing: skipped += 1; continue
 
-                            pdate = None
-                            if pd.notna(row.get("purchase_date")):
-                                try: pdate = pd.Timestamp(row["purchase_date"]).to_pydatetime().replace(tzinfo=timezone.utc)
-                                except: pass
+                                pdate = None
+                                raw_date = row.get("purchase_date")
+                                if raw_date is not None and str(raw_date) != "nan":
+                                    try: pdate = pd.Timestamp(raw_date).to_pydatetime().replace(tzinfo=timezone.utc)
+                                    except: pass
 
-                            pid = str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None
-                            if pid and pid.endswith(".0"): pid = pid[:-2]
-                            if pid in ("", "nan", "None"): pid = None
+                                pid = str(row.get("product_id", "") or "").strip()
+                                if pid.endswith(".0"): pid = pid[:-2]
+                                if pid in ("", "nan", "None", "0"): pid = None
 
-                            rows.append(PurchaseRecord(store_id=sid, product_name=product, product_id=pid, supplier_name=supplier,
-                                entry_number=entry, purchase_date=pdate,
-                                total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
-                                quantity=float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0))
-                            success += 1
+                                raw_total = row.get("total_amount")
+                                total_amt = float(raw_total) if raw_total is not None and str(raw_total) != "nan" else 0
+                                raw_qty = row.get("quantity")
+                                qty = float(raw_qty) if raw_qty is not None and str(raw_qty) != "nan" else 0
+
+                                rows.append(PurchaseRecord(store_id=sid, product_name=product, product_id=pid, supplier_name=supplier,
+                                    entry_number=entry, purchase_date=pdate, total_amount=total_amt, quantity=qty))
+                                success += 1
+                            except Exception as ex:
+                                failed += 1
+                                if failed <= 3: log.error(f"Purchase row fail: {ex}")
 
                         for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
-                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.PURCHASE_REPORT, store_id=sid, uploaded_by=info["user_id"],
+                        log.info(f"Purchase: inserted {len(rows)} rows, committing...")
+                        bg_db.add(UploadHistory(file_name=meta["filename"], upload_type=UploadType.PURCHASE_REPORT, store_id=sid, uploaded_by=meta["user_id"],
                             total_records=len(df_p), success_records=success, failed_records=failed,
                             error_details=f"Skipped duplicates: {skipped}"))
 
                     await bg_db.commit()
                     del content  # Free memory after all processing
-                    log.info(f"Chunk upload done: {info['upload_type']}, {info['filename']}")
+                    log.info(f"Chunk upload done: {meta['upload_type']}, {meta['filename']}")
             except Exception as e:
-                import logging; logging.getLogger(__name__).error(f"Chunk process failed: {e}")
+                import traceback
+                import logging; logging.getLogger(__name__).error(f"Chunk process failed: {e}\n{traceback.format_exc()}")
 
         asyncio.create_task(bg())
         return {"message": f"All {data.total_chunks} chunks received. Processing in background.", "background": True, "complete": True}
@@ -645,7 +674,7 @@ async def upload_products(
 
     df_mapped, missing, col_info = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
     if missing:
-        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your Excel columns: {col_info.get('original_columns', [])}")
+        raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your Excel columns: {col_meta.get('original_columns', [])}")
 
     success, failed, errors = 0, 0, []
     rows_data = []
@@ -703,7 +732,7 @@ async def upload_products(
         await db.rollback()
 
     return {"message": "Upload complete", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20],
-            "columns_matched": col_info.get("matched", {}), "columns_unmatched": col_info.get("unmatched", [])[:20]}
+            "columns_matched": col_meta.get("matched", {}), "columns_unmatched": col_meta.get("unmatched", [])[:20]}
 
 
 # --- Stores ---
