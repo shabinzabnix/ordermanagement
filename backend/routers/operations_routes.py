@@ -98,6 +98,48 @@ async def upload_ho_stock(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()
+    file_size = len(content)
+
+    # Large files: background processing
+    if file_size > 500000:
+        import asyncio
+        fname = file.filename; uid = user["user_id"]
+        async def bg():
+            try:
+                from database import async_session_maker
+                df = pd.read_excel(BytesIO(content))
+                if df.empty: return
+                df_mapped, missing, _ = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
+                if missing: return
+                product_names = {}
+                async with async_session_maker() as bg_db:
+                    for p in (await bg_db.execute(select(Product))).scalars().all():
+                        product_names[p.product_id] = p.product_name
+                    await bg_db.execute(delete(HOStockBatch))
+                    rows = []
+                    for idx, row in df_mapped.iterrows():
+                        pid = str(row.get("product_id", "")).strip()
+                        if pid.endswith(".0"): pid = pid[:-2]
+                        batch = str(row.get("batch", "")).strip()
+                        if not pid or not batch: continue
+                        pname = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
+                        if not pname or pname == "nan": pname = product_names.get(pid, "")
+                        rows.append(HOStockBatch(product_id=pid, product_name=pname, batch=batch,
+                            mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                            closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
+                            landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
+                            expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
+                    BATCH = 100
+                    for i in range(0, len(rows), BATCH):
+                        bg_db.add_all(rows[i:i+BATCH]); await bg_db.flush()
+                    await bg_db.commit()
+                    bg_db.add(UploadHistory(file_name=fname, upload_type=UploadType.HO_STOCK, uploaded_by=uid, total_records=len(df_mapped), success_records=len(rows), failed_records=len(df_mapped)-len(rows)))
+                    await bg_db.commit()
+            except Exception as e:
+                import logging; logging.getLogger(__name__).error(f"BG HO upload failed: {e}")
+        asyncio.create_task(bg())
+        return {"message": f"File received ({file_size//1024}KB). Processing in background. Refresh in 1-2 minutes.", "total": 0, "success": 0, "failed": 0, "errors": [], "background": True}
+
     try:
         df = pd.read_excel(BytesIO(content))
     except Exception as e:
@@ -205,6 +247,51 @@ async def upload_store_stock(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()
+    file_size = len(content)
+
+    # Large files: background processing
+    if file_size > 500000:
+        import asyncio
+        fname = file.filename; uid = user["user_id"]
+        async def bg():
+            try:
+                from database import async_session_maker
+                df = pd.read_excel(BytesIO(content))
+                if df.empty: return
+                df_mapped, missing, _ = map_columns(df, STORE_STOCK_COLUMNS, STORE_STOCK_REQUIRED)
+                if missing: return
+                async with async_session_maker() as bg_db:
+                    await bg_db.execute(delete(StoreStockBatch).where(StoreStockBatch.store_id == store_id))
+                    rows = []
+                    for idx, row in df_mapped.iterrows():
+                        pname = str(row.get("product_name", "")).strip()
+                        batch = str(row.get("batch", "")).strip()
+                        if not pname or not batch: continue
+                        closing_stock = float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0
+                        packing = float(row.get("packing", 1)) if pd.notna(row.get("packing")) and float(row.get("packing", 0)) > 0 else 1
+                        ho_pid = str(row.get("ho_product_id", "")).strip() if pd.notna(row.get("ho_product_id")) else None
+                        if ho_pid in ("", "nan", "None"): ho_pid = None
+                        if ho_pid and ho_pid.endswith(".0"): ho_pid = ho_pid[:-2]
+                        store_pid = str(row.get("store_product_id", "")).strip() if pd.notna(row.get("store_product_id")) else None
+                        if store_pid and store_pid.endswith(".0"): store_pid = store_pid[:-2]
+                        rows.append(StoreStockBatch(store_id=store_id, ho_product_id=ho_pid, store_product_id=store_pid,
+                            product_name=pname, packing=packing, batch=batch,
+                            mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                            sales=float(row.get("sales", 0)) if pd.notna(row.get("sales")) else 0,
+                            closing_stock=closing_stock, closing_stock_strips=closing_stock / packing,
+                            cost_value=float(row.get("cost_value", 0)) if pd.notna(row.get("cost_value")) else 0,
+                            expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
+                    BATCH = 100
+                    for i in range(0, len(rows), BATCH):
+                        bg_db.add_all(rows[i:i+BATCH]); await bg_db.flush()
+                    await bg_db.commit()
+                    bg_db.add(UploadHistory(file_name=fname, upload_type=UploadType.STORE_STOCK, store_id=store_id, uploaded_by=uid, total_records=len(df_mapped), success_records=len(rows), failed_records=len(df_mapped)-len(rows)))
+                    await bg_db.commit()
+            except Exception as e:
+                import logging; logging.getLogger(__name__).error(f"BG Store upload failed: {e}")
+        asyncio.create_task(bg())
+        return {"message": f"File received ({file_size//1024}KB). Processing in background. Refresh in 1-2 minutes.", "total": 0, "success": 0, "failed": 0, "errors": [], "background": True}
+
     try:
         df = pd.read_excel(BytesIO(content))
     except Exception as e:

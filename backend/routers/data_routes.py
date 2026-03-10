@@ -148,6 +148,257 @@ async def get_sub_categories(
     return {"sub_categories": [r[0] for r in result.all() if r[0]]}
 
 
+
+class ChunkReq(BaseModel):
+    upload_id: str
+    filename: str
+    chunk_index: int
+    total_chunks: int
+    chunk_data: str
+    upload_type: Optional[str] = "products"
+    store_id: Optional[int] = None
+
+
+_chunk_store = {}
+
+
+@router.post("/upload-chunk")
+async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
+    """Receives file chunks and processes when all chunks received."""
+    import base64, asyncio
+    key = data.upload_id
+    if key not in _chunk_store:
+        _chunk_store[key] = {"chunks": {}, "filename": data.filename, "total": data.total_chunks,
+                             "upload_type": data.upload_type, "store_id": data.store_id, "user_id": user["user_id"]}
+    _chunk_store[key]["chunks"][data.chunk_index] = base64.b64decode(data.chunk_data)
+
+    if len(_chunk_store[key]["chunks"]) >= data.total_chunks:
+        content = b""
+        for i in range(data.total_chunks): content += _chunk_store[key]["chunks"][i]
+        info = _chunk_store.pop(key)
+
+        async def bg():
+            try:
+                from database import async_session_maker
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                import logging; log = logging.getLogger(__name__)
+                log.info(f"Processing chunked: {info['filename']}, {len(content)} bytes, type={info['upload_type']}")
+                df = pd.read_excel(BytesIO(content))
+                if df.empty: return
+                async with async_session_maker() as bg_db:
+                    if info["upload_type"] == "products":
+                        df_mapped, missing, _ = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
+                        if missing: log.error(f"Missing: {missing}"); return
+                        rows_data = []
+                        for _, row in df_mapped.iterrows():
+                            pid = str(row.get("product_id", "")).strip()
+                            if pid.endswith(".0"): pid = pid[:-2]
+                            if not pid: continue
+                            rows_data.append({"product_id": pid, "product_name": str(row.get("product_name", "")).strip(),
+                                "primary_supplier": str(row.get("primary_supplier", "")).strip() if pd.notna(row.get("primary_supplier")) else None,
+                                "secondary_supplier": str(row.get("secondary_supplier", "")).strip() if pd.notna(row.get("secondary_supplier")) else None,
+                                "least_price_supplier": str(row.get("least_price_supplier", "")).strip() if pd.notna(row.get("least_price_supplier")) else None,
+                                "most_qty_supplier": str(row.get("most_qty_supplier", "")).strip() if pd.notna(row.get("most_qty_supplier")) else None,
+                                "category": str(row.get("category", "")).strip() if pd.notna(row.get("category")) else None,
+                                "sub_category": str(row.get("sub_category", "")).strip() if pd.notna(row.get("sub_category")) else None,
+                                "rep": str(row.get("rep", "")).strip() if pd.notna(row.get("rep")) else None,
+                                "mrp": float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                                "ptr": float(row.get("ptr", 0)) if pd.notna(row.get("ptr")) else 0,
+                                "landing_cost": float(row.get("landing_cost", 0)) if pd.notna(row.get("landing_cost")) else 0})
+                        for i in range(0, len(rows_data), 100):
+                            stmt = pg_insert(Product).values(rows_data[i:i+100])
+                            stmt = stmt.on_conflict_do_update(index_elements=['product_id'], set_={k: stmt.excluded[k] for k in ['product_name','primary_supplier','secondary_supplier','least_price_supplier','most_qty_supplier','category','sub_category','rep','mrp','ptr','landing_cost']})
+                            await bg_db.execute(stmt); await bg_db.flush()
+                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.PRODUCT_MASTER, uploaded_by=info["user_id"], total_records=len(df), success_records=len(rows_data), failed_records=len(df)-len(rows_data)))
+
+                    elif info["upload_type"] == "ho_stock":
+                        df_mapped, missing, _ = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
+                        if missing: return
+                        pnames = {p.product_id: p.product_name for p in (await bg_db.execute(select(Product))).scalars().all()}
+                        await bg_db.execute(delete(HOStockBatch))
+                        rows = []
+                        for _, row in df_mapped.iterrows():
+                            pid = str(row.get("product_id", "")).strip()
+                            if pid.endswith(".0"): pid = pid[:-2]
+                            batch = str(row.get("batch", "")).strip()
+                            if not pid or not batch: continue
+                            pn = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else pnames.get(pid, "")
+                            rows.append(HOStockBatch(product_id=pid, product_name=pn, batch=batch, mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                                closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
+                                landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
+                                expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
+                        for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
+                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.HO_STOCK, uploaded_by=info["user_id"], total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
+
+                    elif info["upload_type"] == "store_stock" and info.get("store_id"):
+                        sid = info["store_id"]
+                        df_mapped, missing, _ = map_columns(df, STORE_STOCK_COLUMNS, STORE_STOCK_REQUIRED)
+                        if missing: return
+                        await bg_db.execute(delete(StoreStockBatch).where(StoreStockBatch.store_id == sid))
+                        rows = []
+                        for _, row in df_mapped.iterrows():
+                            pname = str(row.get("product_name", "")).strip(); batch = str(row.get("batch", "")).strip()
+                            if not pname or not batch: continue
+                            cs = float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0
+                            pk = float(row.get("packing", 1)) if pd.notna(row.get("packing")) and float(row.get("packing", 0)) > 0 else 1
+                            hpid = str(row.get("ho_product_id", "")).strip() if pd.notna(row.get("ho_product_id")) else None
+                            if hpid in ("", "nan", "None"): hpid = None
+                            if hpid and hpid.endswith(".0"): hpid = hpid[:-2]
+                            rows.append(StoreStockBatch(store_id=sid, ho_product_id=hpid, product_name=pname, packing=pk, batch=batch,
+                                mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0, sales=float(row.get("sales", 0)) if pd.notna(row.get("sales")) else 0,
+                                closing_stock=cs, closing_stock_strips=cs/pk, cost_value=float(row.get("cost_value", 0)) if pd.notna(row.get("cost_value")) else 0,
+                                expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
+                        for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
+                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.STORE_STOCK, store_id=sid, uploaded_by=info["user_id"], total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
+
+                    await bg_db.commit()
+                    log.info(f"Chunk upload done: {info['upload_type']}, {info['filename']}")
+            except Exception as e:
+                import logging; logging.getLogger(__name__).error(f"Chunk process failed: {e}")
+
+        asyncio.create_task(bg())
+        return {"message": f"All {data.total_chunks} chunks received. Processing in background.", "background": True, "complete": True}
+
+    return {"message": f"Chunk {data.chunk_index + 1}/{data.total_chunks} received", "complete": False}
+
+
+class ChunkedUploadReq(BaseModel):
+    filename: str
+    file_base64: str
+    extra_params: Optional[dict] = None
+    upload_type: Optional[str] = None
+    store_id: Optional[int] = None
+
+
+@router.post("/upload-chunked")
+async def generic_chunked_upload(data: ChunkedUploadReq, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    """Generic chunked upload for ALL types — bypasses proxy body size limits."""
+    import base64, asyncio
+    content = base64.b64decode(data.file_base64)
+    fname = data.filename
+    uid = user["user_id"]
+    utype = data.upload_type or "products"
+    sid = data.store_id
+
+    # Determine which URL to forward to internally
+    async def bg():
+        try:
+            from database import async_session_maker
+            from models import HOStockBatch, StoreStockBatch, Product, UploadHistory, UploadType as UT
+            df = pd.read_excel(BytesIO(content))
+            if df.empty: return
+            import logging
+            log = logging.getLogger(__name__)
+            log.info(f"Chunked upload: type={utype}, rows={len(df)}, store={sid}")
+
+            async with async_session_maker() as bg_db:
+                if utype == "ho_stock":
+                    df_mapped, missing, _ = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
+                    if missing: log.error(f"Missing cols: {missing}"); return
+                    from models import Product as Prod
+                    pnames = {p.product_id: p.product_name for p in (await bg_db.execute(select(Prod))).scalars().all()}
+                    await bg_db.execute(delete(HOStockBatch))
+                    rows = []
+                    for _, row in df_mapped.iterrows():
+                        pid = str(row.get("product_id", "")).strip()
+                        if pid.endswith(".0"): pid = pid[:-2]
+                        batch = str(row.get("batch", "")).strip()
+                        if not pid or not batch: continue
+                        pn = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
+                        if not pn or pn == "nan": pn = pnames.get(pid, "")
+                        rows.append(HOStockBatch(product_id=pid, product_name=pn, batch=batch,
+                            mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                            closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
+                            landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
+                            expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
+                    for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
+                    await bg_db.commit()
+                    bg_db.add(UploadHistory(file_name=fname, upload_type=UT.HO_STOCK, uploaded_by=uid, total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
+
+                elif utype == "store_stock" and sid:
+                    df_mapped, missing, _ = map_columns(df, STORE_STOCK_COLUMNS, STORE_STOCK_REQUIRED)
+                    if missing: log.error(f"Missing cols: {missing}"); return
+                    await bg_db.execute(delete(StoreStockBatch).where(StoreStockBatch.store_id == sid))
+                    rows = []
+                    for _, row in df_mapped.iterrows():
+                        pname = str(row.get("product_name", "")).strip()
+                        batch = str(row.get("batch", "")).strip()
+                        if not pname or not batch: continue
+                        cs = float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0
+                        pk = float(row.get("packing", 1)) if pd.notna(row.get("packing")) and float(row.get("packing", 0)) > 0 else 1
+                        hpid = str(row.get("ho_product_id", "")).strip() if pd.notna(row.get("ho_product_id")) else None
+                        if hpid in ("", "nan", "None"): hpid = None
+                        if hpid and hpid.endswith(".0"): hpid = hpid[:-2]
+                        spid = str(row.get("store_product_id", "")).strip() if pd.notna(row.get("store_product_id")) else None
+                        if spid and spid.endswith(".0"): spid = spid[:-2]
+                        rows.append(StoreStockBatch(store_id=sid, ho_product_id=hpid, store_product_id=spid, product_name=pname, packing=pk, batch=batch,
+                            mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0, sales=float(row.get("sales", 0)) if pd.notna(row.get("sales")) else 0,
+                            closing_stock=cs, closing_stock_strips=cs/pk, cost_value=float(row.get("cost_value", 0)) if pd.notna(row.get("cost_value")) else 0,
+                            expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
+                    for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
+                    await bg_db.commit()
+                    bg_db.add(UploadHistory(file_name=fname, upload_type=UT.STORE_STOCK, store_id=sid, uploaded_by=uid, total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
+
+                await bg_db.commit()
+                log.info(f"Chunked upload complete: {utype}, {fname}")
+        except Exception as e:
+            import logging; logging.getLogger(__name__).error(f"Chunked upload failed: {e}")
+
+    asyncio.create_task(bg())
+    return {"message": f"File received ({len(content)//1024}KB). Processing in background. Refresh in 1-2 minutes.", "total": 0, "success": 0, "failed": 0, "errors": [], "background": True}
+
+
+@router.post("/products/upload-chunked")
+async def upload_products_chunked(data: ChunkedUploadReq, db: AsyncSession = Depends(get_db), user: dict = Depends(require_roles("ADMIN"))):
+    """Accepts large files as base64 JSON to bypass proxy body size limits."""
+    import base64, asyncio
+    content = base64.b64decode(data.file_base64)
+    fname = data.filename
+    uid = user["user_id"]
+
+    async def bg():
+        try:
+            df = pd.read_excel(BytesIO(content))
+            if df.empty: return
+            df_mapped, missing, _ = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
+            if missing: return
+            rows_data = []
+            for idx, row in df_mapped.iterrows():
+                product_id = str(row.get("product_id", "")).strip()
+                if product_id.endswith(".0"): product_id = product_id[:-2]
+                if not product_id: continue
+                rows_data.append({
+                    "product_id": product_id, "product_name": str(row.get("product_name", "")).strip(),
+                    "primary_supplier": str(row.get("primary_supplier", "")).strip() if pd.notna(row.get("primary_supplier")) else None,
+                    "secondary_supplier": str(row.get("secondary_supplier", "")).strip() if pd.notna(row.get("secondary_supplier")) else None,
+                    "least_price_supplier": str(row.get("least_price_supplier", "")).strip() if pd.notna(row.get("least_price_supplier")) else None,
+                    "most_qty_supplier": str(row.get("most_qty_supplier", "")).strip() if pd.notna(row.get("most_qty_supplier")) else None,
+                    "category": str(row.get("category", "")).strip() if pd.notna(row.get("category")) else None,
+                    "sub_category": str(row.get("sub_category", "")).strip() if pd.notna(row.get("sub_category")) else None,
+                    "rep": str(row.get("rep", "")).strip() if pd.notna(row.get("rep")) else None,
+                    "mrp": float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                    "ptr": float(row.get("ptr", 0)) if pd.notna(row.get("ptr")) else 0,
+                    "landing_cost": float(row.get("landing_cost", 0)) if pd.notna(row.get("landing_cost")) else 0,
+                })
+            if rows_data:
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+                async with async_session_maker() as bg_db:
+                    BATCH = 100
+                    for i in range(0, len(rows_data), BATCH):
+                        stmt = pg_insert(Product).values(rows_data[i:i+BATCH])
+                        stmt = stmt.on_conflict_do_update(index_elements=['product_id'],
+                            set_={k: stmt.excluded[k] for k in ['product_name', 'primary_supplier', 'secondary_supplier', 'least_price_supplier', 'most_qty_supplier', 'category', 'sub_category', 'rep', 'mrp', 'ptr', 'landing_cost']})
+                        await bg_db.execute(stmt); await bg_db.flush()
+                    await bg_db.commit()
+                    bg_db.add(UploadHistory(file_name=fname, upload_type=UploadType.PRODUCT_MASTER, uploaded_by=uid, total_records=len(df), success_records=len(rows_data), failed_records=len(df)-len(rows_data)))
+                    await bg_db.commit()
+        except Exception as e:
+            import logging; logging.getLogger(__name__).error(f"Chunked upload failed: {e}")
+
+    asyncio.create_task(bg())
+    return {"message": f"File received ({len(content)//1024}KB). Processing in background. Refresh in 1-2 minutes.", "total": 0, "success": 0, "failed": 0, "errors": [], "background": True, "columns_matched": {}, "columns_unmatched": []}
+
+
 @router.post("/products/upload")
 async def upload_products(
     file: UploadFile = File(...),

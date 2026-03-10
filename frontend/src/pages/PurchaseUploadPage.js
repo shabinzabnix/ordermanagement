@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { uploadFile } from '../lib/uploadHelper';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -58,23 +59,20 @@ export default function PurchaseUploadPage() {
     setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData(); fd.append('file', file);
     try {
-      const res = await api.post(`/intel/purchase-upload?store_id=${selectedStore}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000,
-        onUploadProgress: (evt) => {
-          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
-          setUploadProgress({ phase: 'uploading', percent: pct });
-          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+      await uploadFile(`/intel/purchase-upload?store_id=${selectedStore}`, fd, {
+        timeout: 300000,
+        onProgress: (phase, pct) => setUploadProgress({ phase, percent: pct }),
+        onDone: (data) => {
+          if (!data?.background) {
+            setUploadResult(data);
+            toast.success(`Imported: ${data?.new_records || 0} new, ${data?.skipped_duplicate || 0} duplicates skipped`);
+          }
+          setPage(1); setSearch('');
+          api.get('/intel/purchase-records', { params: { store_id: selectedStore, page: 1, limit } }).then(r => { setRecords(r.data.records); setTotal(r.data.total); });
+          setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
         },
       });
-      setUploadProgress({ phase: 'done', percent: 100 });
-      setUploadResult(res.data);
-      toast.success(`Imported: ${res.data.new_records} new, ${res.data.skipped_duplicate} duplicates skipped`);
-      setPage(1); setSearch('');
-      api.get('/intel/purchase-records', { params: { store_id: selectedStore, page: 1, limit } }).then(r => { setRecords(r.data.records); setTotal(r.data.total); });
-      const rp = {}; if (selectedStore) rp.store_id = selectedStore; if (dateFrom) rp.date_from = dateFrom; if (dateTo) rp.date_to = dateTo;
-      api.get('/intel/purchase-analytics', { params: rp }).then(r => setAnalytics(r.data));
-      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
+    } catch (err) { setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 

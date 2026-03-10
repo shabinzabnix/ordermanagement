@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { uploadFile } from '../lib/uploadHelper';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -49,22 +50,17 @@ export default function StoreStockUploadPage() {
     const fd = new FormData();
     fd.append('file', file);
     try {
-      const res = await api.post(`/stock/store/upload?store_id=${selectedStore}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (evt) => {
-          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
-          setUploadProgress({ phase: 'uploading', percent: pct });
-          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+      await uploadFile(`/stock/store/upload?store_id=${selectedStore}`, fd, {
+        onProgress: (phase, pct) => setUploadProgress({ phase, percent: pct }),
+        onDone: (data) => {
+          if (!data?.background) toast.success(`Store Stock: ${data?.success || 0}/${data?.total || 0} records processed`);
+          const params = { page: 1, limit: 100 };
+          if (search) params.search = search;
+          api.get(`/stock/store/${selectedStore}`, { params }).then(r => { setStocks(r.data.stocks); setTotal(r.data.total); });
+          setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
         },
       });
-      setUploadProgress({ phase: 'done', percent: 100 });
-      toast.success(`Store Stock: ${res.data.success}/${res.data.total} records processed`);
-      if (res.data.failed > 0) toast.warning(`${res.data.failed} records failed`);
-      const params = { page: 1, limit: 100 };
-      if (search) params.search = search;
-      api.get(`/stock/store/${selectedStore}`, { params }).then(r => { setStocks(r.data.stocks); setTotal(r.data.total); });
-      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
+    } catch (err) { setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 

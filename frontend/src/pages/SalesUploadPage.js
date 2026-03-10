@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import { uploadFile } from '../lib/uploadHelper';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -46,20 +47,19 @@ export default function SalesUploadPage() {
     setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData(); fd.append('file', file);
     try {
-      const res = await api.post(`/crm/sales-upload?store_id=${selectedStore}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000,
-        onUploadProgress: (evt) => {
-          const pct = Math.round((evt.loaded * 100) / (evt.total || 1));
-          setUploadProgress({ phase: 'uploading', percent: pct });
-          if (pct >= 100) setUploadProgress({ phase: 'processing', percent: 100 });
+      await uploadFile(`/crm/sales-upload?store_id=${selectedStore}`, fd, {
+        timeout: 300000,
+        onProgress: (phase, pct) => setUploadProgress({ phase, percent: pct }),
+        onDone: (data) => {
+          if (!data?.background) {
+            setUploadResult(data);
+            toast.success(`Imported: ${data?.new_records || 0} new records, ${data?.skipped_duplicate || 0} duplicates skipped`);
+          }
+          loadRecords();
+          setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
         },
       });
-      setUploadProgress({ phase: 'done', percent: 100 });
-      setUploadResult(res.data);
-      toast.success(`Imported: ${res.data.new_records} new records, ${res.data.skipped_duplicate} duplicates skipped, ${res.data.new_customers} new customers`);
-      loadRecords();
-      setTimeout(() => setUploadProgress({ phase: 'idle', percent: 0 }), 3000);
-    } catch (err) { toast.error(err.response?.data?.detail || 'Upload failed'); setUploadProgress({ phase: 'idle', percent: 0 }); }
+    } catch (err) { setUploadProgress({ phase: 'idle', percent: 0 }); }
     finally { setUploading(false); e.target.value = ''; }
   };
 
