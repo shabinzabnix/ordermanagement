@@ -42,7 +42,7 @@ export async function uploadFile(url, formData, { onProgress, onDone, onError, t
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     const totalChunks = Math.ceil(bytes.length / CHUNK_SIZE);
-    const uploadType = url.includes('ho/upload') ? 'ho_stock' : url.includes('store/upload') ? 'store_stock' : url.includes('sales-upload') ? 'sales' : url.includes('purchase-upload') ? 'purchase' : 'products';
+    const uploadType = url.includes('ho/upload') ? 'ho_stock' : url.includes('store/upload') ? 'store_stock' : url.includes('sales-upload') ? 'sales' : url.includes('purchase-upload') ? 'purchase' : url.includes('mode=new') ? 'products_new' : 'products';
     const storeMatch = url.match(/store_id=(\d+)/);
     const storeId = storeMatch ? parseInt(storeMatch[1]) : null;
     const uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

@@ -216,7 +216,8 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                     del content
                     return
                 async with async_session_maker() as bg_db:
-                    if meta["upload_type"] == "products":
+                    if meta["upload_type"] in ("products", "products_new"):
+                        is_new_only = meta["upload_type"] == "products_new"
                         df_mapped, missing, _ = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
                         if missing: log.error(f"Missing: {missing}"); return
                         rows_data = []
@@ -235,9 +236,15 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                                 "mrp": float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
                                 "ptr": float(row.get("ptr", 0)) if pd.notna(row.get("ptr")) else 0,
                                 "landing_cost": float(row.get("landing_cost", 0)) if pd.notna(row.get("landing_cost")) else 0})
+                        if not is_new_only:
+                            await bg_db.execute(delete(Product))
+                            await bg_db.flush()
                         for i in range(0, len(rows_data), 100):
                             stmt = pg_insert(Product).values(rows_data[i:i+100])
-                            stmt = stmt.on_conflict_do_update(index_elements=['product_id'], set_={k: stmt.excluded[k] for k in ['product_name','primary_supplier','secondary_supplier','least_price_supplier','most_qty_supplier','category','sub_category','rep','mrp','ptr','landing_cost']})
+                            if is_new_only:
+                                stmt = stmt.on_conflict_do_nothing(index_elements=['product_id'])
+                            else:
+                                stmt = stmt.on_conflict_do_update(index_elements=['product_id'], set_={k: stmt.excluded[k] for k in ['product_name','primary_supplier','secondary_supplier','least_price_supplier','most_qty_supplier','category','sub_category','rep','mrp','ptr','landing_cost']})
                             await bg_db.execute(stmt); await bg_db.flush()
                         bg_db.add(UploadHistory(file_name=meta["filename"], upload_type=UploadType.PRODUCT_MASTER, uploaded_by=meta["user_id"], total_records=len(df), success_records=len(rows_data), failed_records=len(df)-len(rows_data)))
 
@@ -594,10 +601,12 @@ async def upload_products_chunked(data: ChunkedUploadReq, db: AsyncSession = Dep
 @router.post("/products/upload")
 async def upload_products(
     file: UploadFile = File(...),
+    mode: str = Query("full"),
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN")),
 ):
+    """mode=full: replaces all products. mode=new: adds only new, skips existing."""
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted")
 
@@ -704,14 +713,21 @@ async def upload_products(
 
     if rows_data:
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+        if mode == "full":
+            # Delete all existing products first, then insert
+            await db.execute(delete(Product))
+            await db.flush()
         BATCH = 100
         for i in range(0, len(rows_data), BATCH):
             batch = rows_data[i:i+BATCH]
             stmt = pg_insert(Product).values(batch)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=['product_id'],
-                set_={k: stmt.excluded[k] for k in ['product_name', 'primary_supplier', 'secondary_supplier', 'least_price_supplier', 'most_qty_supplier', 'category', 'sub_category', 'rep', 'mrp', 'ptr', 'landing_cost']}
-            )
+            if mode == "new":
+                stmt = stmt.on_conflict_do_nothing(index_elements=['product_id'])
+            else:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['product_id'],
+                    set_={k: stmt.excluded[k] for k in ['product_name', 'primary_supplier', 'secondary_supplier', 'least_price_supplier', 'most_qty_supplier', 'category', 'sub_category', 'rep', 'mrp', 'ptr', 'landing_cost']}
+                )
             await db.execute(stmt)
             await db.flush()
         await db.commit()

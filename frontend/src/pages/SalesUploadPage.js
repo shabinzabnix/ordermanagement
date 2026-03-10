@@ -40,6 +40,8 @@ export default function SalesUploadPage() {
   };
   useEffect(() => { loadRecords(); }, [selectedStore, pendingOnly]);
 
+  const [uploadMode, setUploadMode] = useState('full');
+
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file || !selectedStore) { toast.error('Select a store first'); return; }
@@ -47,7 +49,7 @@ export default function SalesUploadPage() {
     setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData(); fd.append('file', file);
     try {
-      await uploadFile(`/crm/sales-upload?store_id=${selectedStore}`, fd, {
+      await uploadFile(`/crm/sales-upload?store_id=${selectedStore}&mode=${uploadMode}`, fd, {
         timeout: 300000,
         onProgress: (phase, pct) => setUploadProgress({ phase, percent: pct }),
         onDone: (data) => {
@@ -87,11 +89,24 @@ export default function SalesUploadPage() {
         <Card className="border-slate-200 shadow-sm rounded-sm lg:col-span-2">
           <CardHeader className="pb-3"><CardTitle className="text-sm font-heading font-semibold flex items-center gap-2"><Upload className="w-4 h-4 text-sky-500" /> Upload Sales Report</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-wrap items-end">
               <Select value={selectedStore} onValueChange={setSelectedStore}>
-                <SelectTrigger className="w-[220px] font-body text-sm rounded-sm" data-testid="sales-store-select"><SelectValue placeholder="Select Store" /></SelectTrigger>
+                <SelectTrigger className="w-[180px] font-body text-sm rounded-sm" data-testid="sales-store-select"><SelectValue placeholder="Select Store" /></SelectTrigger>
                 <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
               </Select>
+              <div className="space-y-0.5">
+                <span className="text-[9px] font-body text-slate-400 uppercase">Upload Mode</span>
+                <Select value={uploadMode} onValueChange={setUploadMode}>
+                  <SelectTrigger className="w-[180px] rounded-sm text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="full">Full Report (all data)</SelectItem>
+                    <SelectItem value="1day">Last 1 Day only</SelectItem>
+                    <SelectItem value="2days">Last 2 Days</SelectItem>
+                    <SelectItem value="3days">Last 3 Days</SelectItem>
+                    <SelectItem value="7days">Last 7 Days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div>
                 <input type="file" accept=".xlsx,.xls" onChange={handleUpload} disabled={uploading || !selectedStore} className="hidden" id="sales-upload" data-testid="sales-file-input" />
                 <label htmlFor="sales-upload">

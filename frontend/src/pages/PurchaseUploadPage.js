@@ -21,6 +21,7 @@ export default function PurchaseUploadPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadProgress, setUploadProgress] = useState({ phase: 'idle', percent: 0 });
+  const [uploadMode, setUploadMode] = useState('full');
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -59,7 +60,7 @@ export default function PurchaseUploadPage() {
     setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData(); fd.append('file', file);
     try {
-      await uploadFile(`/intel/purchase-upload?store_id=${selectedStore}`, fd, {
+      await uploadFile(`/intel/purchase-upload?store_id=${selectedStore}&mode=${uploadMode}`, fd, {
         timeout: 300000,
         onProgress: (phase, pct) => setUploadProgress({ phase, percent: pct }),
         onDone: (data) => {
@@ -99,6 +100,19 @@ export default function PurchaseUploadPage() {
             <Select value={selectedStore} onValueChange={v => { setSelectedStore(v); setPage(1); }}>
               <SelectTrigger className="w-[200px] font-body text-sm rounded-sm"><SelectValue placeholder="Select Store" /></SelectTrigger>
               <SelectContent>{stores.map(s => <SelectItem key={s.id} value={String(s.id)}>{s.store_name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] font-body text-slate-400 uppercase tracking-wider">Upload Mode</label>
+            <Select value={uploadMode} onValueChange={setUploadMode}>
+              <SelectTrigger className="w-[180px] rounded-sm text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="full">Full Report (all data)</SelectItem>
+                <SelectItem value="1day">Last 1 Day only</SelectItem>
+                <SelectItem value="2days">Last 2 Days</SelectItem>
+                <SelectItem value="3days">Last 3 Days</SelectItem>
+                <SelectItem value="7days">Last 7 Days</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           <div>

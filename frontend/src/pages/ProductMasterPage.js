@@ -69,19 +69,20 @@ export default function ProductMasterPage() {
   }, []);
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
-  const handleUpload = async (e) => {
+  const handleUpload = async (e, mode = 'full') => {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
     setUploadProgress({ phase: 'uploading', percent: 0 });
     const fd = new FormData();
     fd.append('file', file);
+    const url = mode === 'new' ? '/products/upload?mode=new' : '/products/upload?mode=full';
     try {
-      await uploadFile('/products/upload', fd, {
+      await uploadFile(url, fd, {
         onProgress: (phase, pct) => setUploadProgress({ phase, percent: pct }),
         onDone: (data) => {
           if (!data?.background) {
-            toast.success(`Upload: ${data?.success || 0}/${data?.total || 0} records processed`);
+            toast.success(`${mode === 'new' ? 'New products added' : 'Full master updated'}: ${data?.success || 0}/${data?.total || 0}`);
           }
           setUploadOpen(false);
           loadProducts();
@@ -115,13 +116,23 @@ export default function ProductMasterPage() {
           <DialogContent className="rounded-sm">
             <DialogHeader><DialogTitle className="font-heading">Upload Product Master</DialogTitle></DialogHeader>
             <p className="text-sm text-slate-500 font-body">Required columns: Product ID, Product Name. Other standard columns mapped automatically.</p>
-            <div className="border-2 border-dashed border-slate-200 rounded-sm p-8 text-center hover:border-sky-300 transition-colors">
-              <input type="file" accept=".xlsx,.xls" onChange={handleUpload} disabled={uploading} className="hidden" id="product-upload" data-testid="product-file-input" />
-              <label htmlFor="product-upload" className="cursor-pointer">
-                <Upload className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                <p className="text-sm text-slate-500 font-body">{uploading ? 'Processing...' : 'Click to select Excel file'}</p>
-                <p className="text-[11px] text-slate-400 mt-1">.xlsx or .xls</p>
-              </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="border-2 border-dashed border-sky-200 rounded-sm p-6 text-center hover:border-sky-400 transition-colors bg-sky-50/30">
+                <input type="file" accept=".xlsx,.xls" onChange={e => handleUpload(e, 'full')} disabled={uploading} className="hidden" id="product-upload-full" />
+                <label htmlFor="product-upload-full" className="cursor-pointer">
+                  <Upload className="w-7 h-7 text-sky-400 mx-auto mb-1.5" />
+                  <p className="text-[13px] text-sky-700 font-body font-medium">Full Product Master</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Replaces entire product list</p>
+                </label>
+              </div>
+              <div className="border-2 border-dashed border-emerald-200 rounded-sm p-6 text-center hover:border-emerald-400 transition-colors bg-emerald-50/30">
+                <input type="file" accept=".xlsx,.xls" onChange={e => handleUpload(e, 'new')} disabled={uploading} className="hidden" id="product-upload-new" />
+                <label htmlFor="product-upload-new" className="cursor-pointer">
+                  <Upload className="w-7 h-7 text-emerald-400 mx-auto mb-1.5" />
+                  <p className="text-[13px] text-emerald-700 font-body font-medium">Add New Products</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Adds to existing, skips duplicates</p>
+                </label>
+              </div>
             </div>
             <UploadProgress phase={uploadProgress.phase} percent={uploadProgress.percent} />
           </DialogContent>

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, delete
 from database import get_db
 from models import (
     CRMCustomer, MedicinePurchase, CRMCallLog, CRMTask, SalesRecord,
@@ -712,6 +712,7 @@ SALES_REQUIRED = ["patient_name", "mobile_number", "product_name"]
 @router.post("/crm/sales-upload")
 async def upload_sales_report(
     store_id: int = Query(...),
+    mode: str = Query("full"),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
@@ -720,6 +721,15 @@ async def upload_sales_report(
     if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         if store_id != user["store_id"]:
             raise HTTPException(403, "You can only upload for your assigned store")
+
+    # For date-wise modes, delete existing data for that period first
+    if mode != "full" and mode != "":
+        days_map = {"1day": 1, "2days": 2, "3days": 3, "7days": 7}
+        days = days_map.get(mode, 0)
+        if days > 0:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            await db.execute(delete(SalesRecord).where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= cutoff)))
+            await db.commit()
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()
