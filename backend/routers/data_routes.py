@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from database import get_db, async_session_maker
-from models import Product, Store, User, UserRole, UploadHistory, UploadType, SalesRecord, TransactionComment
+from models import Product, Store, User, UserRole, UploadHistory, UploadType, SalesRecord, TransactionComment, HOStockBatch, StoreStockBatch
 from auth import get_current_user, require_roles, hash_password
+from routers.operations_routes import HO_STOCK_COLUMNS, HO_STOCK_REQUIRED, STORE_STOCK_COLUMNS, STORE_STOCK_REQUIRED, map_columns
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
