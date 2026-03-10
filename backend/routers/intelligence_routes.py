@@ -1137,15 +1137,8 @@ async def upload_purchase_report(
         if store_id != user["store_id"]:
             raise HTTPException(403, "You can only upload for your assigned store")
     
-    # For date-wise modes, delete existing data for that period first
-    if mode != "full" and mode != "":
-        from sqlalchemy import delete as sql_delete, and_ as sql_and
-        days_map = {"1day": 1, "2days": 2, "3days": 3, "7days": 7}
-        days = days_map.get(mode, 0)
-        if days > 0:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-            await db.execute(sql_delete(PurchaseRecord).where(sql_and(PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= cutoff)))
-            await db.commit()
+    # For date-wise modes, just add new records (dedup handles duplicates)
+    # No deletion needed — small daily files just append to existing data
 
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Only Excel files accepted")
