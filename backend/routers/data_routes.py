@@ -270,6 +270,127 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                         for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
                         bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.STORE_STOCK, store_id=sid, uploaded_by=info["user_id"], total_records=len(df), success_records=len(rows), failed_records=len(df)-len(rows)))
 
+                    elif info["upload_type"] == "sales" and info.get("store_id"):
+                        sid = info["store_id"]
+                        from models import SalesRecord, CRMCustomer, CustomerType
+                        from routers.crm_routes import SALES_COLUMNS, SALES_REQUIRED
+                        df_mapped, missing, _ = map_columns(df, SALES_COLUMNS, SALES_REQUIRED) if 'SALES_COLUMNS' in dir() else (df, [], {})
+                        # Flexible column mapping for sales
+                        df.columns = [str(c).strip().lower().replace('_', ' ') for c in df.columns]
+                        col_map = {"patient name": "patient_name", "customer name": "patient_name", "name": "patient_name",
+                            "mobile number": "mobile_number", "mobile": "mobile_number", "phone": "mobile_number", "mob": "mobile_number",
+                            "product name": "product_name", "product": "product_name", "item name": "product_name", "item": "product_name",
+                            "product id": "product_id", "id": "product_id", "ho id": "product_id",
+                            "date of invoice": "invoice_date", "date": "invoice_date", "invoice date": "invoice_date",
+                            "entry number": "entry_number", "invoice no": "entry_number", "invoice": "entry_number", "bill no": "entry_number",
+                            "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount",
+                            "quantity": "quantity", "qty": "quantity"}
+                        mapped = {c: col_map[c] for c in df.columns if c in col_map}
+                        df = df.rename(columns=mapped)
+
+                        success, skipped, failed, new_cust = 0, 0, 0, 0
+                        existing_mobiles = {}
+                        for c in (await bg_db.execute(select(CRMCustomer))).scalars().all():
+                            existing_mobiles[c.mobile_number] = c.id
+                        existing_entries = set()
+                        for r in (await bg_db.execute(select(SalesRecord.entry_number, SalesRecord.product_name).where(SalesRecord.store_id == sid))).all():
+                            existing_entries.add((str(r[0]), str(r[1])))
+
+                        new_custs = {}
+                        rows = []
+                        for _, row in df.iterrows():
+                            pname = str(row.get("patient_name", "")).strip() if pd.notna(row.get("patient_name")) else ""
+                            mobile = str(row.get("mobile_number", "")).strip().replace(".0", "") if pd.notna(row.get("mobile_number")) else ""
+                            product = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
+                            if not product or product == "nan": failed += 1; continue
+                            entry = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else ""
+                            if entry.endswith(".0"): entry = entry[:-2]
+                            if (entry, product) in existing_entries: skipped += 1; continue
+
+                            inv_date = None
+                            if pd.notna(row.get("invoice_date")):
+                                try: inv_date = pd.Timestamp(row["invoice_date"]).to_pydatetime().replace(tzinfo=timezone.utc)
+                                except: pass
+
+                            cid = existing_mobiles.get(mobile)
+                            if not cid and mobile and len(mobile) >= 10:
+                                if mobile not in new_custs:
+                                    new_custs[mobile] = pname or "Unknown"
+
+                            rows.append(SalesRecord(store_id=sid, patient_name=pname, mobile_number=mobile,
+                                product_name=product, product_id=str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
+                                entry_number=entry, invoice_date=inv_date,
+                                total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
+                                quantity=float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0))
+                            success += 1
+
+                        # Create new customers
+                        for mob, cname in new_custs.items():
+                            c = CRMCustomer(mobile_number=mob, customer_name=cname, first_store_id=sid, assigned_store_id=sid, customer_type=CustomerType.WALKIN)
+                            bg_db.add(c)
+                        if new_custs:
+                            await bg_db.flush()
+                            for c in (await bg_db.execute(select(CRMCustomer).where(CRMCustomer.mobile_number.in_(new_custs.keys())))).scalars().all():
+                                existing_mobiles[c.mobile_number] = c.id
+                            new_cust = len(new_custs)
+
+                        # Set customer_id on records
+                        for r in rows:
+                            if r.mobile_number: r.customer_id = existing_mobiles.get(r.mobile_number)
+
+                        for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
+                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.SALES_REPORT, store_id=sid, uploaded_by=info["user_id"],
+                            total_records=len(df), success_records=success, failed_records=failed,
+                            error_details=f"New customers: {new_cust}, Skipped: {skipped}"))
+
+                    elif info["upload_type"] == "purchase" and info.get("store_id"):
+                        sid = info["store_id"]
+                        from models import PurchaseRecord
+                        df.columns = [str(c).strip().lower().replace('_', ' ') for c in df.columns]
+                        col_map = {"product name": "product_name", "product": "product_name", "item name": "product_name",
+                            "product id": "product_id", "id": "product_id",
+                            "supplier name": "supplier_name", "supplier": "supplier_name", "party name": "supplier_name",
+                            "purchase date": "purchase_date", "date": "purchase_date",
+                            "entry number": "entry_number", "invoice no": "entry_number", "bill no": "entry_number",
+                            "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount",
+                            "quantity": "quantity", "qty": "quantity"}
+                        mapped = {c: col_map[c] for c in df.columns if c in col_map}
+                        df = df.rename(columns=mapped)
+
+                        success, skipped, failed = 0, 0, 0
+                        existing = set()
+                        for r in (await bg_db.execute(select(PurchaseRecord.entry_number, PurchaseRecord.product_name).where(PurchaseRecord.store_id == sid))).all():
+                            existing.add((str(r[0]), str(r[1])))
+
+                        rows = []
+                        for _, row in df.iterrows():
+                            product = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
+                            supplier = str(row.get("supplier_name", "")).strip() if pd.notna(row.get("supplier_name")) else ""
+                            if not product or product == "nan": failed += 1; continue
+                            entry = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else ""
+                            if entry.endswith(".0"): entry = entry[:-2]
+                            if (entry, product) in existing: skipped += 1; continue
+
+                            pdate = None
+                            if pd.notna(row.get("purchase_date")):
+                                try: pdate = pd.Timestamp(row["purchase_date"]).to_pydatetime().replace(tzinfo=timezone.utc)
+                                except: pass
+
+                            pid = str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None
+                            if pid and pid.endswith(".0"): pid = pid[:-2]
+                            if pid in ("", "nan", "None"): pid = None
+
+                            rows.append(PurchaseRecord(store_id=sid, product_name=product, product_id=pid, supplier_name=supplier,
+                                entry_number=entry, purchase_date=pdate,
+                                total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
+                                quantity=float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0))
+                            success += 1
+
+                        for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
+                        bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.PURCHASE_REPORT, store_id=sid, uploaded_by=info["user_id"],
+                            total_records=len(df), success_records=success, failed_records=failed,
+                            error_details=f"Skipped duplicates: {skipped}"))
+
                     await bg_db.commit()
                     log.info(f"Chunk upload done: {info['upload_type']}, {info['filename']}")
             except Exception as e:
