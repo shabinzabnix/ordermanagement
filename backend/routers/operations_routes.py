@@ -911,8 +911,12 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    from cache import get_cached, set_cached
     is_store_staff = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
+    cache_key = f"dashboard_stats_{user_store_id or 'all'}"
+    cached = get_cached(cache_key, ttl=60)
+    if cached: return cached
 
     total_products = (await db.execute(select(func.count(Product.id)))).scalar() or 0
 
@@ -959,7 +963,7 @@ async def get_dashboard_stats(
     if sids:
         smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
 
-    return {
+    result = {
         "total_products": total_products,
         "total_stores": total_stores,
         "ho_stock_value": round(store_stock_value if user_store_id else ho_stock_value, 2),
@@ -982,3 +986,4 @@ async def get_dashboard_stats(
             for t in recent_transfers
         ],
     }
+    return set_cached(cache_key, result, ttl=60)

@@ -76,6 +76,10 @@ async def aging_report(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
+    from cache import get_cached, set_cached
+    cache_key = f"aging_{location}_{status}_{bucket}_{search}_{page}"
+    cached = get_cached(cache_key, ttl=90)
+    if cached: return cached
     now = datetime.now(timezone.utc)
     d90 = now - timedelta(days=90)
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
@@ -188,13 +192,14 @@ async def aging_report(
         if i["status"] == "dead": dead_count += 1; dead_value += i["value"]
         if i["status"] == "slow": slow_count += 1; slow_value += i["value"]
 
-    return {
+    result = {
         "items": paged, "total": total, "page": page, "limit": limit,
         "summary": buckets,
         "dead_count": dead_count, "slow_count": slow_count,
         "dead_value": round(dead_value, 2), "slow_value": round(slow_value, 2),
         "locations": ["Head Office"] + list(stores.values()),
     }
+    return set_cached(cache_key, result, ttl=90)
 
 
 @router.get("/intelligence/summary")
@@ -202,10 +207,15 @@ async def intelligence_summary(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    now = datetime.now(timezone.utc)
-    stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    from cache import get_cached, set_cached
     is_store_staff = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
+    cache_key = f"intel_summary_{user_store_id or 'all'}"
+    cached = get_cached(cache_key, ttl=120)
+    if cached: return cached
+
+    now = datetime.now(timezone.utc)
+    stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
 
     dead_items, slow_items, recommendations = [], [], []
 
@@ -270,7 +280,7 @@ async def intelligence_summary(
                     })
                     break
 
-    return {
+    result = {
         "dead_stock": sorted(dead_items, key=lambda x: -x["days"])[:20],
         "slow_moving": sorted(slow_items, key=lambda x: -x["days"])[:20],
         "dead_stock_count": len(dead_items),
@@ -279,6 +289,7 @@ async def intelligence_summary(
         "slow_moving_value": round(sum(i["value"] for i in slow_items), 2),
         "recommendations": recommendations[:10],
     }
+    return set_cached(cache_key, result, ttl=120)
 
 
 # ─── Batch Details ────────────────────────────────────────
@@ -755,9 +766,14 @@ async def get_chart_data(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    now = datetime.now(timezone.utc)
+    from cache import get_cached, set_cached
     is_store = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store else None
+    cache_key = f"chart_data_{user_store_id or 'all'}"
+    cached = get_cached(cache_key, ttl=120)
+    if cached: return cached
+
+    now = datetime.now(timezone.utc)
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
 
     # 1. Aging distribution buckets
@@ -810,12 +826,13 @@ async def get_chart_data(
     )).all()
     transfer_chart = [{"status": r.status.value if hasattr(r.status, 'value') else r.status, "count": r.cnt} for r in transfer_q]
 
-    return {
+    result = {
         "aging_chart": aging_chart,
         "stock_distribution": store_dist,
         "category_chart": category_chart,
         "transfer_chart": transfer_chart,
     }
+    return set_cached(cache_key, result, ttl=120)
 
 
 @router.get("/audit-logs")
