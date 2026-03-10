@@ -273,19 +273,10 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                     elif info["upload_type"] == "sales" and info.get("store_id"):
                         sid = info["store_id"]
                         from models import SalesRecord, CRMCustomer, CustomerType
-                        from routers.crm_routes import SALES_COLUMNS, SALES_REQUIRED
-                        df_mapped, missing, _ = map_columns(df, SALES_COLUMNS, SALES_REQUIRED) if 'SALES_COLUMNS' in dir() else (df, [], {})
-                        # Flexible column mapping for sales
+                        from routers.crm_routes import SALES_COLUMNS
+                        # Use the same column mapping as the direct upload
                         df.columns = [str(c).strip().lower().replace('_', ' ') for c in df.columns]
-                        col_map = {"patient name": "patient_name", "customer name": "patient_name", "name": "patient_name",
-                            "mobile number": "mobile_number", "mobile": "mobile_number", "phone": "mobile_number", "mob": "mobile_number",
-                            "product name": "product_name", "product": "product_name", "item name": "product_name", "item": "product_name",
-                            "product id": "product_id", "id": "product_id", "ho id": "product_id",
-                            "date of invoice": "invoice_date", "date": "invoice_date", "invoice date": "invoice_date",
-                            "entry number": "entry_number", "invoice no": "entry_number", "invoice": "entry_number", "bill no": "entry_number",
-                            "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount",
-                            "quantity": "quantity", "qty": "quantity"}
-                        mapped = {c: col_map[c] for c in df.columns if c in col_map}
+                        mapped = {c: SALES_COLUMNS[c] for c in df.columns if c in SALES_COLUMNS}
                         df = df.rename(columns=mapped)
 
                         success, skipped, failed, new_cust = 0, 0, 0, 0
@@ -321,7 +312,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                                 product_name=product, product_id=str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None,
                                 entry_number=entry, invoice_date=inv_date,
                                 total_amount=float(row.get("total_amount", 0)) if pd.notna(row.get("total_amount")) else 0,
-                                quantity=float(row.get("quantity", 0)) if pd.notna(row.get("quantity")) else 0))
+                                quantity=float(row.get("qty", row.get("quantity", 0))) if pd.notna(row.get("qty", row.get("quantity"))) else 0))
                             success += 1
 
                         # Create new customers
@@ -949,6 +940,14 @@ async def delete_upload(
         deleted_count = result.rowcount
     elif utype == "product_master":
         result = await db.execute(delete(Product))
+        deleted_count = result.rowcount
+    elif utype in ("sales_report", "SALES_REPORT") and upload.store_id:
+        from models import SalesRecord
+        result = await db.execute(delete(SalesRecord).where(SalesRecord.store_id == upload.store_id))
+        deleted_count = result.rowcount
+    elif utype in ("purchase_report", "PURCHASE_REPORT") and upload.store_id:
+        from models import PurchaseRecord
+        result = await db.execute(delete(PurchaseRecord).where(PurchaseRecord.store_id == upload.store_id))
         deleted_count = result.rowcount
 
     await db.delete(upload)
