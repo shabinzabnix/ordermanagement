@@ -51,7 +51,13 @@ export async function uploadFile(url, formData, { onProgress, onDone, onError, t
       const start = i * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, bytes.length);
       const chunk = bytes.slice(start, end);
-      const b64 = btoa(String.fromCharCode(...chunk));
+      // Convert binary to base64 without stack overflow
+      let binary = '';
+      const STEP = 8192;
+      for (let j = 0; j < chunk.length; j += STEP) {
+        binary += String.fromCharCode.apply(null, chunk.subarray(j, Math.min(j + STEP, chunk.length)));
+      }
+      const b64 = btoa(binary);
 
       const pct = Math.round(((i + 1) / totalChunks) * 80) + 10;
       if (onProgress) onProgress('uploading', pct);
