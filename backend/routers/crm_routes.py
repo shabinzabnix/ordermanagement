@@ -704,6 +704,7 @@ SALES_COLUMNS = {
     "net": "net_amount",
     "category": "category",
     "expiary": "expiry_date", "expiry": "expiry_date", "expiry date": "expiry_date",
+    "patent name": "supplier_name", "sub category": "sub_category",
 }
 SALES_REQUIRED = ["patient_name", "mobile_number", "product_name"]
 

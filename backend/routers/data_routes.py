@@ -202,8 +202,9 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                 log.info(f"Processing chunked: {info['filename']}, {len(content)} bytes, type={info['upload_type']}")
 
                 df = pd.read_excel(BytesIO(content))
-                del content  # Free memory after parsing
-                if df.empty: return
+                if df.empty:
+                    del content
+                    return
                 async with async_session_maker() as bg_db:
                     if info["upload_type"] == "products":
                         df_mapped, missing, _ = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
@@ -274,10 +275,23 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                         sid = info["store_id"]
                         from models import SalesRecord, CRMCustomer, CustomerType
                         from routers.crm_routes import SALES_COLUMNS
-                        # Use the same column mapping as the direct upload
-                        df.columns = [str(c).strip().lower().replace('_', ' ') for c in df.columns]
-                        mapped = {c: SALES_COLUMNS[c] for c in df.columns if c in SALES_COLUMNS}
-                        df = df.rename(columns=mapped)
+
+                        # Try multiple header rows (some files have title rows)
+                        df_final = None
+                        for skip in [0, 1, 2, 3]:
+                            try:
+                                test_df = pd.read_excel(BytesIO(content), skiprows=skip)
+                                cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
+                                matched = sum(1 for c in cols_lower if c in SALES_COLUMNS)
+                                if matched >= 3 and test_df.shape[0] > 0:
+                                    df_final = test_df
+                                    break
+                            except: continue
+                        if df_final is None: df_final = df
+
+                        df_final.columns = [str(c).strip().lower().replace('_', ' ') for c in df_final.columns]
+                        mapped = {c: SALES_COLUMNS[c] for c in df_final.columns if c in SALES_COLUMNS}
+                        df_final = df_final.rename(columns=mapped)
 
                         success, skipped, failed, new_cust = 0, 0, 0, 0
                         existing_mobiles = {}
@@ -289,7 +303,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
 
                         new_custs = {}
                         rows = []
-                        for _, row in df.iterrows():
+                        for _, row in df_final.iterrows():
                             pname = str(row.get("patient_name", "")).strip() if pd.notna(row.get("patient_name")) else ""
                             mobile = str(row.get("mobile_number", "")).strip().replace(".0", "") if pd.notna(row.get("mobile_number")) else ""
                             product = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
@@ -331,7 +345,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
 
                         for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
                         bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.SALES_REPORT, store_id=sid, uploaded_by=info["user_id"],
-                            total_records=len(df), success_records=success, failed_records=failed,
+                            total_records=len(df_final), success_records=success, failed_records=failed,
                             error_details=f"New customers: {new_cust}, Skipped: {skipped}"))
 
                     elif info["upload_type"] == "purchase" and info.get("store_id"):
@@ -383,6 +397,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                             error_details=f"Skipped duplicates: {skipped}"))
 
                     await bg_db.commit()
+                    del content  # Free memory after all processing
                     log.info(f"Chunk upload done: {info['upload_type']}, {info['filename']}")
             except Exception as e:
                 import logging; logging.getLogger(__name__).error(f"Chunk process failed: {e}")
