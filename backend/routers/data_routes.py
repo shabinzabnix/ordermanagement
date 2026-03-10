@@ -815,9 +815,24 @@ async def delete_upload(
     upload = (await db.execute(select(UploadHistory).where(UploadHistory.id == upload_id))).scalar_one_or_none()
     if not upload:
         raise HTTPException(404, "Upload not found")
+
+    # Delete the actual uploaded data based on upload type
+    utype = upload.upload_type.value if hasattr(upload.upload_type, 'value') else upload.upload_type
+    deleted_count = 0
+
+    if utype == "ho_stock":
+        result = await db.execute(delete(HOStockBatch))
+        deleted_count = result.rowcount
+    elif utype == "store_stock" and upload.store_id:
+        result = await db.execute(delete(StoreStockBatch).where(StoreStockBatch.store_id == upload.store_id))
+        deleted_count = result.rowcount
+    elif utype == "product_master":
+        result = await db.execute(delete(Product))
+        deleted_count = result.rowcount
+
     await db.delete(upload)
     await db.commit()
-    return {"message": "Upload record deleted"}
+    return {"message": f"Upload deleted. {deleted_count} records removed."}
 
 
 
