@@ -7,6 +7,7 @@ from auth import get_current_user, require_roles, hash_password
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 import pandas as pd
 from io import BytesIO
 import json
@@ -159,31 +160,48 @@ class ChunkReq(BaseModel):
     store_id: Optional[int] = None
 
 
-_chunk_store = {}
+_chunk_meta = {}  # upload_id -> metadata (no file data in memory)
+UPLOAD_TMP = Path(__file__).parent.parent / "upload_tmp"
+UPLOAD_TMP.mkdir(exist_ok=True)
 
 
 @router.post("/upload-chunk")
 async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
-    """Receives file chunks and processes when all chunks received."""
+    """Receives file chunks, writes to temp file, processes when complete."""
     import base64, asyncio
-    key = data.upload_id
-    if key not in _chunk_store:
-        _chunk_store[key] = {"chunks": {}, "filename": data.filename, "total": data.total_chunks,
-                             "upload_type": data.upload_type, "store_id": data.store_id, "user_id": user["user_id"]}
-    _chunk_store[key]["chunks"][data.chunk_index] = base64.b64decode(data.chunk_data)
 
-    if len(_chunk_store[key]["chunks"]) >= data.total_chunks:
-        content = b""
-        for i in range(data.total_chunks): content += _chunk_store[key]["chunks"][i]
-        info = _chunk_store.pop(key)
+    key = data.upload_id
+    chunk_bytes = base64.b64decode(data.chunk_data)
+    tmp_path = UPLOAD_TMP / f"{key}.tmp"
+
+    if key not in _chunk_meta:
+        _chunk_meta[key] = {"received": set(), "filename": data.filename, "total": data.total_chunks,
+                            "upload_type": data.upload_type, "store_id": data.store_id, "user_id": user["user_id"]}
+        # Create/truncate temp file
+        tmp_path.write_bytes(b"")
+
+    # Write chunk at correct offset
+    with open(tmp_path, "r+b" if tmp_path.exists() else "wb") as f:
+        f.seek(data.chunk_index * 600000)
+        f.write(chunk_bytes)
+    _chunk_meta[key]["received"].add(data.chunk_index)
+
+    if len(_chunk_meta[key]["received"]) >= data.total_chunks:
+        info = _chunk_meta.pop(key)
+        file_path = str(tmp_path)
 
         async def bg():
             try:
                 from database import async_session_maker
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
                 import logging; log = logging.getLogger(__name__)
+
+                content = Path(file_path).read_bytes()
+                Path(file_path).unlink(missing_ok=True)  # Clean up temp file
                 log.info(f"Processing chunked: {info['filename']}, {len(content)} bytes, type={info['upload_type']}")
+
                 df = pd.read_excel(BytesIO(content))
+                del content  # Free memory after parsing
                 if df.empty: return
                 async with async_session_maker() as bg_db:
                     if info["upload_type"] == "products":
