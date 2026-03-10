@@ -351,16 +351,33 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                     elif info["upload_type"] == "purchase" and info.get("store_id"):
                         sid = info["store_id"]
                         from models import PurchaseRecord
-                        df.columns = [str(c).strip().lower().replace('_', ' ') for c in df.columns]
-                        col_map = {"product name": "product_name", "product": "product_name", "item name": "product_name",
-                            "product id": "product_id", "id": "product_id",
-                            "supplier name": "supplier_name", "supplier": "supplier_name", "party name": "supplier_name",
-                            "purchase date": "purchase_date", "date": "purchase_date",
-                            "entry number": "entry_number", "invoice no": "entry_number", "bill no": "entry_number",
-                            "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount",
-                            "quantity": "quantity", "qty": "quantity"}
-                        mapped = {c: col_map[c] for c in df.columns if c in col_map}
-                        df = df.rename(columns=mapped)
+
+                        # Try multiple header rows
+                        df_p = None
+                        purchase_cols = {"entry no": "entry_number", "entry number": "entry_number", "invoice no": "entry_number", "bill no": "entry_number",
+                            "date": "purchase_date", "purchase date": "purchase_date",
+                            "supplier": "supplier_name", "supplier name": "supplier_name", "party name": "supplier_name",
+                            "ho id": "product_id", "product id": "product_id", "id": "product_id",
+                            "name": "product_name", "product name": "product_name", "product": "product_name", "item name": "product_name",
+                            "total": "total_amount", "total amount": "total_amount", "amount": "total_amount", "net amount": "total_amount", "net": "total_amount",
+                            "qty": "quantity", "quantity": "quantity",
+                            "batch": "batch", "batch no": "batch",
+                            "expiry": "expiry_date", "expiary": "expiry_date", "expiry date": "expiry_date",
+                            "mrp": "mrp", "l.cost": "landing_cost", "lcost": "landing_cost", "landing cost": "landing_cost",
+                            "category": "category", "sub category": "sub_category"}
+                        for skip in [0, 1, 2, 3]:
+                            try:
+                                test_df = pd.read_excel(BytesIO(content), skiprows=skip)
+                                cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
+                                matched = sum(1 for c in cols_lower if c in purchase_cols)
+                                if matched >= 3 and test_df.shape[0] > 0:
+                                    df_p = test_df; break
+                            except: continue
+                        if df_p is None: df_p = df
+
+                        df_p.columns = [str(c).strip().lower().replace('_', ' ') for c in df_p.columns]
+                        mapped = {c: purchase_cols[c] for c in df_p.columns if c in purchase_cols}
+                        df_p = df_p.rename(columns=mapped)
 
                         success, skipped, failed = 0, 0, 0
                         existing = set()
@@ -368,7 +385,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                             existing.add((str(r[0]), str(r[1])))
 
                         rows = []
-                        for _, row in df.iterrows():
+                        for _, row in df_p.iterrows():
                             product = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
                             supplier = str(row.get("supplier_name", "")).strip() if pd.notna(row.get("supplier_name")) else ""
                             if not product or product == "nan": failed += 1; continue
@@ -393,7 +410,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
 
                         for i in range(0, len(rows), 100): bg_db.add_all(rows[i:i+100]); await bg_db.flush()
                         bg_db.add(UploadHistory(file_name=info["filename"], upload_type=UploadType.PURCHASE_REPORT, store_id=sid, uploaded_by=info["user_id"],
-                            total_records=len(df), success_records=success, failed_records=failed,
+                            total_records=len(df_p), success_records=success, failed_records=failed,
                             error_details=f"Skipped duplicates: {skipped}"))
 
                     await bg_db.commit()
