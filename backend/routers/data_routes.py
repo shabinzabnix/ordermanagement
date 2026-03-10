@@ -159,11 +159,73 @@ async def upload_products(
         raise HTTPException(400, "Only Excel files (.xlsx, .xls) are accepted")
 
     content = await file.read()
+    file_size = len(content)
+
+    # For large files (>500KB), process entirely in background
+    if file_size > 500000:
+        import asyncio
+        filename = file.filename
+        user_id = user["user_id"]
+
+        async def bg_process():
+            try:
+                df = pd.read_excel(BytesIO(content))
+                if df.empty: return
+                df_mapped, missing, col_info = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
+                if missing: return
+
+                rows_data = []
+                for idx, row in df_mapped.iterrows():
+                    product_id = str(row.get("product_id", "")).strip()
+                    if product_id.endswith(".0"): product_id = product_id[:-2]
+                    if not product_id: continue
+                    rows_data.append({
+                        "product_id": product_id,
+                        "product_name": str(row.get("product_name", "")).strip(),
+                        "primary_supplier": str(row.get("primary_supplier", "")).strip() if pd.notna(row.get("primary_supplier")) else None,
+                        "secondary_supplier": str(row.get("secondary_supplier", "")).strip() if pd.notna(row.get("secondary_supplier")) else None,
+                        "least_price_supplier": str(row.get("least_price_supplier", "")).strip() if pd.notna(row.get("least_price_supplier")) else None,
+                        "most_qty_supplier": str(row.get("most_qty_supplier", "")).strip() if pd.notna(row.get("most_qty_supplier")) else None,
+                        "category": str(row.get("category", "")).strip() if pd.notna(row.get("category")) else None,
+                        "sub_category": str(row.get("sub_category", "")).strip() if pd.notna(row.get("sub_category")) else None,
+                        "rep": str(row.get("rep", "")).strip() if pd.notna(row.get("rep")) else None,
+                        "mrp": float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
+                        "ptr": float(row.get("ptr", 0)) if pd.notna(row.get("ptr")) else 0,
+                        "landing_cost": float(row.get("landing_cost", 0)) if pd.notna(row.get("landing_cost")) else 0,
+                    })
+
+                if rows_data:
+                    async with async_session_maker() as bg_db:
+                        from sqlalchemy.dialects.postgresql import insert as pg_insert
+                        BATCH = 100
+                        for i in range(0, len(rows_data), BATCH):
+                            batch = rows_data[i:i+BATCH]
+                            stmt = pg_insert(Product).values(batch)
+                            stmt = stmt.on_conflict_do_update(
+                                index_elements=['product_id'],
+                                set_={k: stmt.excluded[k] for k in ['product_name', 'primary_supplier', 'secondary_supplier', 'least_price_supplier', 'most_qty_supplier', 'category', 'sub_category', 'rep', 'mrp', 'ptr', 'landing_cost']}
+                            )
+                            await bg_db.execute(stmt)
+                            await bg_db.flush()
+                        await bg_db.commit()
+
+                        bg_db.add(UploadHistory(file_name=filename, upload_type=UploadType.PRODUCT_MASTER, uploaded_by=user_id,
+                            total_records=len(df), success_records=len(rows_data), failed_records=len(df)-len(rows_data)))
+                        await bg_db.commit()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Background upload failed: {e}")
+
+        asyncio.create_task(bg_process())
+        return {"message": f"File received ({file_size//1024}KB). Processing {file.filename} in background. Refresh page in 1-2 minutes.",
+                "total": 0, "success": 0, "failed": 0, "errors": [], "background": True,
+                "columns_matched": {}, "columns_unmatched": []}
+
+    # Small files: process immediately
     try:
         df = pd.read_excel(BytesIO(content))
     except Exception as e:
         raise HTTPException(400, f"Failed to read Excel file: {str(e)}")
-
     if df.empty:
         raise HTTPException(400, "Excel file is empty")
 
@@ -171,23 +233,15 @@ async def upload_products(
     if missing:
         raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your Excel columns: {col_info.get('original_columns', [])}")
 
-    success = 0
-    failed = 0
-    errors = []
-
-    # Build all data first, then bulk upsert
+    success, failed, errors = 0, 0, []
     rows_data = []
     for idx, row in df_mapped.iterrows():
         try:
             product_id = str(row.get("product_id", "")).strip()
-            if product_id.endswith(".0"):
-                product_id = product_id[:-2]
+            if product_id.endswith(".0"): product_id = product_id[:-2]
             if not product_id:
-                errors.append(f"Row {idx+2}: Missing product_id")
-                failed += 1
-                continue
-
-            data = {
+                errors.append(f"Row {idx+2}: Missing product_id"); failed += 1; continue
+            rows_data.append({
                 "product_id": product_id,
                 "product_name": str(row.get("product_name", "")).strip(),
                 "primary_supplier": str(row.get("primary_supplier", "")).strip() if pd.notna(row.get("primary_supplier")) else None,
@@ -200,46 +254,11 @@ async def upload_products(
                 "mrp": float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
                 "ptr": float(row.get("ptr", 0)) if pd.notna(row.get("ptr")) else 0,
                 "landing_cost": float(row.get("landing_cost", 0)) if pd.notna(row.get("landing_cost")) else 0,
-            }
-            rows_data.append(data)
+            })
             success += 1
         except Exception as e:
-            errors.append(f"Row {idx+2}: {str(e)}")
-            failed += 1
+            errors.append(f"Row {idx+2}: {str(e)}"); failed += 1
 
-    # For large files, return immediately and process in background
-    if len(rows_data) > 2000:
-        # Save upload history first
-        try:
-            upload = UploadHistory(file_name=file.filename, upload_type=UploadType.PRODUCT_MASTER, uploaded_by=user["user_id"],
-                total_records=len(df_mapped), success_records=success, failed_records=failed)
-            db.add(upload)
-            await db.commit()
-        except Exception:
-            pass
-
-        # Process in background using asyncio task
-        import asyncio
-        async def bg_upsert():
-            async with async_session_maker() as bg_db:
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
-                BATCH = 100
-                for i in range(0, len(rows_data), BATCH):
-                    batch = rows_data[i:i+BATCH]
-                    stmt = pg_insert(Product).values(batch)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=['product_id'],
-                        set_={k: stmt.excluded[k] for k in ['product_name', 'primary_supplier', 'secondary_supplier', 'least_price_supplier', 'most_qty_supplier', 'category', 'sub_category', 'rep', 'mrp', 'ptr', 'landing_cost']}
-                    )
-                    await bg_db.execute(stmt)
-                    await bg_db.flush()
-                await bg_db.commit()
-
-        asyncio.create_task(bg_upsert())
-        return {"message": f"Upload accepted! {success} products being processed in background. Refresh in 1-2 minutes.", "total": len(df_mapped), "success": success, "failed": failed, "errors": errors[:20],
-                "columns_matched": col_info.get("matched", {}), "columns_unmatched": col_info.get("unmatched", [])[:20], "background": True}
-
-    # Small files: process immediately
     if rows_data:
         from sqlalchemy.dialects.postgresql import insert as pg_insert
         BATCH = 100
