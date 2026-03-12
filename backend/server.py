@@ -69,34 +69,45 @@ app.include_router(notif_router, prefix="/api", tags=["Notifications"])
 
 @app.on_event("startup")
 async def startup():
-    await init_db()
-    # Migrate: add crm_staff enum value (requires autocommit)
+    import asyncio
+    # Retry DB connection up to 5 times
+    for attempt in range(5):
+        try:
+            await init_db()
+            break
+        except Exception as e:
+            logger.warning(f"DB connection attempt {attempt+1}/5 failed: {e}")
+            if attempt < 4:
+                await asyncio.sleep(3)
+            else:
+                logger.error("Could not connect to database after 5 attempts")
+                raise
+
+    # Migrate: add enum values
     from database import engine
     from sqlalchemy import text
-    async with engine.connect() as conn:
-        await conn.execution_options(isolation_level="AUTOCOMMIT")
-        try:
-            await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'crm_staff'"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'DIRECTOR'"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'SALES_REPORT'"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'PURCHASE_REPORT'"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'STORE_MANAGER'"))
-        except Exception:
-            pass
-    async with engine.connect() as conn:
-        await conn.execution_options(isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
+            for sql in [
+                "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'crm_staff'",
+                "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'DIRECTOR'",
+                "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'STORE_MANAGER'",
+                "ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'SALES_REPORT'",
+                "ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'PURCHASE_REPORT'",
+                "ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'sales_report'",
+                "ALTER TYPE uploadtype ADD VALUE IF NOT EXISTS 'purchase_report'",
+            ]:
+                try:
+                    await conn.execute(text(sql))
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"Enum migration failed: {e}")
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
         try:
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS assigned_store_id INTEGER REFERENCES stores(id)"))
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS adherence_score VARCHAR(20) DEFAULT 'unknown'"))
@@ -156,6 +167,9 @@ async def startup():
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_crm_assigned_staff ON crm_customers(assigned_staff_id) WHERE assigned_staff_id IS NOT NULL"))
         except Exception:
             pass
+    except Exception as e:
+        logger.warning(f"Migration block failed (non-critical): {e}")
+
     # Ensure new tables exist
     await init_db()
 
