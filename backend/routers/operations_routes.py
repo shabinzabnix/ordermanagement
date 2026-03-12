@@ -398,6 +398,11 @@ async def get_consolidated_stock(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
+    from cache import get_cached, set_cached, cache_key
+    ck = cache_key("consolidated", search, category, page, limit)
+    cached = get_cached(ck, ttl=90)
+    if cached: return cached
+
     stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
 
     # Get registered products from Product Master
@@ -475,11 +480,12 @@ async def get_consolidated_stock(
         local_offset = (page - 1) * limit - product_count
         consolidated = local_list[local_offset:local_offset + limit]
 
-    return {
+    result = {
         "consolidated": consolidated,
         "stores": [{"id": s.id, "store_name": s.store_name, "store_code": s.store_code} for s in stores],
         "total": total_with_local, "page": page, "limit": limit,
     }
+    return set_cached(ck, result, ttl=90)
 
 
 # --- Transfers ---

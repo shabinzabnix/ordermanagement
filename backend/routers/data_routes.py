@@ -80,6 +80,10 @@ async def get_products(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    from cache import get_cached, set_cached, cache_key
+    ck = cache_key("products", search, category, sub_category, supplier, page, limit)
+    cached = get_cached(ck, ttl=90)
+    if cached: return cached
     query = select(Product)
     if search:
         query = query.where(
@@ -103,7 +107,7 @@ async def get_products(
     result = await db.execute(query)
     products = result.scalars().all()
 
-    return {
+    result = {
         "products": [
             {
                 "id": p.id,
@@ -126,6 +130,7 @@ async def get_products(
         "page": page,
         "limit": limit,
     }
+    return set_cached(ck, result, ttl=90)
 
 
 @router.get("/products/categories")
@@ -449,6 +454,8 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                             error_details=f"Skipped duplicates: {skipped}"))
 
                     await bg_db.commit()
+                    from cache import invalidate
+                    invalidate()  # Clear all cache after upload
                     del content  # Free memory after all processing
                     log.info(f"Chunk upload done: {meta['upload_type']}, {meta['filename']}")
             except Exception as e:

@@ -4,6 +4,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 const api = axios.create({
   baseURL: `${BACKEND_URL}/api`,
+  timeout: 30000,
 });
 
 api.interceptors.request.use(config => {
@@ -11,6 +12,8 @@ api.interceptors.request.use(config => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Enable response compression
+  config.headers['Accept-Encoding'] = 'gzip, deflate';
   return config;
 });
 
@@ -24,6 +27,19 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Simple client-side cache for GET requests
+const _clientCache = {};
+const CACHE_TTL = 60000; // 60 seconds
+
+export const cachedGet = async (url, params = {}) => {
+  const key = url + JSON.stringify(params);
+  const cached = _clientCache[key];
+  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+  const res = await api.get(url, { params });
+  _clientCache[key] = { data: res, ts: Date.now() };
+  return res;
+};
 
 export const downloadExcel = async (endpoint, filename) => {
   const response = await api.get(endpoint, { responseType: 'blob' });

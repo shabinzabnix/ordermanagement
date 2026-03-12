@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from dotenv import load_dotenv
 from pathlib import Path
 import os
@@ -22,6 +23,9 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 app = FastAPI(title="Sahakar Pharmacy Inventory Platform")
+
+# GZip compression — reduces response size 3-5x
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.add_middleware(
     CORSMiddleware,

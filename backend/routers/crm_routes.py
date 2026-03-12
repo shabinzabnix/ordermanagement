@@ -94,6 +94,11 @@ async def list_customers(
     sort_by: str = Query("name"),
     db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
 ):
+    from cache import get_cached, set_cached, cache_key
+    sf = _store_filter(user)
+    ck = cache_key("customers", search, store_id or sf, customer_type, page, limit, sort_by)
+    cached = get_cached(ck, ttl=60)
+    if cached: return cached
     sf = _store_filter(user)
     query = select(CRMCustomer)
     if search:
@@ -201,7 +206,7 @@ async def list_customers(
         "registration_date": c.registration_date.isoformat() if c.registration_date else None,
     } for c in customers]
 
-    return {"customers": result, "total": total, "page": page, "limit": limit}
+    return set_cached(ck, {"customers": result, "total": total, "page": page, "limit": limit}, ttl=60)
 
 
 @router.post("/crm/customers")
@@ -1514,7 +1519,11 @@ async def store_crm_dashboard(
     date_from: str = Query(None), date_to: str = Query(None),
     db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
 ):
+    from cache import get_cached, set_cached, cache_key
     sf = _store_filter(user)
+    ck = cache_key("store_crm_dash", sf, date_from, date_to)
+    cached = get_cached(ck, ttl=90)
+    if cached: return cached
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -1601,7 +1610,7 @@ async def store_crm_dashboard(
         "days_until": (p.next_due_date - now).days if p.next_due_date else 0,
     } for p in upcoming_items]
 
-    return {
+    result = {
         "kpis": {
             "total_customers": total_customers, "rc_customers": rc_customers,
             "overdue": overdue, "due_today": due_today, "due_7days": due_7d,
@@ -1611,6 +1620,7 @@ async def store_crm_dashboard(
         "rc_purchases": rc_purchases,
         "upcoming_purchases": upcoming,
     }
+    return set_cached(ck, result, ttl=90)
 
 
 # ─── Assign RC Customer to Staff ─────────────────────────────
