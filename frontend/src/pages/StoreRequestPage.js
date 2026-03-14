@@ -12,7 +12,7 @@ import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
-import { ShoppingCart, Search, Trash2, Plus, Package, MessageCircle, Send, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { ShoppingCart, Search, Trash2, Plus, Package, MessageCircle, Send, RefreshCw, CheckCircle2, Loader2 } from 'lucide-react';
 import { useSales90d } from '../hooks/useSales90d';
 
 export default function StoreRequestPage() {
@@ -57,15 +57,19 @@ export default function StoreRequestPage() {
   const salesMap = useSales90d(allItems.map(i => i.product_name));
   const [reviewFilter, setReviewFilter] = useState('all');
   const sugRef = useRef(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { api.get('/stores').then(r => setStores(r.data.stores)).catch(() => {}); loadData(); }, []);
   useEffect(() => { if (['STORE_STAFF','STORE_MANAGER'].includes(user?.role) && user?.store_id) setStoreId(String(user.store_id)); }, [user]);
 
   const loadData = () => {
-    api.get('/po/store-requests').then(r => setRequests(r.data.requests)).catch(() => {});
-    api.get('/po/purchase-review?po_category=all').then(r => setAllItems(r.data.items)).catch(() => {});
-    api.get('/po/all-comments', { params: { limit: 50, search: msgSearch || undefined } }).then(r => setAllComments(r.data.comments)).catch(() => {});
-    api.get('/po/received-items', { params: receivedFilter !== 'all' ? { status: receivedFilter } : {} }).then(r => setReceivedItems(r.data.items)).catch(() => {});
+    setPageLoading(true);
+    Promise.all([
+      api.get('/po/store-requests').then(r => setRequests(r.data.requests)),
+      api.get('/po/purchase-review?po_category=all').then(r => setAllItems(r.data.items)),
+      api.get('/po/all-comments', { params: { limit: 50, search: msgSearch || undefined } }).then(r => setAllComments(r.data.comments)),
+      api.get('/po/received-items', { params: receivedFilter !== 'all' ? { status: receivedFilter } : {} }).then(r => setReceivedItems(r.data.items)),
+    ]).catch(() => {}).finally(() => setPageLoading(false));
   };
   useEffect(() => { loadData(); }, [receivedFilter]);
   useEffect(() => { api.get('/po/all-comments', { params: { limit: 50, search: msgSearch || undefined } }).then(r => setAllComments(r.data.comments)).catch(() => {}); }, [msgSearch]);
@@ -185,6 +189,17 @@ export default function StoreRequestPage() {
     <div data-testid="store-request-page" className="space-y-5">
       <div><h2 className="text-2xl font-heading font-bold text-slate-900 tracking-tight">Store Requests</h2>
         <p className="text-sm font-body text-slate-500 mt-0.5">{isHO ? 'Review and manage all store requests' : 'Request products from Head Office'}</p></div>
+
+      {pageLoading && (
+        <div className="flex items-center justify-center py-16">
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 text-sky-500 animate-spin mx-auto mb-3" />
+            <p className="text-sm text-slate-400 font-body">Loading requests...</p>
+          </div>
+        </div>
+      )}
+
+      {!pageLoading && (
 
       <Tabs defaultValue={isHO ? "requests" : "new"}>
         <TabsList className="rounded-sm">
@@ -473,6 +488,7 @@ export default function StoreRequestPage() {
           </Card>
         </TabsContent>
       </Tabs>
+      )}
 
       {/* Chat Popup Dialog */}
       <Dialog open={chatOpen !== null} onOpenChange={v => { if (!v) setChatOpen(null); }}>

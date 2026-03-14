@@ -244,8 +244,13 @@ async def list_store_requests(
     page: int = Query(1, ge=1), limit: int = Query(50),
     db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
 ):
+    from cache import get_cached, set_cached, cache_key
     if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         store_id = user["store_id"]
+    ck = cache_key("store_requests", store_id, status, page, limit)
+    cached = get_cached(ck, ttl=30)
+    if cached: return cached
+
     query = select(StoreRequest)
     if store_id:
         query = query.where(StoreRequest.store_id == store_id)
@@ -257,9 +262,18 @@ async def list_store_requests(
 
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     umap = await _get_user_map(db)
+
+    # Batch load ALL items for these requests in ONE query
+    req_ids = [r.id for r in reqs]
+    all_items = {}
+    if req_ids:
+        items_q = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.request_id.in_(req_ids)))).scalars().all()
+        for it in items_q:
+            all_items.setdefault(it.request_id, []).append(it)
+
     result = []
     for r in reqs:
-        items = (await db.execute(select(StoreRequestItem).where(StoreRequestItem.request_id == r.id))).scalars().all()
+        items = all_items.get(r.id, [])
         result.append({
             "id": r.id, "store_id": r.store_id, "store_name": smap.get(r.store_id, ""),
             "request_reason": r.request_reason, "customer_name": r.customer_name,
@@ -278,7 +292,7 @@ async def list_store_requests(
                 "doctor_name": it.doctor_name, "clinic_location": it.clinic_location,
             } for it in items],
         })
-    return {"requests": result, "total": total}
+    return set_cached(ck, {"requests": result, "total": total}, ttl=30)
 
 
 @router.get("/po/store-requests/{request_id}/stock-info")
@@ -294,29 +308,41 @@ async def request_stock_info(
     smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     now = datetime.now(timezone.utc)
 
+    # Batch load stock for ALL product IDs at once
+    pids = [it.product_id for it in items if it.product_id]
+    all_stock = {}
+    if pids:
+        stock_rows = (await db.execute(
+            select(StoreStockBatch.ho_product_id, StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock"))
+            .where(StoreStockBatch.ho_product_id.in_(pids))
+            .group_by(StoreStockBatch.ho_product_id, StoreStockBatch.store_id)
+        )).all()
+        for r in stock_rows:
+            all_stock.setdefault(r[0], []).append({"store": smap.get(r[1], ""), "stock": round(float(r[2] or 0), 0)})
+
+    # Batch load 90d sales
+    d90 = now - timedelta(days=90); d30 = now - timedelta(days=30)
+    pnames = {it.product_id: it.product_name for it in items if it.product_id}
+    all_sales_30 = {}; all_sales_90 = {}
+    if pnames:
+        for r in (await db.execute(
+            select(SalesRecord.product_name, func.sum(SalesRecord.quantity))
+            .where(SalesRecord.product_name.in_(pnames.values()), SalesRecord.invoice_date >= d30)
+            .group_by(SalesRecord.product_name)
+        )).all():
+            all_sales_30[r[0]] = float(r[1] or 0)
+        for r in (await db.execute(
+            select(SalesRecord.product_name, func.sum(SalesRecord.quantity))
+            .where(SalesRecord.product_name.in_(pnames.values()), SalesRecord.invoice_date >= d90)
+            .group_by(SalesRecord.product_name)
+        )).all():
+            all_sales_90[r[0]] = float(r[1] or 0)
+
     product_info = []
     for it in items:
-        # Stock across all stores
-        stock_q = (await db.execute(
-            select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock"))
-            .where(StoreStockBatch.ho_product_id == it.product_id)
-            .group_by(StoreStockBatch.store_id)
-        )).all() if it.product_id else []
-        store_stock = [{"store": smap.get(r[0], ""), "stock": round(float(r[1] or 0), 0)} for r in stock_q if float(r[1] or 0) > 0]
-
-        # Sales trend (last 30/60/90 days)
-        sales_30 = 0; sales_90 = 0
-        if it.product_id:
-            sales_30 = float((await db.execute(
-                select(func.sum(SalesRecord.quantity)).where(and_(
-                    SalesRecord.product_id == it.product_id, SalesRecord.invoice_date >= now - timedelta(days=30)
-                ))
-            )).scalar() or 0)
-            sales_90 = float((await db.execute(
-                select(func.sum(SalesRecord.quantity)).where(and_(
-                    SalesRecord.product_id == it.product_id, SalesRecord.invoice_date >= now - timedelta(days=90)
-                ))
-            )).scalar() or 0)
+        store_stock = [s for s in all_stock.get(it.product_id, []) if s["stock"] > 0]
+        sales_30 = all_sales_30.get(it.product_name, 0)
+        sales_90 = all_sales_90.get(it.product_name, 0)
 
         product_info.append({
             "product_id": it.product_id, "product_name": it.product_name,
@@ -456,6 +482,11 @@ async def purchase_review(
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Get all store request items with PO category — full details per product."""
+    from cache import get_cached, set_cached, cache_key
+    ck = cache_key("purchase_review", po_category, status)
+    cached = get_cached(ck, ttl=30)
+    if cached: return cached
+
     query = select(StoreRequestItem)
     if po_category and po_category != "all":
         query = query.where(StoreRequestItem.po_category == po_category)
@@ -530,7 +561,8 @@ async def purchase_review(
             "created_at": req.created_at.isoformat() if req and req.created_at else None,
         })
 
-    return {"items": result, "total": len(result)}
+    response = {"items": result, "total": len(result)}
+    return set_cached(ck, response, ttl=30)
 
 
 class UpdateItemReq(BaseModel):
@@ -556,6 +588,8 @@ async def update_review_items(data: UpdateItemReq, db: AsyncSession = Depends(ge
             if data.fulfillment_status is not None: it.fulfillment_status = data.fulfillment_status
     await _log(db, user, f"Updated {len(data.item_ids)} items", "purchase_review")
     await db.commit()
+    from cache import invalidate
+    invalidate()
     return {"message": f"Updated {len(data.item_ids)} items"}
 
 
