@@ -23,6 +23,7 @@ const navItems = [
   // ── Inventory
   { section: 'Inventory', roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'] },
   { label: 'Products', path: '/products', icon: Package, roles: ['ADMIN'], svc: 'products' },
+  { label: 'Product Profile', path: '/product-profile', icon: Package, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_MANAGER'], svc: 'product_profile' },
   { label: 'Stores', path: '/stores', icon: Building2, roles: ['ADMIN'], svc: 'stores' },
   { label: 'HO Stock', path: '/ho-stock', icon: Warehouse, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR'], svc: 'ho_stock' },
   { label: 'Store Stock', path: '/store-stock', icon: Archive, roles: ['ADMIN', 'HO_STAFF', 'DIRECTOR', 'STORE_STAFF', 'STORE_MANAGER'], svc: 'store_stock' },

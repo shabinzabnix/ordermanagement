@@ -1036,9 +1036,11 @@ async def delete_upload(
         result = await db.execute(delete(Product))
         deleted_count = result.rowcount
     elif utype in ("sales_report", "SALES_REPORT") and upload.store_id:
-        from models import SalesRecord
+        from models import SalesRecord, CRMCustomer
         result = await db.execute(delete(SalesRecord).where(SalesRecord.store_id == upload.store_id))
         deleted_count = result.rowcount
+        # Also delete customers created from this store's sales
+        await db.execute(delete(CRMCustomer).where(CRMCustomer.first_store_id == upload.store_id))
     elif utype in ("purchase_report", "PURCHASE_REPORT") and upload.store_id:
         from models import PurchaseRecord
         result = await db.execute(delete(PurchaseRecord).where(PurchaseRecord.store_id == upload.store_id))
@@ -1046,6 +1048,11 @@ async def delete_upload(
 
     await db.delete(upload)
     await db.commit()
+
+    # Invalidate ALL caches after delete
+    from cache import invalidate
+    invalidate()
+
     return {"message": f"Upload deleted. {deleted_count} records removed."}
 
 
@@ -1099,89 +1106,85 @@ async def product_profile(
     product_id: str,
     db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user),
 ):
-    from models import HOStockBatch, StoreStockBatch, Store, InterStoreTransfer, SalesRecord, PurchaseRecord
+    from models import HOStockBatch, StoreStockBatch, Store, InterStoreTransfer, SalesRecord, PurchaseRecord, ProductRecall, CRMCustomer, StoreRequestItem
+    from cache import get_cached, set_cached
+    ck = f"product_profile_{product_id}"
+    cached = get_cached(ck, ttl=120)
+    if cached: return cached
+
     now = datetime.now(timezone.utc)
     d90 = now - timedelta(days=90)
 
+    # Allow search by ID or name
     product = (await db.execute(select(Product).where(Product.product_id == product_id))).scalar_one_or_none()
+    if not product:
+        product = (await db.execute(select(Product).where(Product.product_name.ilike(f"%{product_id}%")))).scalars().first()
     if not product:
         return {"error": "Product not found"}
 
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
 
-    # Supplier info
     suppliers = []
-    if product.primary_supplier: suppliers.append({"type": "Primary", "name": product.primary_supplier})
-    if product.secondary_supplier: suppliers.append({"type": "Secondary", "name": product.secondary_supplier})
-    if product.least_price_supplier: suppliers.append({"type": "Least Price", "name": product.least_price_supplier})
-    if product.most_qty_supplier: suppliers.append({"type": "Most Qty", "name": product.most_qty_supplier})
+    for stype, col in [("Primary", product.primary_supplier), ("Secondary", product.secondary_supplier), ("Least Price", product.least_price_supplier), ("Most Qty", product.most_qty_supplier)]:
+        if col: suppliers.append({"type": stype, "name": col})
 
-    # HO Stock
-    ho_stock = float((await db.execute(select(func.sum(HOStockBatch.closing_stock)).where(HOStockBatch.product_id == product_id))).scalar() or 0)
+    ho_stock = float((await db.execute(select(func.sum(HOStockBatch.closing_stock)).where(HOStockBatch.product_id == product.product_id))).scalar() or 0)
 
-    # Store stock breakdown
-    store_stocks = []
-    ss_q = (await db.execute(
-        select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("stock"))
-        .where(StoreStockBatch.ho_product_id == product_id)
-        .group_by(StoreStockBatch.store_id)
+    store_stocks = [{"store": stores_map.get(r[0], ""), "store_id": r[0], "stock": round(float(r[1] or 0), 1)} for r in (await db.execute(
+        select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.ho_product_id == product.product_id).group_by(StoreStockBatch.store_id))).all()]
+
+    # ALL-TIME Sales by store
+    sales_all = [{"store": stores_map.get(r[0], ""), "qty": round(float(r[1] or 0), 1), "amount": round(float(r[2] or 0), 2), "invoices": int(r[3] or 0)} for r in (await db.execute(
+        select(SalesRecord.store_id, func.sum(SalesRecord.quantity), func.sum(SalesRecord.total_amount), func.count(SalesRecord.id))
+        .where(SalesRecord.product_name == product.product_name).group_by(SalesRecord.store_id))).all()]
+
+    # 90d Sales
+    sales_90d = [{"store": stores_map.get(r[0], ""), "qty": round(float(r[1] or 0), 1), "amount": round(float(r[2] or 0), 2)} for r in (await db.execute(
+        select(SalesRecord.store_id, func.sum(SalesRecord.quantity), func.sum(SalesRecord.total_amount))
+        .where(SalesRecord.product_name == product.product_name, SalesRecord.invoice_date >= d90).group_by(SalesRecord.store_id))).all()]
+
+    # ALL-TIME Purchases by store
+    purchases_all = [{"store": stores_map.get(r[0], ""), "qty": round(float(r[1] or 0), 1), "amount": round(float(r[2] or 0), 2)} for r in (await db.execute(
+        select(PurchaseRecord.store_id, func.sum(PurchaseRecord.quantity), func.sum(PurchaseRecord.total_amount))
+        .where(PurchaseRecord.product_id == product.product_id).group_by(PurchaseRecord.store_id))).all()]
+
+    # Transfers
+    transfers = [{"from": stores_map.get(t.source_store_id, ""), "to": stores_map.get(t.requesting_store_id, ""), "qty": t.quantity,
+        "status": t.status.value if hasattr(t.status, 'value') else t.status, "date": t.created_at.isoformat() if t.created_at else None}
+        for t in (await db.execute(select(InterStoreTransfer).where(InterStoreTransfer.product_id == product.product_id).order_by(InterStoreTransfer.created_at.desc()).limit(20))).scalars().all()]
+
+    # Recalls
+    recalls = [{"store": stores_map.get(r.store_id, ""), "qty": r.quantity, "status": r.status, "date": r.created_at.isoformat() if r.created_at else None}
+        for r in (await db.execute(select(ProductRecall).where(ProductRecall.product_id == product.product_id).order_by(ProductRecall.created_at.desc()).limit(10))).scalars().all()]
+
+    # Store Requests
+    requests = [{"store": stores_map.get(r.store_id, ""), "qty": r.quantity, "status": r.status, "date": r.created_at.isoformat() if r.created_at else None}
+        for r in (await db.execute(select(StoreRequestItem).where(StoreRequestItem.product_id == product.product_id).order_by(StoreRequestItem.created_at.desc()).limit(20))).scalars().all()]
+
+    # Customers who bought this product
+    cust_q = (await db.execute(
+        select(SalesRecord.customer_id, SalesRecord.patient_name, SalesRecord.mobile_number,
+            func.count(SalesRecord.id).label("times"), func.sum(SalesRecord.total_amount).label("spent"))
+        .where(SalesRecord.product_name == product.product_name, SalesRecord.customer_id.isnot(None))
+        .group_by(SalesRecord.customer_id, SalesRecord.patient_name, SalesRecord.mobile_number)
+        .order_by(func.count(SalesRecord.id).desc()).limit(50)
     )).all()
-    for r in ss_q:
-        store_stocks.append({"store": stores_map.get(r[0], ""), "stock": round(float(r[1] or 0), 1)})
+    customers = [{"customer_id": r[0], "name": r[1], "mobile": r[2], "purchases": int(r[3] or 0), "spent": round(float(r[4] or 0), 2)} for r in cust_q]
 
-    # Sales (90d) by store
-    sales_by_store = []
-    sr_q = (await db.execute(
-        select(SalesRecord.store_id, func.sum(SalesRecord.quantity).label("qty"), func.sum(SalesRecord.total_amount).label("amt"), func.count(SalesRecord.id).label("cnt"))
-        .where(SalesRecord.product_name == product.product_name, SalesRecord.invoice_date >= d90)
-        .group_by(SalesRecord.store_id)
-    )).all()
-    total_sales_qty = 0; total_sales_amt = 0
-    for r in sr_q:
-        qty = round(float(r[1] or 0), 1); amt = round(float(r[2] or 0), 2)
-        sales_by_store.append({"store": stores_map.get(r[0], ""), "qty": qty, "amount": amt, "invoices": int(r[3] or 0)})
-        total_sales_qty += qty; total_sales_amt += amt
-
-    # Purchases (90d) by store
-    purchases_by_store = []
-    pr_q = (await db.execute(
-        select(PurchaseRecord.store_id, func.sum(PurchaseRecord.quantity).label("qty"), func.sum(PurchaseRecord.total_amount).label("amt"))
-        .where(PurchaseRecord.product_id == product_id, PurchaseRecord.purchase_date >= d90)
-        .group_by(PurchaseRecord.store_id)
-    )).all()
-    total_purchase_qty = 0; total_purchase_amt = 0
-    for r in pr_q:
-        qty = round(float(r[1] or 0), 1); amt = round(float(r[2] or 0), 2)
-        purchases_by_store.append({"store": stores_map.get(r[0], ""), "qty": qty, "amount": amt})
-        total_purchase_qty += qty; total_purchase_amt += amt
-
-    # Recent transfers
-    transfers = (await db.execute(
-        select(InterStoreTransfer).where(InterStoreTransfer.product_id == product_id)
-        .order_by(InterStoreTransfer.created_at.desc()).limit(10)
-    )).scalars().all()
-    transfer_list = [{
-        "from": stores_map.get(t.source_store_id, ""), "to": stores_map.get(t.requesting_store_id, ""),
-        "qty": t.quantity, "status": t.status.value if hasattr(t.status, 'value') else t.status,
-        "date": t.created_at.isoformat() if t.created_at else None,
-    } for t in transfers]
-
-    # Margin calculation
     margin_pct = round((1 - (product.ptr or 0) / product.mrp) * 100, 1) if product.mrp and product.mrp > 0 else 0
 
-    return {
-        "product": {
-            "product_id": product.product_id, "product_name": product.product_name,
+    result = {
+        "product": {"product_id": product.product_id, "product_name": product.product_name,
             "category": product.category, "sub_category": product.sub_category, "rep": product.rep,
-            "mrp": product.mrp or 0, "ptr": product.ptr or 0, "landing_cost": product.landing_cost or 0,
-            "margin_pct": margin_pct,
-        },
+            "mrp": product.mrp or 0, "ptr": product.ptr or 0, "landing_cost": product.landing_cost or 0, "margin_pct": margin_pct},
         "suppliers": suppliers,
         "stock": {"ho": ho_stock, "stores": store_stocks, "total": ho_stock + sum(s["stock"] for s in store_stocks)},
-        "sales_90d": {"total_qty": total_sales_qty, "total_amount": round(total_sales_amt, 2), "by_store": sales_by_store},
-        "purchases_90d": {"total_qty": total_purchase_qty, "total_amount": round(total_purchase_amt, 2), "by_store": purchases_by_store},
-        "transfers": transfer_list,
+        "sales_all_time": {"total_qty": sum(s["qty"] for s in sales_all), "total_amount": round(sum(s["amount"] for s in sales_all), 2), "by_store": sales_all},
+        "sales_90d": {"total_qty": sum(s["qty"] for s in sales_90d), "total_amount": round(sum(s["amount"] for s in sales_90d), 2), "by_store": sales_90d},
+        "purchases_all_time": {"total_qty": sum(p["qty"] for p in purchases_all), "total_amount": round(sum(p["amount"] for p in purchases_all), 2), "by_store": purchases_all},
+        "transfers": transfers, "recalls": recalls, "requests": requests, "customers": customers,
     }
+    return set_cached(ck, result, ttl=120)
 
 
 

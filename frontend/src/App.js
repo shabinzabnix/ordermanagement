@@ -41,6 +41,7 @@ import RCCustomerListPage from '@/pages/RCCustomerListPage';
 import DailyReportPage from '@/pages/DailyReportPage';
 import SalesCallTasksPage from '@/pages/SalesCallTasksPage';
 import RecallPage from '@/pages/RecallPage';
+import ProductProfilePage from '@/pages/ProductProfilePage';
 import DailyInvoicesPage from '@/pages/DailyInvoicesPage';
 import '@/App.css';
 
@@ -110,6 +111,7 @@ function AppRoutes() {
       <Route path="/crm/daily-report" element={<ProtectedRoute><DailyReportPage /></ProtectedRoute>} />
       <Route path="/crm/call-tasks" element={<ProtectedRoute><SalesCallTasksPage /></ProtectedRoute>} />
       <Route path="/recalls" element={<ProtectedRoute><RecallPage /></ProtectedRoute>} />
+      <Route path="/product-profile" element={<ProtectedRoute><ProductProfilePage /></ProtectedRoute>} />
       <Route path="/crm/daily-invoices" element={<ProtectedRoute><DailyInvoicesPage /></ProtectedRoute>} />
       <Route path="/audit-log" element={<ProtectedRoute><AuditLogPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to={['STORE_STAFF','STORE_MANAGER'].includes(user?.role) ? '/store-dashboard' : '/dashboard'} replace />} />
