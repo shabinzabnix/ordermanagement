@@ -1158,8 +1158,8 @@ async def product_profile(
         for r in (await db.execute(select(ProductRecall).where(ProductRecall.product_id == product.product_id).order_by(ProductRecall.created_at.desc()).limit(10))).scalars().all()]
 
     # Store Requests
-    requests = [{"store": stores_map.get(r.store_id, ""), "qty": r.quantity, "status": r.status, "date": r.created_at.isoformat() if r.created_at else None}
-        for r in (await db.execute(select(StoreRequestItem).where(StoreRequestItem.product_id == product.product_id).order_by(StoreRequestItem.created_at.desc()).limit(20))).scalars().all()]
+    requests = [{"store_id": r.request_id, "qty": r.quantity, "status": r.item_status, "product": r.product_name}
+        for r in (await db.execute(select(StoreRequestItem).where(StoreRequestItem.product_id == product.product_id).limit(20))).scalars().all()]
 
     # Customers who bought this product
     cust_q = (await db.execute(
