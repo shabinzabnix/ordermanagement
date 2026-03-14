@@ -70,18 +70,20 @@ app.include_router(notif_router, prefix="/api", tags=["Notifications"])
 @app.on_event("startup")
 async def startup():
     import asyncio
-    # Retry DB connection up to 5 times
-    for attempt in range(5):
+    # Retry DB connection up to 10 times (Supabase free tier may be waking up)
+    db_connected = False
+    for attempt in range(10):
         try:
             await init_db()
+            db_connected = True
             break
         except Exception as e:
-            logger.warning(f"DB connection attempt {attempt+1}/5 failed: {e}")
-            if attempt < 4:
-                await asyncio.sleep(3)
-            else:
-                logger.error("Could not connect to database after 5 attempts")
-                raise
+            logger.warning(f"DB connection attempt {attempt+1}/10 failed: {e}")
+            await asyncio.sleep(5)
+
+    if not db_connected:
+        logger.error("Could not connect to database after 10 attempts. Starting anyway - will retry on first request.")
+        return
 
     # Migrate: add enum values
     from database import engine

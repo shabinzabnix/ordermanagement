@@ -12,8 +12,6 @@ api.interceptors.request.use(config => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  // Enable response compression
-  config.headers['Accept-Encoding'] = 'gzip, deflate';
   return config;
 });
 
