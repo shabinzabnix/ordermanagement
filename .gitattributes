@@ -1,0 +1,58 @@
+# .gitattributes — Consistent line endings across all platforms
+# Ensures Windows devs and Linux/Mac devs get the same experience.
+
+# Default: auto-normalize all text files to LF in the repo
+* text=auto eol=lf
+
+# Windows batch scripts should keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Explicitly text files
+*.py        text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.env       text eol=lf
+*.example   text eol=lf
+*.sh        text eol=lf
+*.css       text eol=lf
+*.html      text eol=lf
+*.sql       text eol=lf
+Dockerfile  text eol=lf
+*.dockerfile text eol=lf
+.gitignore  text eol=lf
+.gitattributes text eol=lf
+
+# Binary files — never diff or merge these
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.svg  text eol=lf
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.xlsx  binary
+*.xls   binary
+*.pdf   binary
+*.zip   binary
+*.tar   binary
+*.gz    binary
+*.tgz   binary
+*.dylib binary
+*.so    binary
+*.pyd   binary

@@ -1,70 +1,91 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# IDE and editors
-.idea/
-.vscode/
+# ── Environment & Secrets (NEVER commit these) ───────────────
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+*token.json*
+*credentials.json*
 
-# Dependencies
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# ── Virtual Environments ──────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+backend/venv/
+backend/.venv/
+
+# ── Node / React ──────────────────────────────────────────────
 node_modules/
-/node_modules
-/.pnp
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+/build
+/out
+dist/
+/.next/
+next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.pnp
 .pnp.js
-.yarn/install-state.gz
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
 
-# Testing
-/coverage
+# ── Frontend build cache (wildcard — no more explicit .pack lines) ──
+frontend/node_modules/.cache/
 
-# Next.js
-/.next/
-/out/
-next-env.d.ts
-*.tsbuildinfo
+# ── IDEs & Editors ────────────────────────────────────────────
+.idea/
+.vscode/settings.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
 
-# Production builds
-/build
-dist/
-dist
+# ── OS Files ──────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Environment files (comprehensive coverage)
-
-*token.json*
-*credentials.json*
-
-# Logs and debug files
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# ── Uploads & Temporary Files ─────────────────────────────────
+backend/uploads/
+backend/tmp/
+*.log
 dump.rdb
 
-# System files
-.DS_Store
-*.pem
-
-# Python
-__pycache__/
-*pyc*
-venv/
-.venv/
-
-# Development tools
-chainlit.md
-.chainlit
-.ipynb_checkpoints/
-.ac
-
-# Deployment
-.vercel
-
-# Data and databases
-agenthub/agents/youtube/db
-
-# Archive files and large assets
+# ── Archives & Large Binaries ─────────────────────────────────
 **/*.zip
 **/*.tar.gz
 **/*.tar
@@ -72,59 +93,15 @@ agenthub/agents/youtube/db
 *.pack
 *.deb
 *.dylib
+*.pem
 
-# Build caches
+# ── Misc ──────────────────────────────────────────────────────
+*.bak
+*.orig
 .cache/
-
-# Mobile development
-android-sdk/ frontend/node_modules/.cache/default-development/10.pack
-frontend/node_modules/.cache/default-development/10.pack
-frontend/node_modules/.cache/default-development/11.pack
-frontend/node_modules/.cache/default-development/4.pack
-frontend/node_modules/.cache/default-development/14.pack
-frontend/node_modules/.cache/default-development/15.pack
-frontend/node_modules/.cache/default-development/16.pack
-frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/8.pack
-frontend/node_modules/.cache/default-development/9.pack
-frontend/node_modules/.cache/default-development/3.pack
-frontend/node_modules/.cache/default-development/18.pack
-frontend/node_modules/.cache/default-development/20.pack
-frontend/node_modules/.cache/default-development/22.pack
-frontend/node_modules/.cache/default-development/25.pack
-frontend/node_modules/.cache/default-development/21.pack
-frontend/node_modules/.cache/default-development/24.pack
-frontend/node_modules/.cache/default-development/26.pack
-frontend/node_modules/.cache/default-development/23.pack
-frontend/node_modules/.cache/default-development/27.pack
-frontend/node_modules/.cache/default-development/29.pack
-frontend/node_modules/.cache/default-development/32.pack
-frontend/node_modules/.cache/default-development/33.pack
-frontend/node_modules/.cache/default-development/31.pack
-frontend/node_modules/.cache/default-development/34.pack
-frontend/node_modules/.cache/default-development/35.pack
-frontend/node_modules/.cache/default-development/36.pack
-frontend/node_modules/.cache/default-development/38.pack
-frontend/node_modules/.cache/default-development/39.pack
-frontend/node_modules/.cache/default-development/40.pack
-frontend/node_modules/.cache/default-development/41.pack
-frontend/node_modules/.cache/default-development/43.pack
-frontend/node_modules/.cache/default-development/42.pack
-frontend/node_modules/.cache/default-development/45.pack
-frontend/node_modules/.cache/default-development/46.pack
-frontend/node_modules/.cache/default-development/47.pack
-frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/1.pack
-frontend/node_modules/.cache/default-development/5.pack
-frontend/node_modules/.cache/default-development/7.pack
-frontend/node_modules/.cache/default-development/13.pack
-frontend/node_modules/.cache/default-development/12.pack
-frontend/node_modules/.cache/default-development/17.pack
-frontend/node_modules/.cache/default-development/16.pack_
-frontend/node_modules/.cache/default-development/19.pack
-frontend/node_modules/.cache/default-development/30.pack
-frontend/node_modules/.cache/default-development/37.pack
--e 
-# Environment files
-*.env
-*.env.*
+.vercel
+.chainlit
+chainlit.md
+.ipynb_checkpoints/
+.emergent/
+.ac
