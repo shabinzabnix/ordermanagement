@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, and_, or_
+from sqlalchemy import select, func, delete, and_, or_, text, join
+import math
 from database import get_db
 from models import (
     Product, Store, User, HOStockBatch, StoreStockBatch,
@@ -108,35 +109,49 @@ async def upload_ho_stock(
             try:
                 from database import async_session_maker
                 df = pd.read_excel(BytesIO(content))
-                if df.empty: return
+                if df is None or (isinstance(df, pd.DataFrame) and df.empty): return
                 df_mapped, missing, _ = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
-                if missing: return
+                if df_mapped is None: return
+                
                 product_names = {}
                 async with async_session_maker() as bg_db:
                     for p in (await bg_db.execute(select(Product))).scalars().all():
                         product_names[p.product_id] = p.product_name
                     await bg_db.execute(delete(HOStockBatch))
                     rows = []
-                    for idx, row in df_mapped.iterrows():
-                        pid = str(row.get("product_id", "")).strip()
-                        if pid.endswith(".0"): pid = pid[:-2]
-                        batch = str(row.get("batch", "")).strip()
-                        if not pid or not batch: continue
-                        pname = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
-                        if not pname or pname == "nan": pname = product_names.get(pid, "")
-                        rows.append(HOStockBatch(product_id=pid, product_name=pname, batch=batch,
-                            mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0,
-                            closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0,
-                            landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0,
-                            expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None))
+                    # Ensure df_mapped is a DataFrame
+                    if isinstance(df_mapped, pd.DataFrame):
+                        for idx, row in df_mapped.iterrows():
+                            pid = str(row.get("product_id", "")).strip()
+                            if pid.endswith(".0"): pid = pid[:-2]
+                            batch = str(row.get("batch", "")).strip()
+                            if not pid or not batch: continue
+                            pname = str(row.get("product_name", "")).strip() if pd.notna(row.get("product_name")) else ""
+                            if not pname or pname == "nan": pname = product_names.get(pid, "")
+                            rows.append(HOStockBatch(
+                                product_id=pid, product_name=pname, batch=batch,
+                                mrp=float(row.get("mrp", 0)) if pd.notna(row.get("mrp")) else 0.0,
+                                closing_stock=float(row.get("closing_stock", 0)) if pd.notna(row.get("closing_stock")) else 0.0,
+                                landing_cost_value=float(row.get("landing_cost_value", 0)) if pd.notna(row.get("landing_cost_value")) else 0.0,
+                                expiry_date=pd.Timestamp(row.get("expiry_date")).to_pydatetime().replace(tzinfo=timezone.utc) if pd.notna(row.get("expiry_date")) else None
+                            ))
+                    
                     BATCH = 100
                     for i in range(0, len(rows), BATCH):
-                        bg_db.add_all(rows[i:i+BATCH]); await bg_db.flush()
+                        bg_db.add_all(rows[i:i+BATCH])
+                        await bg_db.flush()
                     await bg_db.commit()
-                    bg_db.add(UploadHistory(file_name=fname, upload_type=UploadType.HO_STOCK, uploaded_by=uid, total_records=len(df_mapped), success_records=len(rows), failed_records=len(df_mapped)-len(rows)))
+                    
+                    df_count = len(df_mapped) if isinstance(df_mapped, pd.DataFrame) else 0
+                    bg_db.add(UploadHistory(
+                        file_name=fname, upload_type=UploadType.HO_STOCK, uploaded_by=uid,
+                        total_records=df_count, success_records=len(rows),
+                        failed_records=df_count - len(rows)
+                    ))
                     await bg_db.commit()
             except Exception as e:
-                import logging; logging.getLogger(__name__).error(f"BG HO upload failed: {e}")
+                import logging
+                logging.getLogger(__name__).error(f"BG HO upload failed: {e}")
         asyncio.create_task(bg())
         return {"message": f"File received ({file_size//1024}KB). Processing in background. Refresh in 1-2 minutes.", "total": 0, "success": 0, "failed": 0, "errors": [], "background": True}
 
@@ -148,7 +163,7 @@ async def upload_ho_stock(
         raise HTTPException(400, "Excel file is empty")
 
     df_mapped, missing, _col_info = map_columns(df, HO_STOCK_COLUMNS, HO_STOCK_REQUIRED)
-    if missing:
+    if df_mapped is None or not isinstance(df_mapped, pd.DataFrame):
         raise HTTPException(400, f"Missing required columns: {', '.join(missing)}")
 
     await db.execute(delete(HOStockBatch))
@@ -414,71 +429,110 @@ async def get_consolidated_stock(
     if category:
         product_query = product_query.where(Product.category == category)
 
-    product_count = (await db.execute(select(func.count()).select_from(product_query.subquery()))).scalar()
-    products = (await db.execute(
-        product_query.order_by(Product.product_name).offset((page - 1) * limit).limit(limit)
-    )).scalars().all()
+    # Optimized Consolidated Stock using UNION ALL for unified pagination
+    # Get the total count across both sets
+    count_sql = text("""
+        SELECT (
+            SELECT COUNT(*) FROM products p
+            WHERE (:search IS NULL OR p.product_name ILIKE :search)
+            AND (:category IS NULL OR p.category = :category)
+        ) + (
+            SELECT COUNT(DISTINCT s.product_name) FROM store_stock_batches s
+            LEFT JOIN products p ON s.ho_product_id = p.product_id
+            WHERE p.product_id IS NULL AND s.closing_stock_strips > 0
+            AND (:search IS NULL OR s.product_name ILIKE :search)
+        ) as total
+    """)
+    total_with_local = (await db.execute(count_sql, {"search": f"%{search}%" if search else None, "category": category})).scalar() or 0
 
-    pids = [p.product_id for p in products]
+    # Unified list of products (Master + Local)
+    main_query = text("""
+        SELECT product_id, product_name, category, FALSE as is_local FROM products p
+        WHERE (:search IS NULL OR p.product_name ILIKE :search)
+        AND (:category IS NULL OR p.category = :category)
+        UNION ALL
+        SELECT NULL as product_id, product_name, 'Local Purchase' as category, TRUE as is_local
+        FROM (
+            SELECT DISTINCT s.product_name 
+            FROM store_stock_batches s
+            LEFT JOIN products p ON s.ho_product_id = p.product_id
+            WHERE p.product_id IS NULL AND s.closing_stock_strips > 0
+            AND (:search IS NULL OR s.product_name ILIKE :search)
+        ) loc
+        ORDER BY product_name
+        LIMIT :limit OFFSET :offset
+    """)
+    
+    page_items = (await db.execute(main_query, {
+        "search": f"%{search}%" if search else None,
+        "category": category,
+        "limit": limit,
+        "offset": (page - 1) * limit
+    })).all()
 
-    ho_result = await db.execute(
-        select(HOStockBatch.product_id, func.sum(HOStockBatch.closing_stock).label("t"))
-        .where(HOStockBatch.product_id.in_(pids)).group_by(HOStockBatch.product_id)
-    )
-    ho_stock = {r[0]: float(r[1] or 0) for r in ho_result.all()}
+    if not page_items:
+        return {"consolidated": [], "stores": [{"id": s.id, "store_name": s.store_name, "store_code": s.store_code} for s in stores], "total": total_with_local, "page": page, "limit": limit}
 
-    store_result = await db.execute(
-        select(StoreStockBatch.ho_product_id, StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
-        .where(and_(StoreStockBatch.ho_product_id.in_(pids), StoreStockBatch.ho_product_id.isnot(None)))
-        .group_by(StoreStockBatch.ho_product_id, StoreStockBatch.store_id)
-    )
-    store_stock = {}
-    for r in store_result.all():
-        store_stock.setdefault(r[0], {})[r[1]] = float(r[2] or 0)
+    # Fetch HO Stock for Master products in the page
+    master_pids = [r[0] for r in page_items if not r[3]]
+    ho_stock = {}
+    if master_pids:
+        ho_result = await db.execute(
+            select(HOStockBatch.product_id, func.sum(HOStockBatch.closing_stock).label("t"))
+            .where(HOStockBatch.product_id.in_(master_pids)).group_by(HOStockBatch.product_id)
+        )
+        ho_stock = {r[0]: float(r[1] or 0.0) for r in ho_result.all()}
+
+    # Fetch Store Stock for all products in the page (Master by ID, Local by Name)
+    master_names = [r[1] for r in page_items if not r[3]]
+    local_names = [r[1] for r in page_items if r[3]]
+    
+    # Store stock map: (ho_product_id or product_name) -> store_id -> qty
+    store_map = {}
+    
+    # query for master products by ID
+    if master_pids:
+        s_res = await db.execute(
+            select(StoreStockBatch.ho_product_id, StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
+            .where(and_(StoreStockBatch.ho_product_id.in_(master_pids), StoreStockBatch.ho_product_id.isnot(None)))
+            .group_by(StoreStockBatch.ho_product_id, StoreStockBatch.store_id)
+        )
+        for r in s_res.all():
+            store_map.setdefault(r[0], {})[r[1]] = float(r[2] or 0.0)
+
+    # query for local products by Name
+    if local_names:
+        s_res = await db.execute(
+            select(StoreStockBatch.product_name, StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
+            .select_from(join(StoreStockBatch, Product, StoreStockBatch.ho_product_id == Product.product_id, isouter=True))
+            .where(and_(Product.product_id.is_(None), StoreStockBatch.product_name.in_(local_names)))
+            .group_by(StoreStockBatch.product_name, StoreStockBatch.store_id)
+        )
+        for r in s_res.all():
+            store_map.setdefault(r[0], {})[r[1]] = float(r[2] or 0.0)
 
     consolidated = []
-    for p in products:
-        ho = ho_stock.get(p.product_id, 0)
+    for r in page_items:
+        pid, pname, pcat, is_local = r
+        key = pid if not is_local else pname
+        ho = ho_stock.get(pid, 0.0) if not is_local else 0.0
+        
         sd = {}
-        total_stock = ho
+        total = ho
         for s in stores:
-            qty = store_stock.get(p.product_id, {}).get(s.id, 0)
-            sd[str(s.id)] = qty
-            total_stock += qty
+            qty = store_map.get(key, {}).get(s.id, 0.0)
+            sd[str(s.id)] = math.floor(float(qty) * 100 + 0.5) / 100.0
+            total += qty
+            
         consolidated.append({
-            "product_id": p.product_id, "product_name": p.product_name,
-            "category": p.category, "ho_stock": ho, "store_stock": sd, "total": total_stock, "is_local": False,
+            "product_id": pid or "LOCAL",
+            "product_name": pname,
+            "category": pcat,
+            "ho_stock": math.floor(float(ho) * 100 + 0.5) / 100.0,
+            "store_stock": sd,
+            "total": math.floor(float(total) * 100 + 0.5) / 100.0,
+            "is_local": is_local
         })
-
-    # Also include non-registered local store products (no ho_product_id or not in product master)
-    local_q = (
-        select(StoreStockBatch.product_name, StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
-        .where(or_(StoreStockBatch.ho_product_id.is_(None), ~StoreStockBatch.ho_product_id.in_(pids) if pids else StoreStockBatch.ho_product_id.is_(None)))
-        .where(StoreStockBatch.closing_stock_strips > 0)
-        .group_by(StoreStockBatch.product_name, StoreStockBatch.store_id)
-    )
-    if search:
-        local_q = local_q.where(StoreStockBatch.product_name.ilike(f"%{search}%"))
-
-    local_rows = (await db.execute(local_q)).all()
-    local_products = {}
-    for r in local_rows:
-        pname = r[0]
-        if pname not in local_products:
-            local_products[pname] = {"product_id": "LOCAL", "product_name": pname, "category": "Local Purchase", "ho_stock": 0, "store_stock": {}, "total": 0, "is_local": True}
-        local_products[pname]["store_stock"][str(r[1])] = float(r[2] or 0)
-        local_products[pname]["total"] += float(r[2] or 0)
-
-    local_list = sorted(local_products.values(), key=lambda x: x["product_name"])
-    total_with_local = product_count + len(local_products)
-
-    # Merge: if on first page and there's room, append local products
-    if page == 1 and len(consolidated) < limit:
-        remaining = limit - len(consolidated)
-        consolidated.extend(local_list[:remaining])
-    elif (page - 1) * limit >= product_count:
-        local_offset = (page - 1) * limit - product_count
-        consolidated = local_list[local_offset:local_offset + limit]
 
     result = {
         "consolidated": consolidated,
@@ -918,48 +972,63 @@ async def get_dashboard_stats(
     user: dict = Depends(get_current_user),
 ):
     from cache import get_cached, set_cached
+    import asyncio
     is_store_staff = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
     cache_key = f"dashboard_stats_{user_store_id or 'all'}"
     cached = get_cached(cache_key, ttl=60)
     if cached: return cached
 
-    total_products = (await db.execute(select(func.count(Product.id)))).scalar() or 0
+    # Basic queries that are always needed
+    tasks = [
+        db.execute(select(func.count(Product.id))),
+    ]
+
+    if user_store_id:
+        tasks.append(db.execute(select(func.count(InterStoreTransfer.id)).where(
+            and_(InterStoreTransfer.status == TransferStatus.PENDING,
+                 or_(InterStoreTransfer.requesting_store_id == user_store_id, InterStoreTransfer.source_store_id == user_store_id))
+        )))
+        tasks.append(db.execute(select(func.count(PurchaseRequest.id)).where(
+            and_(PurchaseRequest.status.in_([PurchaseStatus.PENDING, PurchaseStatus.TRANSFER_SUGGESTED]), PurchaseRequest.store_id == user_store_id)
+        )))
+        tasks.append(db.execute(select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == user_store_id)))
+        tasks.append(db.execute(select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == user_store_id)))
+    else:
+        tasks.append(db.execute(select(func.count(InterStoreTransfer.id)).where(InterStoreTransfer.status == TransferStatus.PENDING)))
+        tasks.append(db.execute(select(func.count(PurchaseRequest.id)).where(
+            PurchaseRequest.status.in_([PurchaseStatus.PENDING, PurchaseStatus.TRANSFER_SUGGESTED])
+        )))
+        tasks.append(db.execute(select(func.count(Store.id)).where(Store.is_active == True)))
+        tasks.append(db.execute(select(func.sum(HOStockBatch.landing_cost_value))))
+        tasks.append(db.execute(select(func.sum(HOStockBatch.closing_stock))))
+
+    # Execute all independent counts/sums in parallel
+    results = await asyncio.gather(*tasks)
+
+    total_products = results[0].scalar() or 0
+    pending_transfers = results[1].scalar() or 0
+    pending_purchases = results[2].scalar() or 0
 
     if user_store_id:
         total_stores = 1
-        ho_stock_value = 0
-        ho_stock_units = 0
-        # Store-specific stock value
-        store_stock_value = float((await db.execute(select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == user_store_id))).scalar() or 0)
-        store_stock_units = float((await db.execute(select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == user_store_id))).scalar() or 0)
+        ho_stock_value = float(results[3].scalar() or 0)
+        ho_stock_units = float(results[4].scalar() or 0)
     else:
-        total_stores = (await db.execute(select(func.count(Store.id)).where(Store.is_active == True))).scalar() or 0
-        ho_stock_value = (await db.execute(select(func.sum(HOStockBatch.landing_cost_value)))).scalar() or 0
-        ho_stock_units = (await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0
-        store_stock_value = ho_stock_value
-        store_stock_units = ho_stock_units
+        total_stores = results[3].scalar() or 0
+        ho_stock_value = float(results[4].scalar() or 0)
+        ho_stock_units = float(results[5].scalar() or 0)
 
-    transfer_q = select(func.count(InterStoreTransfer.id)).where(InterStoreTransfer.status == TransferStatus.PENDING)
-    purchase_q = select(func.count(PurchaseRequest.id)).where(
-        PurchaseRequest.status.in_([PurchaseStatus.PENDING, PurchaseStatus.TRANSFER_SUGGESTED])
-    )
-    if user_store_id:
-        transfer_q = transfer_q.where(
-            (InterStoreTransfer.requesting_store_id == user_store_id) | (InterStoreTransfer.source_store_id == user_store_id)
-        )
-        purchase_q = purchase_q.where(PurchaseRequest.store_id == user_store_id)
-
-    pending_transfers = (await db.execute(transfer_q)).scalar() or 0
-    pending_purchases = (await db.execute(purchase_q)).scalar() or 0
-
+    # RECENT ITEMS (can also be parallelized)
     recent_uploads_q = select(UploadHistory).order_by(UploadHistory.created_at.desc()).limit(5)
     recent_transfers_q = select(InterStoreTransfer).order_by(InterStoreTransfer.created_at.desc()).limit(5)
     if user_store_id:
         recent_uploads_q = recent_uploads_q.where(or_(UploadHistory.store_id == user_store_id, UploadHistory.store_id.is_(None)))
         recent_transfers_q = recent_transfers_q.where((InterStoreTransfer.requesting_store_id == user_store_id) | (InterStoreTransfer.source_store_id == user_store_id))
-    recent_uploads = (await db.execute(recent_uploads_q)).scalars().all()
-    recent_transfers = (await db.execute(recent_transfers_q)).scalars().all()
+    
+    recent_res = await asyncio.gather(db.execute(recent_uploads_q), db.execute(recent_transfers_q))
+    recent_uploads = recent_res[0].scalars().all()
+    recent_transfers = recent_res[1].scalars().all()
 
     sids = set()
     for t in recent_transfers:
@@ -970,12 +1039,12 @@ async def get_dashboard_stats(
         smap = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.id.in_(sids)))).scalars().all()}
 
     result = {
-        "total_products": total_products,
-        "total_stores": total_stores,
-        "ho_stock_value": round(store_stock_value if user_store_id else ho_stock_value, 2),
-        "ho_stock_units": store_stock_units if user_store_id else ho_stock_units,
-        "pending_transfers": pending_transfers,
-        "pending_purchases": pending_purchases,
+        "total_products": int(total_products),
+        "total_stores": int(total_stores),
+        "ho_stock_value": round(float(ho_stock_value), 2),
+        "ho_stock_units": float(ho_stock_units),
+        "pending_transfers": int(pending_transfers),
+        "pending_purchases": int(pending_purchases),
         "recent_uploads": [
             {"id": u.id, "file_name": u.file_name,
              "upload_type": u.upload_type.value if isinstance(u.upload_type, UploadType) else u.upload_type,
@@ -993,3 +1062,4 @@ async def get_dashboard_stats(
         ],
     }
     return set_cached(cache_key, result, ttl=60)
+

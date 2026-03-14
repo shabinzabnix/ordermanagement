@@ -10,6 +10,7 @@ from auth import get_current_user, require_roles
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+import asyncio
 import pandas as pd
 from io import BytesIO
 import uuid
@@ -39,32 +40,29 @@ async def crm_dashboard(db: AsyncSession = Depends(get_db), user: dict = Depends
     d7 = now + timedelta(days=7)
     sf = _store_filter(user)
 
-    total_customers = (await db.execute(select(func.count(CRMCustomer.id)))).scalar() or 0
-    rc_customers = (await db.execute(
-        select(func.count(CRMCustomer.id)).where(CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]))
-    )).scalar() or 0
-
-    due_q = select(func.count(MedicinePurchase.id)).where(MedicinePurchase.status == "active")
-    if sf:
-        due_q = due_q.where(MedicinePurchase.store_id == sf)
-
-    due_today = (await db.execute(due_q.where(and_(
-        MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=1)
-    )))).scalar() or 0
-    due_3d = (await db.execute(due_q.where(and_(
-        MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < d3
-    )))).scalar() or 0
-    overdue = (await db.execute(due_q.where(MedicinePurchase.next_due_date < today_start))).scalar() or 0
-    upcoming_7d = (await db.execute(due_q.where(and_(
-        MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < d7
-    )))).scalar() or 0
-
-    calls_today = (await db.execute(
-        select(func.count(CRMCallLog.id)).where(CRMCallLog.created_at >= today_start)
-    )).scalar() or 0
-    pending_tasks = (await db.execute(
-        select(func.count(CRMTask.id)).where(CRMTask.status == "pending")
-    )).scalar() or 0
+    sf_filters = [MedicinePurchase.store_id == sf] if sf else []
+    (
+        r_total, r_rc,
+        r_due_today, r_due_3d, r_overdue, r_upcoming,
+        r_calls, r_tasks,
+    ) = await asyncio.gather(
+        db.execute(select(func.count(CRMCustomer.id))),
+        db.execute(select(func.count(CRMCustomer.id)).where(CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]))),
+        db.execute(select(func.count(MedicinePurchase.id)).where(MedicinePurchase.status == "active", *sf_filters, MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=1))),
+        db.execute(select(func.count(MedicinePurchase.id)).where(MedicinePurchase.status == "active", *sf_filters, MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < d3)),
+        db.execute(select(func.count(MedicinePurchase.id)).where(MedicinePurchase.status == "active", *sf_filters, MedicinePurchase.next_due_date < today_start)),
+        db.execute(select(func.count(MedicinePurchase.id)).where(MedicinePurchase.status == "active", *sf_filters, MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < d7)),
+        db.execute(select(func.count(CRMCallLog.id)).where(CRMCallLog.created_at >= today_start)),
+        db.execute(select(func.count(CRMTask.id)).where(CRMTask.status == "pending")),
+    )
+    total_customers = r_total.scalar() or 0
+    rc_customers    = r_rc.scalar() or 0
+    due_today       = r_due_today.scalar() or 0
+    due_3d          = r_due_3d.scalar() or 0
+    overdue         = r_overdue.scalar() or 0
+    upcoming_7d     = r_upcoming.scalar() or 0
+    calls_today     = r_calls.scalar() or 0
+    pending_tasks   = r_tasks.scalar() or 0
 
     return {
         "total_customers": total_customers, "rc_customers": rc_customers,
@@ -242,13 +240,13 @@ async def get_customer_profile(customer_id: int, db: AsyncSession = Depends(get_
     # Get SalesRecord data (primary source - from sales uploads)
     sales = (await db.execute(
         select(SalesRecord).where(SalesRecord.customer_id == customer_id)
-        .order_by(SalesRecord.invoice_date.desc())
+        .order_by(SalesRecord.invoice_date.desc()).limit(200)
     )).scalars().all()
 
     # Get MedicinePurchase data (for refill tracking)
     purchases = (await db.execute(
         select(MedicinePurchase).where(MedicinePurchase.customer_id == customer_id)
-        .order_by(MedicinePurchase.purchase_date.desc())
+        .order_by(MedicinePurchase.purchase_date.desc()).limit(100)
     )).scalars().all()
 
     # Get store names

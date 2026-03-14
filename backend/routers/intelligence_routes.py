@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import (
+    select, func, and_, or_, case, cast, Float, Integer, String, Date, 
+    extract, distinct, join, union_all, literal_column
+)
 from database import get_db
 from models import (
     Product, Store, HOStockBatch, StoreStockBatch,
@@ -11,8 +14,12 @@ from models import (
 from auth import get_current_user, require_roles
 from datetime import datetime, timezone, timedelta
 import pandas as pd
+from pydantic import BaseModel
 from io import BytesIO
 import uuid
+import asyncio
+import math
+from typing import Optional, List, Dict, Any, Tuple
 
 router = APIRouter()
 
@@ -32,113 +39,125 @@ async def intel_dashboard(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
+    from cache import get_cached, set_cached, cache_key
+    ck = cache_key("intel_dashboard", store_id)
+    cached = get_cached(ck, ttl=120)
+    if cached: return cached
     now = datetime.now(timezone.utc)
     d30 = now + timedelta(days=30)
     d60 = now + timedelta(days=60)
     d90 = now + timedelta(days=90)
+    dead_threshold = now - timedelta(days=60)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    # ── Inventory Intelligence ──
-    ho_value = float((await db.execute(select(func.sum(HOStockBatch.landing_cost_value)))).scalar() or 0)
-    store_value = float((await db.execute(select(func.sum(StoreStockBatch.cost_value)))).scalar() or 0)
-    total_inventory_value = round(ho_value + store_value, 2)
+    # 1. Parallelize ALL independent metrics
+    tasks = [
+        db.execute(select(func.sum(HOStockBatch.landing_cost_value))),
+        db.execute(select(func.sum(StoreStockBatch.cost_value))),
+        # Dead stock HO
+        db.execute(select(func.sum(HOStockBatch.landing_cost_value)).where(and_(HOStockBatch.closing_stock > 0, HOStockBatch.created_at < dead_threshold))),
+        # Dead stock Store (simplified: assuming no sales means sales=0 or NULL)
+        db.execute(select(func.sum(StoreStockBatch.cost_value)).where(and_(StoreStockBatch.closing_stock_strips > 0, (StoreStockBatch.sales == 0) | (StoreStockBatch.sales.is_(None)), StoreStockBatch.created_at < dead_threshold))),
+        # Expiry HO 30/60/90
+        db.execute(select(
+            func.count(case((HOStockBatch.expiry_date <= d30, 1), else_=None)),
+            func.count(case((and_(HOStockBatch.expiry_date > d30, HOStockBatch.expiry_date <= d60), 1), else_=None)),
+            func.count(case((and_(HOStockBatch.expiry_date > d60, HOStockBatch.expiry_date <= d90), 1), else_=None)),
+            func.sum(case((HOStockBatch.expiry_date <= d30, HOStockBatch.landing_cost_value), else_=0))
+        ).where(and_(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0))),
+        # Expiry Store 30/60/90
+        db.execute(select(
+            func.count(case((StoreStockBatch.expiry_date <= d30, 1), else_=None)),
+            func.count(case((and_(StoreStockBatch.expiry_date > d30, StoreStockBatch.expiry_date <= d60), 1), else_=None)),
+            func.count(case((and_(StoreStockBatch.expiry_date > d60, StoreStockBatch.expiry_date <= d90), 1), else_=None)),
+            func.sum(case((StoreStockBatch.expiry_date <= d30, StoreStockBatch.cost_value), else_=0))
+        ).where(and_(StoreStockBatch.expiry_date.isnot(None), StoreStockBatch.closing_stock_strips > 0))),
+        # Customer counts
+        db.execute(select(func.count(CRMCustomer.id)).where(CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]))),
+        db.execute(select(func.count(CRMCustomer.id))),
+        # Medicine due
+        db.execute(select(func.count(MedicinePurchase.id)).where(and_(MedicinePurchase.status == "active", MedicinePurchase.next_due_date >= today_start, MedicinePurchase.next_due_date < today_start + timedelta(days=1)))),
+        db.execute(select(func.count(MedicinePurchase.id)).where(and_(MedicinePurchase.status == "active", MedicinePurchase.next_due_date < today_start))),
+        # Operations
+        db.execute(select(func.count(InterStoreTransfer.id)).where(InterStoreTransfer.status == TransferStatus.PENDING)),
+        db.execute(select(func.count(PurchaseRequest.id)).where(PurchaseRequest.status.in_([PurchaseStatus.PENDING, PurchaseStatus.TRANSFER_SUGGESTED]))),
+        db.execute(select(func.sum(PurchaseRecord.total_amount))),
+        db.execute(select(func.sum(SalesRecord.total_amount))),
+    ]
 
-    # Dead stock value (no sales, 60+ days)
-    dead_value = 0
-    for s in (await db.execute(select(StoreStockBatch))).scalars().all():
-        if s.closing_stock_strips > 0 and (s.sales or 0) == 0:
-            days = (now - s.created_at).days if s.created_at else 0
-            if days > 60:
-                dead_value += float(s.cost_value or 0)
-    for s in (await db.execute(select(HOStockBatch))).scalars().all():
-        if s.closing_stock > 0:
-            days = (now - s.created_at).days if s.created_at else 0
-            if days > 60:
-                dead_value += float(s.landing_cost_value or 0)
+    # Execute all independent metrics
+    gr = await asyncio.gather(*tasks)
+    res: List[Any] = list(gr)
+    
+    # Extract values safely using .scalar() for single-value queries
+    ho_val: float = float(res[0].scalar() or 0.0)
+    st_val: float = float(res[1].scalar() or 0.0)
+    dead_ho: float = float(res[2].scalar() or 0.0)
+    dead_st: float = float(res[3].scalar() or 0.0)
+    
+    # Expiry results (multiple columns in one row)
+    ho_exp_row = res[4].first()
+    st_exp_row = res[5].first()
+    
+    h30 = int(ho_exp_row[0] or 0) if ho_exp_row else 0
+    h60 = int(ho_exp_row[1] or 0) if ho_exp_row else 0
+    h90 = int(ho_exp_row[2] or 0) if ho_exp_row else 0
+    hv = float(ho_exp_row[3] or 0.0) if ho_exp_row else 0.0
 
-    # Expiring stock
-    exp_30, exp_60, exp_90, exp_value = 0, 0, 0, 0.0
-    for s in (await db.execute(select(HOStockBatch).where(HOStockBatch.expiry_date.isnot(None)))).scalars().all():
-        if s.expiry_date and s.closing_stock > 0:
-            if s.expiry_date <= d30:
-                exp_30 += 1; exp_value += float(s.landing_cost_value or 0)
-            elif s.expiry_date <= d60:
-                exp_60 += 1
-            elif s.expiry_date <= d90:
-                exp_90 += 1
-    for s in (await db.execute(select(StoreStockBatch).where(StoreStockBatch.expiry_date.isnot(None)))).scalars().all():
-        if s.expiry_date and s.closing_stock_strips > 0:
-            if s.expiry_date <= d30:
-                exp_30 += 1; exp_value += float(s.cost_value or 0)
-            elif s.expiry_date <= d60:
-                exp_60 += 1
-            elif s.expiry_date <= d90:
-                exp_90 += 1
+    s30 = int(st_exp_row[0] or 0) if st_exp_row else 0
+    s60 = int(st_exp_row[1] or 0) if st_exp_row else 0
+    s90 = int(st_exp_row[2] or 0) if st_exp_row else 0
+    sv = float(st_exp_row[3] or 0.0) if st_exp_row else 0.0
 
-    # ── Customer Intelligence ──
-    rc_customers = (await db.execute(
-        select(func.count(CRMCustomer.id)).where(CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]))
-    )).scalar() or 0
-    total_customers = (await db.execute(select(func.count(CRMCustomer.id)))).scalar() or 0
-    due_today = (await db.execute(
-        select(func.count(MedicinePurchase.id)).where(and_(
-            MedicinePurchase.status == "active",
-            MedicinePurchase.next_due_date >= today_start,
-            MedicinePurchase.next_due_date < today_start + timedelta(days=1),
-        ))
-    )).scalar() or 0
-    overdue = (await db.execute(
-        select(func.count(MedicinePurchase.id)).where(and_(
-            MedicinePurchase.status == "active",
-            MedicinePurchase.next_due_date < today_start,
-        ))
-    )).scalar() or 0
-
-    # ── Operations Intelligence ──
-    pending_transfers = (await db.execute(
-        select(func.count(InterStoreTransfer.id)).where(InterStoreTransfer.status == TransferStatus.PENDING)
-    )).scalar() or 0
-    pending_purchases = (await db.execute(
-        select(func.count(PurchaseRequest.id)).where(
-            PurchaseRequest.status.in_([PurchaseStatus.PENDING, PurchaseStatus.TRANSFER_SUGGESTED])
+    # Redistribution Suggestions Count
+    redist_cnt_q = select(func.count(func.distinct(StoreStockBatch.ho_product_id))).where(and_(
+        StoreStockBatch.closing_stock_strips > 0,
+        (StoreStockBatch.sales == 0) | (StoreStockBatch.sales.is_(None)),
+        StoreStockBatch.created_at < dead_threshold,
+        StoreStockBatch.ho_product_id.in_(
+            select(StoreStockBatch.ho_product_id).where(StoreStockBatch.sales > 0)
         )
-    )).scalar() or 0
+    ))
+    rd_val = (await db.execute(redist_cnt_q)).scalar()
+    redistribution_count: int = int(rd_val or 0)
 
-    # Redistribution suggestions count
-    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
-    product_demand = {}
-    for s in (await db.execute(select(StoreStockBatch).where(StoreStockBatch.sales > 0))).scalars().all():
-        pid = s.ho_product_id or s.store_product_id
-        if pid:
-            product_demand.setdefault(pid, set()).add(s.store_id)
-    dead_products = set()
-    for s in (await db.execute(select(StoreStockBatch))).scalars().all():
-        if s.closing_stock_strips > 0 and (s.sales or 0) == 0:
-            days = (now - s.created_at).days if s.created_at else 0
-            if days > 60:
-                pid = s.ho_product_id or s.store_product_id
-                if pid and pid in product_demand:
-                    dead_products.add(pid)
-    redistribution_count = len(dead_products)
+    # Metrics with correct indexing from tasks list
+    rc_count: int = int(res[6].scalar() or 0)
+    total_cust: int = int(res[7].scalar() or 0)
+    due_today_val: int = int(res[8].scalar() or 0)
+    overdue_val: int = int(res[9].scalar() or 0)
+    p_transfers: int = int(res[10].scalar() or 0)
+    p_purchases: int = int(res[11].scalar() or 0)
+    purchase_val: float = float(res[12].scalar() or 0.0)
+    sales_val: float = float(res[13].scalar() or 0.0)
 
-    return {
+    # Final result construction
+    # Use floor-based rounding as a workaround for linter's 'round' overload issue
+    result = {
         "inventory": {
-            "total_value": total_inventory_value,
-            "dead_stock_value": round(dead_value, 2),
-            "expiring_value": round(exp_value, 2),
-            "expiring_30d": exp_30, "expiring_60d": exp_60, "expiring_90d": exp_90,
+            "total_value": math.floor((float(ho_val) + float(st_val)) * 100 + 0.5) / 100.0,
+            "dead_stock_value": math.floor((float(dead_ho) + float(dead_st)) * 100 + 0.5) / 100.0,
+            "expiring_value": math.floor((float(hv) + float(sv)) * 100 + 0.5) / 100.0,
+            "expiring_30d": int(h30) + int(s30),
+            "expiring_60d": int(h60) + int(s60),
+            "expiring_90d": int(h90) + int(s90),
         },
         "customer": {
-            "total_customers": total_customers, "rc_customers": rc_customers,
-            "due_today": due_today, "overdue": overdue,
+            "rc_customers": int(rc_count),
+            "total_customers": int(total_cust),
+            "due_today": int(due_today_val),
+            "overdue": int(overdue_val),
         },
         "operations": {
-            "pending_transfers": pending_transfers, "pending_purchases": pending_purchases,
-            "redistribution_suggestions": redistribution_count,
-            "total_purchase_value": round(float((await db.execute(select(func.sum(PurchaseRecord.total_amount)))).scalar() or 0), 2),
-            "total_sales_value": round(float((await db.execute(select(func.sum(SalesRecord.total_amount)))).scalar() or 0), 2),
-        },
+            "pending_transfers": int(p_transfers),
+            "pending_purchases": int(p_purchases),
+            "redistribution_opportunities": int(redistribution_count),
+            "total_purchase_value": math.floor(float(purchase_val) * 100 + 0.5) / 100.0,
+            "total_sales_value": math.floor(float(sales_val) * 100 + 0.5) / 100.0,
+        }
     }
+    return set_cached(ck, result, ttl=120)
+
 
 
 # ─── Demand Forecasting Engine ────────────────────────────
@@ -160,35 +179,67 @@ async def demand_forecast(
     cutoff_60 = now - timedelta(days=60)
     cutoff_90 = now - timedelta(days=90)
 
-    sr_query = select(SalesRecord)
+    # Push all aggregation to DB — one query instead of fetching every sales row
+    agg_cols = [
+        SalesRecord.product_name,
+        SalesRecord.store_id,
+        func.max(SalesRecord.product_id).label("pid"),
+        func.sum(func.case((SalesRecord.invoice_date >= cutoff_90, func.coalesce(SalesRecord.quantity, 1)), else_=0)).label("qty_90"),
+        func.sum(func.case((SalesRecord.invoice_date >= cutoff_60, func.coalesce(SalesRecord.quantity, 1)), else_=0)).label("qty_60"),
+        func.sum(func.case((SalesRecord.invoice_date >= cutoff_30, func.coalesce(SalesRecord.quantity, 1)), else_=0)).label("qty_30"),
+        func.sum(func.case((SalesRecord.invoice_date >= cutoff_90, func.coalesce(SalesRecord.total_amount, 0)), else_=0)).label("amt_90"),
+        func.sum(func.case((SalesRecord.invoice_date >= cutoff_30, func.coalesce(SalesRecord.total_amount, 0)), else_=0)).label("amt_30"),
+    ]
+    sr_query = (
+        select(*agg_cols)
+        .where(SalesRecord.invoice_date >= cutoff_90)
+        .group_by(SalesRecord.product_name, SalesRecord.store_id)
+    )
     if store_id:
         sr_query = sr_query.where(SalesRecord.store_id == store_id)
-    sales_records = (await db.execute(sr_query.where(SalesRecord.invoice_date >= cutoff_90))).scalars().all()
 
     product_sales = {}
-    for sr in sales_records:
-        key = (sr.product_name, sr.store_id)
-        if key not in product_sales:
-            product_sales[key] = {"qty_30": 0, "qty_60": 0, "qty_90": 0, "amt_30": 0, "amt_90": 0, "pid": sr.product_id}
-        qty = float(sr.quantity or 0) if sr.quantity else 1
-        amt = float(sr.total_amount or 0)
-        product_sales[key]["qty_90"] += qty
-        product_sales[key]["amt_90"] += amt
-        if sr.invoice_date and sr.invoice_date >= cutoff_60:
-            product_sales[key]["qty_60"] += qty
-        if sr.invoice_date and sr.invoice_date >= cutoff_30:
-            product_sales[key]["qty_30"] += qty
-            product_sales[key]["amt_30"] += amt
+    for row in (await db.execute(sr_query)).all():
+        key = (row[0], row[1])
+        product_sales[key] = {
+            "pid": row[2] or "",
+            "qty_90": float(row[3] or 0),
+            "qty_60": float(row[4] or 0),
+            "qty_30": float(row[5] or 0),
+            "amt_90": float(row[6] or 0),
+            "amt_30": float(row[7] or 0),
+        }
 
-    stock_by_pid = {}
-    stock_by_name = {}
-    for ss in (await db.execute(select(StoreStockBatch))).scalars().all():
-        units = float(ss.closing_stock or 0)
-        if ss.ho_product_id:
-            k = (ss.ho_product_id, ss.store_id)
-            stock_by_pid[k] = stock_by_pid.get(k, 0) + units
-        k2 = (ss.product_name, ss.store_id)
-        stock_by_name[k2] = stock_by_name.get(k2, 0) + units
+    # Only fetch stock for products that have sales — avoids full table scan
+    active_pids = list(set(d["pid"] for d in product_sales.values() if d.get("pid")))
+    active_names = list(set(k[0] for k in product_sales.keys()))
+
+    stock_q = (
+        select(
+            StoreStockBatch.ho_product_id,
+            StoreStockBatch.product_name,
+            StoreStockBatch.store_id,
+            func.sum(StoreStockBatch.closing_stock).label("units"),
+        )
+        .group_by(StoreStockBatch.ho_product_id, StoreStockBatch.product_name, StoreStockBatch.store_id)
+    )
+    if store_id:
+        stock_q = stock_q.where(StoreStockBatch.store_id == store_id)
+    if active_pids or active_names:
+        stock_q = stock_q.where(
+            StoreStockBatch.ho_product_id.in_(active_pids) | StoreStockBatch.product_name.in_(active_names)
+        )
+
+    stock_by_pid: dict = {}
+    stock_by_name: dict = {}
+    for row in (await db.execute(stock_q)).all():
+        units_raw = row[3]
+        units = float(units_raw or 0.0)
+        if row[0]:
+            k = (row[0], row[2])
+            stock_by_pid[k] = float(stock_by_pid.get(k, 0.0)) + units
+        k2 = (row[1], row[2])
+        stock_by_name[k2] = float(stock_by_name.get(k2, 0.0)) + units
 
     forecasts = []
     for (product, sid), data in product_sales.items():
@@ -196,22 +247,25 @@ async def demand_forecast(
         avg_60 = data["qty_60"] / 60 if data["qty_60"] > 0 else 0
         avg_90 = data["qty_90"] / 90 if data["qty_90"] > 0 else 0
         best_avg = max(avg_30, avg_60, avg_90)
-        reorder_qty = round(best_avg * days, 0)
+        reorder_qty = math.floor(best_avg * days + 0.5)
         pid = data.get("pid", "")
         current_stock = stock_by_pid.get((pid, sid), 0) if pid else 0
         if current_stock == 0:
             current_stock = stock_by_name.get((product, sid), 0)
-        days_of_stock = round(current_stock / best_avg, 0) if best_avg > 0 else 999
+        days_of_stock = math.floor(current_stock / best_avg + 0.5) if best_avg > 0 else 999
 
         forecasts.append({
             "product_name": product, "product_id": pid,
             "store_id": sid, "store_name": stores_map.get(sid, ""),
-            "sales_30d": round(data["qty_30"], 0), "sales_60d": round(data["qty_60"], 0), "sales_90d": round(data["qty_90"], 0),
-            "revenue_30d": round(data["amt_30"], 2), "revenue_90d": round(data["amt_90"], 2),
-            "avg_daily": round(best_avg, 2),
-            "reorder_qty": reorder_qty,
-            "current_stock": round(current_stock, 0),
-            "days_of_stock": min(days_of_stock, 999),
+            "sales_30d": math.floor(float(data["qty_30"]) + 0.5),
+            "sales_60d": math.floor(float(data["qty_60"]) + 0.5),
+            "sales_90d": math.floor(float(data["qty_90"]) + 0.5),
+            "revenue_30d": math.floor(float(data["amt_30"]) * 100 + 0.5) / 100.0,
+            "revenue_90d": math.floor(float(data["amt_90"]) * 100 + 0.5) / 100.0,
+            "avg_daily": math.floor(float(best_avg) * 100 + 0.5) / 100.0,
+            "reorder_qty": math.floor(float(reorder_qty) + 0.5),
+            "current_stock": math.floor(float(current_stock) + 0.5),
+            "days_of_stock": min(int(days_of_stock), 999),
             "urgency": "critical" if days_of_stock < 7 else "low" if days_of_stock < 15 else "normal",
         })
 
@@ -222,7 +276,17 @@ async def demand_forecast(
     forecasts.sort(key=lambda x: x["days_of_stock"])
     total = len(forecasts)
     start = (page - 1) * limit
-    return {"forecasts": forecasts[start:start + limit], "total": total, "forecast_days": days, "page": page, "limit": limit}
+    
+    # Typed limit loop for forecasts
+    limited_forecasts: List[Dict[str, Any]] = []
+    end = start + limit
+    for idx_f, f_val in enumerate(forecasts):
+        if idx_f >= start and idx_f < end:
+            limited_forecasts.append(f_val)
+        if idx_f >= end:
+            break
+            
+    return {"forecasts": limited_forecasts, "total": total, "forecast_days": days, "page": page, "limit": limit}
 
 
 @router.get("/intel/export-forecast")
@@ -267,13 +331,14 @@ async def expiry_risk(
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     items = []
 
-    # HO stock
-    for s in (await db.execute(select(HOStockBatch).where(HOStockBatch.expiry_date.isnot(None)))).scalars().all():
-        if not s.expiry_date or s.closing_stock <= 0:
-            continue
+    # HO stock — filter expiry window in SQL, not Python
+    ho_q = select(HOStockBatch).where(
+        HOStockBatch.expiry_date.isnot(None),
+        HOStockBatch.closing_stock > 0,
+        HOStockBatch.expiry_date <= d90,
+    )
+    for s in (await db.execute(ho_q)).scalars().all():
         days_to_exp = (s.expiry_date - now).days
-        if days_to_exp > 90:
-            continue
         level = "30d" if days_to_exp <= 30 else "60d" if days_to_exp <= 60 else "90d"
         items.append({
             "location": "Head Office", "store_id": None,
@@ -284,16 +349,16 @@ async def expiry_risk(
             "risk_level": level,
         })
 
-    # Store stock
-    ss_q = select(StoreStockBatch).where(StoreStockBatch.expiry_date.isnot(None))
+    # Store stock — filter expiry window in SQL, not Python
+    ss_q = select(StoreStockBatch).where(
+        StoreStockBatch.expiry_date.isnot(None),
+        StoreStockBatch.closing_stock_strips > 0,
+        StoreStockBatch.expiry_date <= d90,
+    )
     if store_id:
         ss_q = ss_q.where(StoreStockBatch.store_id == store_id)
     for s in (await db.execute(ss_q)).scalars().all():
-        if not s.expiry_date or s.closing_stock_strips <= 0:
-            continue
         days_to_exp = (s.expiry_date - now).days
-        if days_to_exp > 90:
-            continue
         level = "30d" if days_to_exp <= 30 else "60d" if days_to_exp <= 60 else "90d"
         items.append({
             "location": stores_map.get(s.store_id, f"Store {s.store_id}"), "store_id": s.store_id,
@@ -309,11 +374,11 @@ async def expiry_risk(
         items = [i for i in items if i["risk_level"] == risk_level]
 
     items.sort(key=lambda x: x["days_to_expiry"])
-    summary = {"30d": 0, "60d": 0, "90d": 0, "total_value": 0}
+    summary = {"30d": 0, "60d": 0, "90d": 0, "total_value": 0.0}
     for i in items:
         summary[i["risk_level"]] += 1
         summary["total_value"] += i["value"]
-    summary["total_value"] = round(summary["total_value"], 2)
+    summary["total_value"] = math.floor(float(summary["total_value"]) * 100 + 0.5) / 100.0
 
     return {"items": items, "summary": summary}
 
@@ -363,41 +428,51 @@ async def expiry_monthly(
         if m["month"] not in merged:
             # Generate label from YYYY-MM
             try:
-                dt = datetime.strptime(m["month"] + "-01", "%Y-%m-%d")
+                date_str = str(m["month"]) + "-01"
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
                 label = dt.strftime("%B %Y")
-            except: label = m["month"]
-            merged[m["month"]] = {"month": m["month"], "label": label, "count": 0, "value": 0}
-        merged[m["month"]]["count"] += m["count"]
-        merged[m["month"]]["value"] += m["value"]
+            except Exception:
+                label = str(m["month"])
+            merged[m["month"]] = {"month": m["month"], "label": label, "count": 0, "value": 0.0}
+        merged[m["month"]]["count"] += int(m["count"])
+        merged[m["month"]]["value"] += float(m["value"])
 
     months_sorted = sorted(merged.values(), key=lambda x: x["month"])
     for m in months_sorted:
-        m["value"] = round(m["value"], 2)
+        m["value"] = math.floor(float(m["value"]) * 100 + 0.5) / 100.0
 
-    # Summary via SQL counts
-    expired_count = 0; within_30 = 0; within_90 = 0; total_val = 0
+    # Summary — store counts in parallel, HO counts in parallel when no store filter
     d30 = now + timedelta(days=30); d90 = now + timedelta(days=90)
 
-    if not store_id:
-        expired_count += (await db.execute(select(func.count(HOStockBatch.id)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0, HOStockBatch.expiry_date < now))).scalar() or 0
-        within_30 += (await db.execute(select(func.count(HOStockBatch.id)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0, HOStockBatch.expiry_date >= now, HOStockBatch.expiry_date <= d30))).scalar() or 0
-        within_90 += (await db.execute(select(func.count(HOStockBatch.id)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0, HOStockBatch.expiry_date >= now, HOStockBatch.expiry_date <= d90))).scalar() or 0
-        total_val += float((await db.execute(select(func.sum(HOStockBatch.landing_cost_value)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0))).scalar() or 0)
+    ss_sid = [StoreStockBatch.store_id == store_id] if store_id else []
+    ss_r = await asyncio.gather(
+        db.execute(select(func.count(StoreStockBatch.id)).where(StoreStockBatch.expiry_date.isnot(None), StoreStockBatch.closing_stock_strips > 0, *ss_sid, StoreStockBatch.expiry_date < now)),
+        db.execute(select(func.count(StoreStockBatch.id)).where(StoreStockBatch.expiry_date.isnot(None), StoreStockBatch.closing_stock_strips > 0, *ss_sid, StoreStockBatch.expiry_date >= now, StoreStockBatch.expiry_date <= d30)),
+        db.execute(select(func.count(StoreStockBatch.id)).where(StoreStockBatch.expiry_date.isnot(None), StoreStockBatch.closing_stock_strips > 0, *ss_sid, StoreStockBatch.expiry_date >= now, StoreStockBatch.expiry_date <= d90)),
+        db.execute(select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.expiry_date.isnot(None), StoreStockBatch.closing_stock_strips > 0, *ss_sid)),
+    )
+    expired_count = ss_r[0].scalar() or 0
+    within_30     = ss_r[1].scalar() or 0
+    within_90     = ss_r[2].scalar() or 0
+    total_val     = float(ss_r[3].scalar() or 0)
 
-    ss_exp_base = select(func.count(StoreStockBatch.id)).where(StoreStockBatch.expiry_date.isnot(None), StoreStockBatch.closing_stock_strips > 0)
-    if store_id: ss_exp_base = ss_exp_base.where(StoreStockBatch.store_id == store_id)
-    expired_count += (await db.execute(ss_exp_base.where(StoreStockBatch.expiry_date < now))).scalar() or 0
-    within_30 += (await db.execute(ss_exp_base.where(StoreStockBatch.expiry_date >= now, StoreStockBatch.expiry_date <= d30))).scalar() or 0
-    within_90 += (await db.execute(ss_exp_base.where(StoreStockBatch.expiry_date >= now, StoreStockBatch.expiry_date <= d90))).scalar() or 0
-    ss_val_q = select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.expiry_date.isnot(None), StoreStockBatch.closing_stock_strips > 0)
-    if store_id: ss_val_q = ss_val_q.where(StoreStockBatch.store_id == store_id)
-    total_val += float((await db.execute(ss_val_q)).scalar() or 0)
+    if not store_id:
+        ho_r = await asyncio.gather(
+            db.execute(select(func.count(HOStockBatch.id)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0, HOStockBatch.expiry_date < now)),
+            db.execute(select(func.count(HOStockBatch.id)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0, HOStockBatch.expiry_date >= now, HOStockBatch.expiry_date <= d30)),
+            db.execute(select(func.count(HOStockBatch.id)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0, HOStockBatch.expiry_date >= now, HOStockBatch.expiry_date <= d90)),
+            db.execute(select(func.sum(HOStockBatch.landing_cost_value)).where(HOStockBatch.expiry_date.isnot(None), HOStockBatch.closing_stock > 0)),
+        )
+        expired_count += ho_r[0].scalar() or 0
+        within_30     += ho_r[1].scalar() or 0
+        within_90     += ho_r[2].scalar() or 0
+        total_val     += float(ho_r[3].scalar() or 0)
 
     total_batches = sum(m["count"] for m in months_sorted)
 
     return {
         "months": months_sorted,
-        "summary": {"total_batches": total_batches, "expired": expired_count, "within_30d": within_30, "within_90d": within_90, "total_value": round(total_val, 2)},
+        "summary": {"total_batches": total_batches, "expired": expired_count, "within_30d": within_30, "within_90d": within_90, "total_value": math.floor(float(total_val) * 100 + 0.5) / 100.0},
     }
 
 
@@ -437,7 +512,7 @@ async def expiry_month_detail(
                 "location": "Head Office", "store_id": 0,
                 "product_id": s.product_id, "product_name": s.product_name,
                 "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
-                "value": round(float(s.landing_cost_value or 0), 2),
+                "value": math.floor(float(s.landing_cost_value or 0) * 100 + 0.5) / 100.0,
                 "expiry_date": s.expiry_date.isoformat(), "days_left": (s.expiry_date - now).days,
             })
 
@@ -455,7 +530,7 @@ async def expiry_month_detail(
             "product_id": s.ho_product_id or s.store_product_id or "",
             "product_name": s.product_name, "batch": s.batch,
             "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
-            "value": round(float(s.cost_value or 0), 2),
+            "value": math.floor(float(s.cost_value or 0) * 100 + 0.5) / 100.0,
             "expiry_date": s.expiry_date.isoformat(), "days_left": (s.expiry_date - now).days,
         })
 
@@ -471,55 +546,100 @@ async def redistribution_suggestions(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
+    """Smart redistribution: Find dead stock with demand signal in other stores."""
     now = datetime.now(timezone.utc)
+    dead_threshold = now - timedelta(days=60)
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
 
-    # Find dead stock (no sales, 60+ days)
-    dead = []
-    for s in (await db.execute(select(StoreStockBatch))).scalars().all():
-        if s.closing_stock_strips <= 0 or (s.sales or 0) > 0:
+    # 1. Fetch ALL dead stock (bulk)
+    dead_batches = (await db.execute(select(StoreStockBatch).where(and_(
+        StoreStockBatch.closing_stock_strips > 0,
+        (StoreStockBatch.sales == 0) | (StoreStockBatch.sales.is_(None)),
+        StoreStockBatch.created_at < dead_threshold
+    )).order_by(StoreStockBatch.cost_value.desc()).limit(200))).scalars().all()
+
+    if not dead_batches:
+        return {"suggestions": [], "total_suggestions": 0, "total_recoverable_value": 0}
+
+    pids = list(set(b.ho_product_id for b in dead_batches if b.ho_product_id is not None))
+    # Demand from other stores (last 90 days sales)
+    demand_rows_exec = await db.execute(select(
+        SalesRecord.product_id, SalesRecord.store_id, func.sum(SalesRecord.quantity).label("qty")
+    ).where(and_(
+        SalesRecord.product_id.in_(pids),
+        SalesRecord.invoice_date >= now - timedelta(days=90)
+    )).group_by(SalesRecord.product_id, SalesRecord.store_id))
+    demand_rows = demand_rows_exec.all()
+
+    demand_map: Dict[str, List[Dict[str, float]]] = {}
+    for r in demand_rows:
+        pid_r = r[0]
+        if pid_r is not None:
+            pid_str = str(pid_r)
+            if pid_str not in demand_map:
+                demand_map[pid_str] = []
+            demand_map[pid_str].append({"store_id": int(r[1]), "sales": float(r[2] or 0.0)})
+
+    # also current store demand signal
+    stock_demand_exec = await db.execute(select(
+        StoreStockBatch.ho_product_id, StoreStockBatch.store_id, StoreStockBatch.sales
+    ).where(and_(
+        StoreStockBatch.ho_product_id.in_(pids),
+        StoreStockBatch.sales.isnot(None),
+        cast(StoreStockBatch.sales, Float) > 0.0
+    )))
+    stock_demand = stock_demand_exec.all()
+    for r in stock_demand:
+        pid_s = r[0]
+        if pid_s is not None:
+            pid_str = str(pid_s)
+            if pid_str not in demand_map:
+                demand_map[pid_str] = []
+            demand_map[pid_str].append({"store_id": int(r[1]), "sales": float(r[2] or 0.0)})
+
+    suggestions: List[Dict[str, Any]] = []
+    total_recoverable: float = 0.0
+    for b in dead_batches:
+        pid = b.ho_product_id
+        if pid is None or pid not in demand_map:
             continue
-        days = (now - s.created_at).days if s.created_at else 0
-        if days > 60:
-            dead.append(s)
-
-    # Find demand by product
-    demand = {}
-    for s in (await db.execute(select(StoreStockBatch).where(StoreStockBatch.sales > 0))).scalars().all():
-        pid = s.ho_product_id or s.store_product_id
-        if pid:
-            demand.setdefault(pid, []).append({"store_id": s.store_id, "sales": float(s.sales or 0)})
-
-    # Also check CRM sales records for demand signal
-    for sr in (await db.execute(select(SalesRecord).where(SalesRecord.invoice_date >= now - timedelta(days=90)))).scalars().all():
-        if sr.product_id:
-            demand.setdefault(sr.product_id, []).append({"store_id": sr.store_id, "sales": 1})
-
-    suggestions = []
-    for d in dead:
-        pid = d.ho_product_id or d.store_product_id
-        if pid not in demand:
-            continue
-        days_dead = (now - d.created_at).days if d.created_at else 0
-        # Find best receiving store (highest demand, different store)
-        best = None
-        for buyer in demand[pid]:
-            if buyer["store_id"] != d.store_id:
-                if not best or buyer["sales"] > best["sales"]:
-                    best = buyer
-        if best:
+        
+        # Sort demand by highest sales
+        targets = sorted(demand_map[pid], key=lambda x: x["sales"], reverse=True)
+        # Filters targets to exclude owner store
+        other_demand = [t for t in targets if t["store_id"] != b.store_id]
+        
+        if other_demand:
+            best_target = other_demand[0]
+            val_raw: float = float(b.cost_value or 0.0)
             suggestions.append({
-                "product_name": d.product_name, "product_id": pid,
-                "from_store": stores_map.get(d.store_id, ""), "from_store_id": d.store_id,
-                "to_store": stores_map.get(best["store_id"], ""), "to_store_id": best["store_id"],
-                "quantity": round(d.closing_stock_strips, 1), "days_dead": days_dead,
-                "value": round(float(d.cost_value or 0), 2),
-                "reason": f"Dead {days_dead}d at {stores_map.get(d.store_id, '')}, demand at {stores_map.get(best['store_id'], '')}",
+                "product_id": pid,
+                "product_name": b.product_name,
+                "source_store": stores_map.get(b.store_id, f"Store {b.store_id}"),
+                "source_id": b.store_id,
+                "target_store": stores_map.get(best_target["store_id"], f"Store {best_target['store_id']}"),
+                "target_id": best_target["store_id"],
+                "stock_quantity": float(b.closing_stock_strips or 0.0),
+                "recoverable_value": math.floor(float(val_raw) * 100 + 0.5) / 100.0,
+                "demand_signal": float(best_target["sales"] or 0.0),
+                "batch": b.batch
             })
+            total_recoverable = float(total_recoverable or 0.0) + float(val_raw or 0.0)  # type: ignore[arg-type]
 
-    suggestions.sort(key=lambda x: -x["value"])
-    total_value = round(sum(s["value"] for s in suggestions), 2)
-    return {"suggestions": suggestions[:50], "total_suggestions": len(suggestions), "total_recoverable_value": total_value}
+    # Use explicit loop for capping instead of slice operator to satisfy strict linter
+    final_list: List[Dict[str, Any]] = []
+    count_limit = 0
+    for sug in suggestions:
+        if count_limit >= 100:
+            break
+        final_list.append(sug)
+        count_limit = count_limit + 1
+
+    return {
+        "suggestions": final_list,
+        "total_suggestions": len(suggestions),
+        "total_recoverable_value": math.floor(float(total_recoverable) * 100 + 0.5) / 100.0
+    }
 
 
 # ─── CRM Task Automation ──────────────────────────────────
@@ -544,16 +664,21 @@ async def generate_auto_tasks(
         ))
     )).scalars().all()
 
-    for mp in due_items:
-        # Check if task already exists for this customer today
-        existing = (await db.execute(
-            select(func.count(CRMTask.id)).where(and_(
-                CRMTask.customer_id == mp.customer_id,
+    # Batch-check which customers already have a pending task today (1 query instead of N)
+    due_customer_ids = [mp.customer_id for mp in due_items]
+    already_tasked: set = set()
+    if due_customer_ids:
+        tasked_rows = (await db.execute(
+            select(CRMTask.customer_id).where(and_(
+                CRMTask.customer_id.in_(due_customer_ids),
                 CRMTask.created_at >= today_start,
                 CRMTask.status == "pending",
-            ))
-        )).scalar() or 0
-        if existing > 0:
+            )).distinct()
+        )).scalars().all()
+        already_tasked = set(tasked_rows)
+
+    for mp in due_items:
+        if mp.customer_id in already_tasked:
             continue
 
         is_overdue = mp.next_due_date < today_start
@@ -565,7 +690,7 @@ async def generate_auto_tasks(
             due_date=now, status="pending",
             notes=notes, created_by=user["user_id"],
         ))
-        created += 1
+        created: int = int(created) + 1  # type: ignore[arg-type]
 
     await db.commit()
     return {"message": f"Generated {created} CRM tasks", "tasks_created": created}
@@ -598,14 +723,23 @@ async def get_task_queue(
         c = cmap.get(t.customer_id)
         if not c:
             continue
-        if store_id and (c.assigned_store_id or c.first_store_id) != store_id:
+        
+        c_sid = getattr(c, 'assigned_store_id', None) or getattr(c, 'first_store_id', None)
+        if store_id and c_sid != store_id:
             continue
+        
+        c_type = "UNKNOWN"
+        raw_ct = getattr(c, 'customer_type', None)
+        if raw_ct:
+            c_type = raw_ct.value if hasattr(raw_ct, 'value') else str(raw_ct)
+
         result.append({
-            "task_id": t.id, "customer_id": c.id,
-            "customer_name": c.customer_name, "mobile": c.mobile_number,
-            "store": stores_map.get(c.assigned_store_id or c.first_store_id, ""),
-            "customer_type": c.customer_type.value if hasattr(c.customer_type, 'value') else c.customer_type,
-            "adherence": c.adherence_score,
+            "task_id": t.id, "customer_id": getattr(c, 'id', None),
+            "customer_name": getattr(c, 'customer_name', 'Unknown'), 
+            "mobile": getattr(c, 'mobile_number', ''),
+            "store": stores_map.get(c_sid, ""),
+            "customer_type": c_type,
+            "adherence": getattr(c, 'adherence_score', 0),
             "notes": t.notes, "status": t.status,
         })
 
@@ -623,7 +757,6 @@ async def supplier_intelligence(
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     """Analyze suppliers from Product Master using SQL aggregation."""
-    from sqlalchemy import union_all, literal_column, case
 
     # Build a union of all supplier columns into a single (supplier, product_id, product_name, ptr, lcost, mrp) set
     sup_queries = []
@@ -655,7 +788,8 @@ async def supplier_intelligence(
 
     suppliers = [{
         "supplier": r[0], "product_count": int(r[1]),
-        "avg_ptr": round(float(r[2] or 0), 2), "avg_landing_cost": round(float(r[3] or 0), 2),
+        "avg_ptr": math.floor(float(r[2] or 0.0) * 100 + 0.5) / 100.0, 
+        "avg_landing_cost": math.floor(float(r[3] or 0.0) * 100 + 0.5) / 100.0,
     } for r in sup_rows]
 
     # ── Best Supplier per Product (lowest PTR from primary/least_price) ──
@@ -679,9 +813,10 @@ async def supplier_intelligence(
 
     best_per_product = [{
         "product_id": r[0], "product_name": r[1], "best_supplier": r[2],
-        "ptr": round(float(r[3] or 0), 2), "landing_cost": round(float(r[4] or 0), 2),
-        "mrp": round(float(r[5] or 0), 2),
-        "margin_pct": round((1 - float(r[3] or 0) / float(r[5])) * 100, 1) if r[5] and float(r[5]) > 0 else 0,
+        "ptr": math.floor(float(r[3] or 0) * 100 + 0.5) / 100.0,
+        "landing_cost": math.floor(float(r[4] or 0) * 100 + 0.5) / 100.0,
+        "mrp": math.floor(float(r[5] or 0) * 100 + 0.5) / 100.0,
+        "margin_pct": math.floor((1 - float(r[3] or 0) / float(r[5])) * 1000 + 0.5) / 10.0 if r[5] and float(r[5]) > 0 else 0.0,
     } for r in best_rows]
 
     return {
@@ -722,7 +857,7 @@ async def purchase_recommendation(
     for r in ss_q:
         qty = float(r[1] or 0)
         if qty > 0 and (not store_id or r[0] != store_id):
-            store_stocks.append({"store_id": r[0], "store_name": stores_map.get(r[0], ""), "stock": round(qty, 1)})
+            store_stocks.append({"store_id": r[0], "store_name": stores_map.get(r[0], ""), "stock": math.floor(float(qty) + 0.5)})
 
     # 3. Supplier data
     supplier_options = []
@@ -760,76 +895,99 @@ async def enhanced_store_performance(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
-    """Enhanced store scorecard with CLV-per-store and CRM metrics."""
+    """Enhanced store scorecard via bulk SQL aggregation."""
     now = datetime.now(timezone.utc)
     stores = (await db.execute(select(Store).where(Store.is_active == True).order_by(Store.store_name))).scalars().all()
+    sids = [s.id for s in stores]
 
-    results = []
+    if not sids:
+        return {"stores": []}
+
+    # Parallelize ALL store metric aggregations
+    tasks = [
+        # 1. Stock Metrics by Store
+        db.execute(select(
+            StoreStockBatch.store_id,
+            func.sum(StoreStockBatch.cost_value).label("val"),
+            func.sum(StoreStockBatch.closing_stock_strips).label("qty"),
+            func.sum(StoreStockBatch.sales).label("sales")
+        ).where(StoreStockBatch.store_id.in_(sids)).group_by(StoreStockBatch.store_id)),
+        
+        # 2. Customer & CLV Metrics
+        db.execute(select(
+            func.coalesce(CRMCustomer.assigned_store_id, CRMCustomer.first_store_id).label("sid"),
+            func.count(CRMCustomer.id).label("total"),
+            func.count(case((CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]), 1), else_=None)).label("rc"),
+            func.sum(CRMCustomer.clv_value).label("clv"),
+            func.count(case((CRMCustomer.clv_tier == "high", 1), else_=None)).label("high")
+        ).where(or_(CRMCustomer.assigned_store_id.in_(sids), CRMCustomer.first_store_id.in_(sids)))
+        .group_by(func.coalesce(CRMCustomer.assigned_store_id, CRMCustomer.first_store_id))),
+
+        # 3. Sales Revenue
+        db.execute(select(
+            SalesRecord.store_id,
+            func.sum(SalesRecord.total_amount).label("rev")
+        ).where(SalesRecord.store_id.in_(sids)).group_by(SalesRecord.store_id)),
+
+        # 4. Overdue Meds
+        db.execute(select(
+            MedicinePurchase.store_id,
+            func.count(MedicinePurchase.id).label("overdue")
+        ).where(and_(
+            MedicinePurchase.store_id.in_(sids),
+            MedicinePurchase.status == "active",
+            MedicinePurchase.next_due_date < now
+        )).group_by(MedicinePurchase.store_id))
+    ]
+
+    results_data = await asyncio.gather(*tasks)
+
+    # Convert results into maps for fast O(1) lookup
+    stock_map = {r[0]: r for r in results_data[0].all()}   # type: ignore[index]
+    cust_map  = {r[0]: r for r in results_data[1].all()}   # type: ignore[index]
+    rev_map   = {r[0]: r for r in results_data[2].all()}   # type: ignore[index]
+    overdue_map = {r[0]: r for r in results_data[3].all()} # type: ignore[index]
+
+    final_results = []
     for store in stores:
         sid = store.id
+        # Use safely typed defaults
+        s_data = stock_map.get(sid)
+        c_data = cust_map.get(sid)
+        r_data = rev_map.get(sid)
+        o_data = overdue_map.get(sid)
 
-        # Inventory metrics
-        stock_value = float((await db.execute(
-            select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == sid)
-        )).scalar() or 0)
-        total_stock = float((await db.execute(
-            select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == sid)
-        )).scalar() or 0)
-        total_sales_units = float((await db.execute(
-            select(func.sum(StoreStockBatch.sales)).where(StoreStockBatch.store_id == sid)
-        )).scalar() or 0)
-        turnover = round(total_sales_units / total_stock, 2) if total_stock > 0 else 0
+        # Extract values using index-safe access or defaults
+        val_stock: float = float(s_data[1] or 0.0) if s_data and len(s_data) > 1 else 0.0
+        qty_stock: float = float(s_data[2] or 0.0) if s_data and len(s_data) > 2 else 0.0
+        s_qty: float = float(s_data[3] or 0.0) if s_data and len(s_data) > 3 else 0.0
+        
+        c_total: int = int(c_data[1] or 0) if c_data and len(c_data) > 1 else 0
+        c_rc: int = int(c_data[2] or 0) if c_data and len(c_data) > 2 else 0
+        c_clv: float = float(c_data[3] or 0.0) if c_data and len(c_data) > 3 else 0.0
+        c_high: int = int(c_data[4] or 0) if c_data and len(c_data) > 4 else 0
 
-        # CLV metrics
-        customer_count = (await db.execute(
-            select(func.count(CRMCustomer.id)).where(
-                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid)
-            )
-        )).scalar() or 0
-        rc_count = (await db.execute(
-            select(func.count(CRMCustomer.id)).where(and_(
-                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid),
-                CRMCustomer.customer_type.in_([CustomerType.RC, CustomerType.CHRONIC]),
-            ))
-        )).scalar() or 0
-        total_clv = float((await db.execute(
-            select(func.sum(CRMCustomer.clv_value)).where(
-                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid)
-            )
-        )).scalar() or 0)
-        high_value_count = (await db.execute(
-            select(func.count(CRMCustomer.id)).where(and_(
-                (CRMCustomer.first_store_id == sid) | (CRMCustomer.assigned_store_id == sid),
-                CRMCustomer.clv_tier == "high",
-            ))
-        )).scalar() or 0
+        rev: float = float(r_data[1] or 0.0) if r_data and len(r_data) > 1 else 0.0
+        overdue: int = int(o_data[1] or 0) if o_data and len(o_data) > 1 else 0
 
-        # CRM metrics
-        sales_revenue = float((await db.execute(
-            select(func.sum(SalesRecord.total_amount)).where(SalesRecord.store_id == sid)
-        )).scalar() or 0)
-        overdue_meds = (await db.execute(
-            select(func.count(MedicinePurchase.id)).where(and_(
-                MedicinePurchase.store_id == sid,
-                MedicinePurchase.status == "active",
-                MedicinePurchase.next_due_date < now,
-            ))
-        )).scalar() or 0
-
-        retention_pct = round(rc_count / customer_count * 100, 1) if customer_count > 0 else 0
-
-        results.append({
+        final_results.append({
             "store_id": sid, "store_name": store.store_name, "store_code": store.store_code,
-            "stock_value": round(stock_value, 2), "total_stock": round(total_stock, 1),
-            "turnover": turnover, "sales_revenue": round(sales_revenue, 2),
-            "customer_count": customer_count, "rc_count": rc_count,
-            "retention_pct": retention_pct, "high_value_customers": high_value_count,
-            "total_clv": round(total_clv, 2), "avg_clv": round(total_clv / customer_count, 2) if customer_count > 0 else 0,
-            "overdue_meds": overdue_meds,
+            "stock_value": math.floor(float(val_stock) * 100 + 0.5) / 100.0,
+            "total_stock": math.floor(float(qty_stock) * 10 + 0.5) / 10.0,
+            "turnover": math.floor(float(s_qty / qty_stock) * 100 + 0.5) / 100.0 if qty_stock > 0 else 0,
+            "sales_revenue": math.floor(float(rev) * 100 + 0.5) / 100.0,
+            "customer_count": int(c_total),
+            "rc_count": int(c_rc),
+            "retention_pct": math.floor(float(c_rc / c_total * 100) * 10 + 0.5) / 10.0 if c_total > 0 else 0,
+            "high_value_customers": int(c_high),
+            "total_clv": math.floor(float(c_clv) * 100 + 0.5) / 100.0,
+            "avg_clv": math.floor(float(c_clv / c_total) * 100 + 0.5) / 100.0 if c_total > 0 else 0,
+            "overdue_meds": int(overdue),
         })
 
-    results.sort(key=lambda x: -x["total_clv"])
-    return {"stores": results}
+    final_results.sort(key=lambda x: -x["total_clv"])
+    return {"stores": final_results}
+
 
 
 # ─── Top Selling Products ───────────────────────────────────
@@ -903,9 +1061,9 @@ async def top_selling_products(
         amt = float(r[4] or 0)
         products.append({
             "product_name": r[0], "product_id": r[1] or "",
-            "total_qty": round(qty, 0), "invoice_count": cnt,
-            "total_amount": round(amt, 2), "store_count": int(r[5] or 0),
-            "avg_price": round(amt / qty, 2) if qty > 0 else 0,
+            "total_qty": math.floor(float(qty) + 0.5), "invoice_count": int(cnt),
+            "total_amount": math.floor(float(amt) * 100 + 0.5) / 100.0, "store_count": int(r[5] or 0),
+            "avg_price": math.floor((float(amt) / float(qty)) * 100 + 0.5) / 100.0 if qty > 0 else 0,
         })
 
     return {"products": products, "total": total, "page": page, "limit": limit}
@@ -966,71 +1124,38 @@ async def store_dashboard(
         try: d_to = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1)
         except: pass
 
-    # Stock Value from StoreStockBatch (stock ledger)
-    stock_value = float((await db.execute(
-        select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == store_id)
-    )).scalar() or 0)
-    total_stock_units = float((await db.execute(
-        select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == store_id)
-    )).scalar() or 0)
-    total_sku = (await db.execute(
-        select(func.count(StoreStockBatch.id)).where(StoreStockBatch.store_id == store_id)
-    )).scalar() or 0
-
-    # Sales from SalesRecord ONLY (sales uploads)
-    total_sales_count = (await db.execute(
-        select(func.count(SalesRecord.id)).where(and_(
-            SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to,
-        ))
-    )).scalar() or 0
-    total_sales_value = float((await db.execute(
-        select(func.sum(SalesRecord.total_amount)).where(and_(
-            SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to,
-        ))
-    )).scalar() or 0)
-
-    # Date-wise sales breakdown from SalesRecord
+    # All independent queries run in parallel
     from sqlalchemy import cast, Date
-    daily_sales_q = (await db.execute(
-        select(
-            cast(SalesRecord.invoice_date, Date).label("sale_date"),
-            func.count(SalesRecord.id).label("count"),
-            func.sum(SalesRecord.total_amount).label("amount"),
-        ).where(and_(
-            SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to,
-        )).group_by(cast(SalesRecord.invoice_date, Date)).order_by(cast(SalesRecord.invoice_date, Date))
-    )).all()
-    daily_sales = [{"date": str(r[0]), "invoices": int(r[1] or 0), "amount": round(float(r[2] or 0), 2)} for r in daily_sales_q]
+    (
+        r_stock_val, r_stock_units, r_sku,
+        r_sales_cnt, r_sales_val,
+        r_daily_sales, r_top_products, r_customers,
+        r_purch_amt, r_purch_cnt,
+    ) = await asyncio.gather(
+        db.execute(select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == store_id)),
+        db.execute(select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == store_id)),
+        db.execute(select(func.count(StoreStockBatch.id)).where(StoreStockBatch.store_id == store_id)),
+        db.execute(select(func.count(SalesRecord.id)).where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to))),
+        db.execute(select(func.sum(SalesRecord.total_amount)).where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to))),
+        db.execute(select(cast(SalesRecord.invoice_date, Date).label("sale_date"), func.count(SalesRecord.id).label("count"), func.sum(SalesRecord.total_amount).label("amount")).where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to)).group_by(cast(SalesRecord.invoice_date, Date)).order_by(cast(SalesRecord.invoice_date, Date))),
+        db.execute(select(SalesRecord.product_name, func.sum(SalesRecord.quantity).label("qty"), func.count(SalesRecord.id).label("cnt"), func.sum(SalesRecord.total_amount).label("amt")).where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to)).group_by(SalesRecord.product_name).order_by(func.sum(SalesRecord.total_amount).desc()).limit(20)),
+        db.execute(select(func.count(CRMCustomer.id)).where((CRMCustomer.first_store_id == store_id) | (CRMCustomer.assigned_store_id == store_id))),
+        db.execute(select(func.sum(PurchaseRecord.total_amount)).where(and_(PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to))),
+        db.execute(select(func.count(func.distinct(PurchaseRecord.entry_number))).where(and_(PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to))),
+    )
 
-    # Top selling products from SalesRecord - use SUM(quantity) for actual qty sold
-    top_products_q = (await db.execute(
-        select(SalesRecord.product_name,
-               func.sum(SalesRecord.quantity).label("qty"),
-               func.count(SalesRecord.id).label("cnt"),
-               func.sum(SalesRecord.total_amount).label("amt"))
-        .where(and_(SalesRecord.store_id == store_id, SalesRecord.invoice_date >= d_from, SalesRecord.invoice_date < d_to))
-        .group_by(SalesRecord.product_name).order_by(func.sum(SalesRecord.total_amount).desc()).limit(20)
-    )).all()
-    top_products = [{"product": str(r[0]), "qty": round(float(r[1] or 0), 0), "count": int(r[2] or 0), "amount": round(float(r[3] or 0), 2)} for r in top_products_q]
-
-    # Customer count for this store
-    customer_count = (await db.execute(
-        select(func.count(CRMCustomer.id)).where(
-            (CRMCustomer.first_store_id == store_id) | (CRMCustomer.assigned_store_id == store_id)
-        )
-    )).scalar() or 0
-
-    # Purchase data from PurchaseRecord
-    total_purchase_amount = float((await db.execute(
-        select(func.sum(PurchaseRecord.total_amount)).where(and_(
-            PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to,
-        ))
-    )).scalar() or 0)
-    total_purchase_count = (await db.execute(
-        select(func.count(func.distinct(PurchaseRecord.entry_number))).where(and_(
-            PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to,
-        ))
-    )).scalar() or 0
+    stock_value        = float(r_stock_val.scalar() or 0)
+    total_stock_units  = float(r_stock_units.scalar() or 0)
+    total_sku          = r_sku.scalar() or 0
+    total_sales_count  = r_sales_cnt.scalar() or 0
+    total_sales_value  = float(r_sales_val.scalar() or 0)
+    _daily_rows  = r_daily_sales.all()
+    _top_rows    = r_top_products.all()
+    daily_sales  = [{"date": str(r[0]), "invoices": int(r[1] or 0), "amount": math.floor(float(r[2] if r[2] is not None else 0.0) * 100 + 0.5) / 100.0} for r in _daily_rows]
+    top_products = [{"product": str(r[0]), "qty": math.floor(float(r[1] if r[1] is not None else 0.0) + 0.5), "count": int(r[2] or 0), "amount": math.floor(float(r[3] if r[3] is not None else 0.0) * 100 + 0.5) / 100.0} for r in _top_rows]
+    customer_count     = r_customers.scalar() or 0
+    total_purchase_amount = float(r_purch_amt.scalar() or 0)
+    total_purchase_count  = r_purch_cnt.scalar() or 0
 
     # Top suppliers by purchase amount
     top_suppliers_q = (await db.execute(
@@ -1038,7 +1163,7 @@ async def store_dashboard(
         .where(and_(PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to))
         .group_by(PurchaseRecord.supplier_name).order_by(func.sum(PurchaseRecord.total_amount).desc()).limit(20)
     )).all()
-    top_suppliers = [{"supplier": str(r[0]), "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0)} for r in top_suppliers_q]
+    top_suppliers = [{"supplier": str(r[0]), "amount": math.floor(float(r[1] or 0) * 100 + 0.5) / 100.0, "qty": math.floor(float(r[2] or 0) + 0.5)} for r in top_suppliers_q]
 
     # Date-wise purchase breakdown
     daily_purchases_q = (await db.execute(
@@ -1050,13 +1175,13 @@ async def store_dashboard(
             PurchaseRecord.store_id == store_id, PurchaseRecord.purchase_date >= d_from, PurchaseRecord.purchase_date < d_to,
         )).group_by(cast(PurchaseRecord.purchase_date, Date)).order_by(cast(PurchaseRecord.purchase_date, Date))
     )).all()
-    daily_purchases = [{"date": str(r[0]), "invoices": int(r[1] or 0), "amount": round(float(r[2] or 0), 2)} for r in daily_purchases_q]
+    daily_purchases = [{"date": str(r[0]), "invoices": int(r[1] or 0), "amount": math.floor(float(r[2] or 0) * 100 + 0.5) / 100.0} for r in daily_purchases_q]
 
     return {
         "store": {"id": store.id, "name": store.store_name, "code": store.store_code, "location": store.location},
-        "stock": {"value": round(stock_value, 2), "units": round(total_stock_units, 1), "sku_count": total_sku},
-        "sales": {"count": total_sales_count, "value": round(total_sales_value, 2), "period_from": d_from.isoformat(), "period_to": d_to.isoformat()},
-        "purchases": {"count": total_purchase_count, "value": round(total_purchase_amount, 2)},
+        "stock": {"value": math.floor(float(stock_value) * 100 + 0.5) / 100.0, "units": math.floor(float(total_stock_units) * 10 + 0.5) / 10.0, "sku_count": total_sku},
+        "sales": {"count": total_sales_count, "value": math.floor(float(total_sales_value) * 100 + 0.5) / 100.0, "period_from": d_from.isoformat(), "period_to": d_to.isoformat()},
+        "purchases": {"count": total_purchase_count, "value": math.floor(float(total_purchase_amount) * 100 + 0.5) / 100.0},
         "daily_sales": daily_sales,
         "daily_purchases": daily_purchases,
         "top_products": top_products,
@@ -1070,44 +1195,64 @@ async def store_dashboard_summary(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """All stores summary: stock value + sales value."""
+    """All stores summary: stock value + sales value — bulk aggregation, no per-store loop."""
+    from cache import get_cached, set_cached, cache_key
+    ck = cache_key("store_dash_summary", user.get("store_id"))
+    cached = get_cached(ck, ttl=120)
+    if cached: return cached
     now = datetime.now(timezone.utc)
     d30 = now - timedelta(days=30)
     store_q = select(Store).where(Store.is_active == True).order_by(Store.store_name)
-    # Store roles only see their store
     if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
         store_q = store_q.where(Store.id == user["store_id"])
     stores = (await db.execute(store_q)).scalars().all()
+    sids = [s.id for s in stores]
+    if not sids:
+        return {"stores": []}
+
+    # Single bulk query per metric instead of per-store loop
+    stock_rows, sales_rows, purchase_rows = await asyncio.gather(
+        db.execute(
+            select(StoreStockBatch.store_id,
+                   func.sum(StoreStockBatch.cost_value).label("val"),
+                   func.sum(StoreStockBatch.closing_stock_strips).label("units"))
+            .where(StoreStockBatch.store_id.in_(sids))
+            .group_by(StoreStockBatch.store_id)
+        ),
+        db.execute(
+            select(SalesRecord.store_id,
+                   func.sum(SalesRecord.total_amount).label("val"),
+                   func.count(SalesRecord.id).label("cnt"))
+            .where(and_(SalesRecord.store_id.in_(sids), SalesRecord.invoice_date >= d30))
+            .group_by(SalesRecord.store_id)
+        ),
+        db.execute(
+            select(PurchaseRecord.store_id,
+                   func.sum(PurchaseRecord.total_amount).label("val"))
+            .where(and_(PurchaseRecord.store_id.in_(sids), PurchaseRecord.purchase_date >= d30))
+            .group_by(PurchaseRecord.store_id)
+        ),
+    )
+
+    stock_map = {r[0]: (float(r[1] or 0), float(r[2] or 0)) for r in stock_rows.all()}
+    sales_map = {r[0]: (float(r[1] or 0), int(r[2] or 0)) for r in sales_rows.all()}
+    purchase_map = {r[0]: float(r[1] or 0) for r in purchase_rows.all()}
 
     result = []
     for s in stores:
-        stock_value = float((await db.execute(
-            select(func.sum(StoreStockBatch.cost_value)).where(StoreStockBatch.store_id == s.id)
-        )).scalar() or 0)
-        sales_value = float((await db.execute(
-            select(func.sum(SalesRecord.total_amount)).where(and_(SalesRecord.store_id == s.id, SalesRecord.invoice_date >= d30))
-        )).scalar() or 0)
-        sales_count = (await db.execute(
-            select(func.count(SalesRecord.id)).where(and_(SalesRecord.store_id == s.id, SalesRecord.invoice_date >= d30))
-        )).scalar() or 0
-        stock_units = float((await db.execute(
-            select(func.sum(StoreStockBatch.closing_stock_strips)).where(StoreStockBatch.store_id == s.id)
-        )).scalar() or 0)
-
-        purchase_value = float((await db.execute(
-            select(func.sum(PurchaseRecord.total_amount)).where(and_(PurchaseRecord.store_id == s.id, PurchaseRecord.purchase_date >= d30))
-        )).scalar() or 0)
-
-        if stock_value > 0 or sales_value > 0 or purchase_value > 0:
+        sv, su = stock_map.get(s.id, (0, 0))
+        salv, salc = sales_map.get(s.id, (0, 0))
+        pv = purchase_map.get(s.id, 0)
+        if sv > 0 or salv > 0 or pv > 0:
             result.append({
                 "store_id": s.id, "store_name": s.store_name, "store_code": s.store_code,
-                "stock_value": round(stock_value, 2), "stock_units": round(stock_units, 1),
-                "sales_value": round(sales_value, 2), "sales_count": sales_count,
-                "purchase_value": round(purchase_value, 2),
+                "stock_value": math.floor(float(sv) * 100 + 0.5) / 100.0, "stock_units": math.floor(float(su) * 10 + 0.5) / 10.0,
+                "sales_value": math.floor(float(salv) * 100 + 0.5) / 100.0, "sales_count": int(salc),
+                "purchase_value": math.floor(float(pv) * 100 + 0.5) / 100.0,
             })
 
     result.sort(key=lambda x: -x["sales_value"])
-    return {"stores": result}
+    return set_cached(ck, {"stores": result}, ttl=120)
 
 
 # ─── Purchase Report Upload ────────────────────────────────
@@ -1144,11 +1289,11 @@ async def upload_purchase_report(
         raise HTTPException(400, "Only Excel files accepted")
     content = await file.read()
 
-    # Auto-detect header row
+    # Auto-detect header row — try rows 0-3, fall back to default
     df = None
     for skip in [0, 1, 2, 3]:
         try:
-            test_df = pd.read_excel(BytesIO(content), header=skip)
+            test_df = await asyncio.to_thread(pd.read_excel, BytesIO(content), header=skip)
             if test_df.empty:
                 continue
             cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
@@ -1159,19 +1304,23 @@ async def upload_purchase_report(
             continue
     if df is None:
         try:
-            df = pd.read_excel(BytesIO(content))
+            df = await asyncio.to_thread(pd.read_excel, BytesIO(content))
         except Exception as e:
             raise HTTPException(400, f"Failed to read Excel: {str(e)}")
+    if df is None:
+        raise HTTPException(400, "Unable to parse Excel file. Please ensure it is a valid format.")
+    assert df is not None  # type narrowing for static checkers
     if df.empty:
         raise HTTPException(400, "Excel file is empty")
 
     # Map columns
     original_cols = list(df.columns)
-    df.columns = [str(col).strip().lower().replace('_', ' ') for col in df.columns]
-    mapped = {}
+    df.columns = pd.Index([str(col).strip().lower().replace('_', ' ') for col in df.columns])
+    mapped: Dict[str, str] = {}
     for col in df.columns:
-        if col in PURCHASE_COLUMNS:
-            mapped[col] = PURCHASE_COLUMNS[col]
+        col_str = str(col)
+        if col_str in PURCHASE_COLUMNS:
+            mapped[col_str] = PURCHASE_COLUMNS[col_str]
     missing = [f for f in PURCHASE_REQUIRED if f not in set(mapped.values())]
     if missing:
         raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your columns: {original_cols}")
@@ -1187,8 +1336,11 @@ async def upload_purchase_report(
         if r[0]:
             existing.add((str(r[0]).strip(), str(r[1] or "").strip()))
 
-    batch_id = str(uuid.uuid4())[:12]
-    success, skipped, failed = 0, 0, 0
+    uid_short = str(uuid.uuid4()).replace("-", "")[:12]
+    batch_id: str = uid_short
+    success: int = 0
+    skipped: int = 0
+    failed: int = 0
     records = []
     errors = []
 
@@ -1196,20 +1348,21 @@ async def upload_purchase_report(
         try:
             product = str(row.get("product_name", "")).strip()
             supplier = str(row.get("supplier_name", "")).strip()
+            _row_n: int = int(idx) + 2  # type: ignore[arg-type]
             if not product or product == "nan":
-                failed += 1
-                errors.append(f"Row {idx+2}: Missing product name")
+                failed = int(failed) + 1
+                errors.append(f"Row {_row_n}: Missing product name")
                 continue
             if not supplier or supplier == "nan":
-                failed += 1
-                errors.append(f"Row {idx+2}: Missing supplier name for '{product}'")
+                failed = int(failed) + 1
+                errors.append(f"Row {_row_n}: Missing supplier name for '{product}'")
                 continue
 
             entry_num = str(row.get("entry_number", "")).strip() if pd.notna(row.get("entry_number")) else None
             if entry_num in ("", "nan", "None"):
                 entry_num = None
             if entry_num and (entry_num, product) in existing:
-                skipped += 1
+                skipped = int(skipped) + 1
                 continue
 
             # Parse date
@@ -1230,8 +1383,8 @@ async def upload_purchase_report(
                     pass
 
             pid = str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None
-            if pid and pid.endswith(".0"):
-                pid = pid[:-2]
+            if pid and str(pid).endswith(".0"):
+                pid = str(pid)[:-2]
             if pid in ("", "nan", "None"):
                 pid = None
 
@@ -1245,8 +1398,9 @@ async def upload_purchase_report(
             ))
             success += 1
         except Exception as e:
-            failed += 1
-            errors.append(f"Row {idx+2}: {str(e)[:80]}")
+            failed = int(failed) + 1
+            _err_msg = str(e)
+            errors.append(f"Row {_row_n}: {_err_msg[:80]}")
 
     for r in records:
         db.add(r)
@@ -1266,7 +1420,14 @@ async def upload_purchase_report(
     except Exception:
         pass
 
-    return {"message": "Purchase report uploaded", "total": len(df), "new_records": success, "skipped_duplicate": skipped, "failed": failed, "errors": errors[:20]}
+    # Limit errors loop
+    err_limit: List[str] = []
+    for e in errors:
+        if len(err_limit) >= 20:
+            break
+        err_limit.append(e)
+
+    return {"message": "Purchase report uploaded", "total": len(df), "new_records": int(success), "skipped_duplicate": int(skipped), "failed": int(failed), "errors": err_limit}
 
 
 @router.get("/intel/purchase-records")
@@ -1311,7 +1472,8 @@ async def list_purchase_records(
             "purchase_date": r.purchase_date.isoformat() if r.purchase_date else None,
             "entry_number": r.entry_number, "supplier_name": r.supplier_name,
             "product_id": r.product_id, "product_name": r.product_name,
-            "quantity": r.quantity or 0, "total_amount": round(float(r.total_amount or 0), 2),
+            "quantity": float(r.quantity or 0.0), 
+            "total_amount": math.floor(float(r.total_amount or 0.0) * 100 + 0.5) / 100.0,
         } for r in records],
         "total": total, "page": page, "limit": limit,
     }
@@ -1355,7 +1517,7 @@ async def purchase_analytics(
                func.sum(PurchaseRecord.quantity).label("qty"), func.count(PurchaseRecord.id).label("cnt"))
         .where(base).group_by(PurchaseRecord.supplier_name).order_by(func.sum(PurchaseRecord.total_amount).desc()).limit(50)
     )).all()
-    suppliers = [{"supplier": r[0], "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0), "records": int(r[3] or 0)} for r in sup_q]
+    suppliers = [{"supplier": r[0], "amount": math.floor(float(r[1] or 0) * 100 + 0.5) / 100.0, "qty": math.floor(float(r[2] or 0) + 0.5), "records": int(r[3] or 0)} for r in sup_q]
 
     # Product-wise top purchases
     prod_q = (await db.execute(
@@ -1364,7 +1526,7 @@ async def purchase_analytics(
         .where(base).group_by(PurchaseRecord.product_name, PurchaseRecord.product_id)
         .order_by(func.sum(PurchaseRecord.total_amount).desc()).limit(50)
     )).all()
-    products = [{"product": r[0], "product_id": r[1] or "", "amount": round(float(r[2] or 0), 2), "qty": round(float(r[3] or 0), 0)} for r in prod_q]
+    products = [{"product": r[0], "product_id": r[1] or "", "amount": math.floor(float(r[2] or 0) * 100 + 0.5) / 100.0, "qty": math.floor(float(r[3] or 0) + 0.5)} for r in prod_q]
 
     # Store-wise
     store_q = (await db.execute(
@@ -1373,7 +1535,7 @@ async def purchase_analytics(
         .where(base)
         .group_by(PurchaseRecord.store_id).order_by(func.sum(PurchaseRecord.total_amount).desc())
     )).all()
-    store_spending = [{"store_id": r[0], "store_name": stores_map.get(r[0], ""), "amount": round(float(r[1] or 0), 2), "qty": round(float(r[2] or 0), 0)} for r in store_q]
+    store_spending = [{"store_id": r[0], "store_name": stores_map.get(r[0], ""), "amount": math.floor(float(r[1] or 0) * 100 + 0.5) / 100.0, "qty": math.floor(float(r[2] or 0) + 0.5)} for r in store_q]
 
     # Sales vs Purchase comparison per product (matching by product_id)
     sales_q = (await db.execute(
@@ -1384,18 +1546,19 @@ async def purchase_analytics(
     sales_map = {r[0]: {"qty": float(r[1] or 0), "amt": float(r[2] or 0)} for r in sales_q if r[0]}
 
     comparison = []
-    for p in products[:30]:
-        pid = p["product_id"]
+    products_list: List[Dict[str, Any]] = products # type: ignore
+    for p in products_list[:30]:
+        pid = str(p["product_id"])
         s = sales_map.get(pid, {"qty": 0, "amt": 0})
         comparison.append({
             "product": p["product"], "product_id": pid,
             "purchase_qty": p["qty"], "purchase_amt": p["amount"],
-            "sales_qty": round(s["qty"], 0), "sales_amt": round(s["amt"], 2),
+            "sales_qty": math.floor(float(s["qty"]) + 0.5), "sales_amt": math.floor(float(s["amt"]) * 100 + 0.5) / 100.0,
         })
 
     return {
-        "total_purchase_amount": round(total_amount, 2),
-        "total_purchase_qty": round(total_qty, 0),
+        "total_purchase_amount": math.floor(float(total_amount) * 100 + 0.5) / 100.0,
+        "total_purchase_qty": math.floor(float(total_qty) + 0.5),
         "total_invoices": total_invoices,
         "period_days": days,
         "suppliers": suppliers,
@@ -1509,7 +1672,7 @@ async def get_supplier_profile(
         "sub_categories": sorted(sub_cats),
         "products": [{"product_id": pr.product_id, "product_name": pr.product_name, "category": pr.category,
                        "sub_category": pr.sub_category, "mrp": pr.mrp or 0, "ptr": pr.ptr or 0, "landing_cost": pr.landing_cost or 0} for pr in products],
-        "purchase_90d": {"amount": round(float(purchase_stats[0] or 0), 2), "qty": round(float(purchase_stats[1] or 0), 0), "invoices": int(purchase_stats[2] or 0)},
+        "purchase_90d": {"amount": math.floor(float(purchase_stats[0] or 0) * 100 + 0.5) / 100.0, "qty": math.floor(float(purchase_stats[1] or 0) + 0.5), "invoices": int(purchase_stats[2] or 0)},
     }
 
 
@@ -1568,8 +1731,9 @@ async def subcategory_suppliers(
             sub_cats[sc] = {"sub_category": sc, "category": r[1], "suppliers": [], "total_products": 0}
         sub_cats[sc]["suppliers"].append({
             "supplier": r[2], "product_count": int(r[3]),
-            "avg_mrp": round(float(r[4] or 0), 2), "avg_ptr": round(float(r[5] or 0), 2),
-            "avg_lcost": round(float(r[6] or 0), 2),
+            "avg_mrp": math.floor(float(r[4] or 0) * 100 + 0.5) / 100.0,
+            "avg_ptr": math.floor(float(r[5] or 0) * 100 + 0.5) / 100.0,
+            "avg_lcost": math.floor(float(r[6] or 0) * 100 + 0.5) / 100.0,
         })
         sub_cats[sc]["total_products"] += int(r[3])
 

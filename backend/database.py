@@ -15,8 +15,8 @@ if DATABASE_URL:
     engine = create_async_engine(
         DATABASE_URL,
         echo=False,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=20,       # Increased for better concurrency
+        max_overflow=30,    # Allow more burst connections
         pool_timeout=30,
         pool_recycle=300,
         pool_pre_ping=True,
@@ -29,7 +29,7 @@ else:
     DB_PASS = os.environ.get('DB_PASS', '')
     DB_NAME = os.environ.get('DB_DATABASE', 'postgres')
     url = URL.create("postgresql+asyncpg", username=DB_USER, password=DB_PASS, host=DB_HOST, port=DB_PORT, database=DB_NAME)
-    engine = create_async_engine(url, echo=False, pool_size=5, max_overflow=10, pool_timeout=30, pool_recycle=300, pool_pre_ping=True)
+    engine = create_async_engine(url, echo=False, pool_size=20, max_overflow=30, pool_timeout=30, pool_recycle=300, pool_pre_ping=True)
 
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

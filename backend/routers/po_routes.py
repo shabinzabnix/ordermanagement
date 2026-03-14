@@ -10,10 +10,12 @@ from models import (
 from auth import get_current_user, require_roles
 from pydantic import BaseModel
 from typing import Optional, List
+import asyncio
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 from io import BytesIO
 import uuid
+import math
 
 router = APIRouter()
 
@@ -107,7 +109,7 @@ async def product_stock_info(
         if user_store:
             ss_q = ss_q.where(StoreStockBatch.store_id == user_store)
         stock_rows = (await db.execute(ss_q)).all()
-        store_stock = [{"store_id": r[0], "store": smap.get(r[0], ""), "stock": round(float(r[1] or 0), 0)} for r in stock_rows if float(r[1] or 0) > 0]
+        store_stock = [{"store_id": r[0], "store": smap.get(r[0], ""), "stock": math.floor(float(r[1] or 0) + 0.5)} for r in stock_rows if float(r[1] or 0) > 0]
 
         products.append({
             "product_id": p.product_id, "product_name": p.product_name,
@@ -157,48 +159,58 @@ async def create_store_request(
         for sc in rule.sub_categories.split(","):
             category_rules[sc.strip()] = rule.po_category
 
-    # Calculate values and check stock/pending for each item
+    # Bulk-fetch all product data, stock, and pending counts in 3 queries (not 3N)
+    all_pids = [item.product_id for item in data.items if item.product_id]
+
+    products_map: dict = {}
+    stock_map: dict = {}
+    pending_map: dict = {}
+
+    if all_pids:
+        prod_rows, stock_rows, pending_rows = await asyncio.gather(
+            db.execute(select(Product).where(Product.product_id.in_(all_pids))),
+            db.execute(
+                select(StoreStockBatch.ho_product_id, func.sum(StoreStockBatch.closing_stock_strips).label("units"))
+                .where(StoreStockBatch.store_id == data.store_id, StoreStockBatch.ho_product_id.in_(all_pids))
+                .group_by(StoreStockBatch.ho_product_id)
+            ),
+            db.execute(
+                select(StoreRequestItem.product_id, func.count(StoreRequestItem.id).label("cnt"))
+                .join(StoreRequest, StoreRequestItem.request_id == StoreRequest.id)
+                .where(
+                    StoreRequest.store_id == data.store_id,
+                    StoreRequest.status.in_(["pending", "approved"]),
+                    StoreRequestItem.product_id.in_(all_pids),
+                )
+                .group_by(StoreRequestItem.product_id)
+            ),
+        )
+        products_map = {p.product_id: p for p in prod_rows.scalars().all()}
+        stock_map = {r[0]: float(r[1] or 0) for r in stock_rows.all()}
+        pending_map = {r[0]: int(r[1] or 0) for r in pending_rows.all()}
+
+    # Build items using pre-fetched maps
     total_value = 0
     items_data = []
     for item in data.items:
-        # Get landing cost + sub_category from Product Master
         lcost = 0
         po_cat = None
-        if item.product_id:
-            prod = (await db.execute(select(Product).where(Product.product_id == item.product_id))).scalar_one_or_none()
-            if prod:
-                lcost = float(prod.landing_cost or prod.ptr or 0)
-                if prod.sub_category and prod.sub_category in category_rules:
-                    po_cat = category_rules[prod.sub_category]
+        if item.product_id and item.product_id in products_map:
+            prod = products_map[item.product_id]
+            lcost = float(prod.landing_cost or prod.ptr or 0)
+            if prod.sub_category and prod.sub_category in category_rules:
+                po_cat = category_rules[prod.sub_category]
 
-        est_value = round(lcost * item.quantity, 2)
+        est_value = math.floor((lcost * item.quantity) * 100 + 0.5) / 100.0
         total_value += est_value
-
-        # Current store stock (in strips)
-        store_stock = float((await db.execute(
-            select(func.sum(StoreStockBatch.closing_stock_strips)).where(and_(
-                StoreStockBatch.store_id == data.store_id,
-                StoreStockBatch.ho_product_id == item.product_id,
-            ))
-        )).scalar() or 0) if item.product_id else 0
-
-        # Pending orders for this product at this store
-        pending = (await db.execute(
-            select(func.count(StoreRequestItem.id))
-            .join(StoreRequest, StoreRequestItem.request_id == StoreRequest.id)
-            .where(and_(
-                StoreRequest.store_id == data.store_id,
-                StoreRequest.status.in_(["pending", "approved"]),
-                StoreRequestItem.product_id == item.product_id,
-            ))
-        )).scalar() or 0 if item.product_id else 0
 
         items_data.append({
             "product_id": item.product_id, "product_name": item.product_name,
             "is_registered": item.is_registered,
             "quantity": item.quantity, "landing_cost": lcost,
-            "estimated_value": est_value, "current_store_stock": store_stock,
-            "pending_orders": pending,
+            "estimated_value": est_value,
+            "current_store_stock": stock_map.get(item.product_id, 0) if item.product_id else 0,
+            "pending_orders": pending_map.get(item.product_id, 0) if item.product_id else 0,
             "has_prescription": item.has_prescription,
             "doctor_name": item.doctor_name, "clinic_location": item.clinic_location,
             "po_category": po_cat,
@@ -207,7 +219,7 @@ async def create_store_request(
     req = StoreRequest(
         store_id=data.store_id, request_reason=data.request_reason,
         customer_name=data.customer_name, customer_mobile=data.customer_mobile,
-        status="pending", total_items=len(items_data), total_value=round(total_value, 2),
+        status="pending", total_items=len(items_data), total_value=math.floor(total_value * 100 + 0.5) / 100.0,
         requested_by=user["user_id"],
     )
     db.add(req)
@@ -232,10 +244,10 @@ async def create_store_request(
     from routers.notification_routes import notify_role
     stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
     store_name = stores_map.get(data.store_id, "")
-    await notify_role(db, ["ADMIN", "HO_STAFF"], f"New Store Request from {store_name}", f"{len(items_data)} items, Est. INR {round(total_value, 2)}", link="/store-request", entity_type="store_request", entity_id=req.id)
+    await notify_role(db, ["ADMIN", "HO_STAFF"], f"New Store Request from {store_name}", f"{len(items_data)} items, Est. INR {math.floor(total_value * 100 + 0.5) / 100.0}", link="/store-request", entity_type="store_request", entity_id=req.id)
     await db.commit()
 
-    return {"id": req.id, "total_value": round(total_value, 2), "items": items_data}
+    return {"id": req.id, "total_value": math.floor(total_value * 100 + 0.5) / 100.0, "items": items_data}
 
 
 @router.get("/po/store-requests")
@@ -318,7 +330,7 @@ async def request_stock_info(
             .group_by(StoreStockBatch.ho_product_id, StoreStockBatch.store_id)
         )).all()
         for r in stock_rows:
-            all_stock.setdefault(r[0], []).append({"store": smap.get(r[1], ""), "stock": round(float(r[2] or 0), 0)})
+            all_stock.setdefault(r[0], []).append({"store": smap.get(r[1], ""), "stock": math.floor(float(r[2] or 0) + 0.5)})
 
     # Batch load 90d sales
     d90 = now - timedelta(days=90); d30 = now - timedelta(days=30)
@@ -347,7 +359,7 @@ async def request_stock_info(
         product_info.append({
             "product_id": it.product_id, "product_name": it.product_name,
             "requested_qty": it.quantity, "landing_cost": it.landing_cost,
-            "store_stock": store_stock, "sales_30d": round(sales_30, 0), "sales_90d": round(sales_90, 0),
+            "store_stock": store_stock, "sales_30d": math.floor(sales_30 + 0.5), "sales_90d": math.floor(sales_90 + 0.5),
         })
 
     return {"request_id": request_id, "store_name": smap.get(req.store_id, ""), "products": product_info}
@@ -379,13 +391,13 @@ async def create_purchase_order(
     user: dict = Depends(require_roles("ADMIN", "HO_STAFF", "DIRECTOR")),
 ):
     total_qty = sum(it.quantity for it in data.items)
-    total_value = sum(round(it.quantity * it.landing_cost, 2) for it in data.items)
+    total_value = sum(math.floor((it.quantity * it.landing_cost) * 100 + 0.5) / 100.0 for it in data.items)
 
     po = PurchaseOrder(
         po_number=_gen_po_number(), store_id=data.store_id,
         supplier_name=data.supplier_name, po_type=data.po_type,
         sub_category=data.sub_category, status="draft",
-        total_qty=total_qty, total_value=round(total_value, 2),
+        total_qty=total_qty, total_value=math.floor(total_value * 100 + 0.5) / 100.0,
         remarks=data.remarks, created_by=user["user_id"],
     )
     db.add(po)
@@ -395,7 +407,7 @@ async def create_purchase_order(
         db.add(PurchaseOrderItem(
             po_id=po.id, product_id=it.product_id, product_name=it.product_name,
             is_registered=it.is_registered, quantity=it.quantity,
-            landing_cost=it.landing_cost, estimated_value=round(it.quantity * it.landing_cost, 2),
+            landing_cost=it.landing_cost, estimated_value=math.floor((it.quantity * it.landing_cost) * 100 + 0.5) / 100.0,
         ))
 
     # Link to store request if provided
@@ -407,7 +419,7 @@ async def create_purchase_order(
 
     await _log(db, user, f"Created PO {po.po_number}: {len(data.items)} items, INR {total_value}", "purchase_order", po.id)
     await db.commit()
-    return {"id": po.id, "po_number": po.po_number, "total_value": round(total_value, 2)}
+    return {"id": po.id, "po_number": po.po_number, "total_value": math.floor(total_value * 100 + 0.5) / 100.0}
 
 
 @router.get("/po/list")
@@ -556,7 +568,7 @@ async def purchase_review(
             "suppliers": suppliers,
             "store_stock": store_stock,
             "total_network_stock": sum(s["stock"] for s in store_stock),
-            "sales_30d": round(sales_30d, 0),
+            "sales_30d": math.floor(sales_30d + 0.5),
             "product_info": prod_info,
             "created_at": req.created_at.isoformat() if req and req.created_at else None,
         })
@@ -817,11 +829,11 @@ async def update_po(po_id: int, data: UpdatePOReq, db: AsyncSession = Depends(ge
         await db.execute(delete(PurchaseOrderItem).where(PurchaseOrderItem.po_id == po_id))
         total_qty = 0; total_value = 0
         for it in data.items:
-            ev = round(it.quantity * it.landing_cost, 2)
+            ev = math.floor((it.quantity * it.landing_cost) * 100 + 0.5) / 100.0
             total_qty += it.quantity; total_value += ev
             db.add(PurchaseOrderItem(po_id=po_id, product_id=it.product_id, product_name=it.product_name,
                 is_registered=it.is_registered, quantity=it.quantity, landing_cost=it.landing_cost, estimated_value=ev))
-        po.total_qty = total_qty; po.total_value = round(total_value, 2)
+        po.total_qty = total_qty; po.total_value = math.floor(total_value * 100 + 0.5) / 100.0
     po.updated_at = datetime.now(timezone.utc)
     await _log(db, user, f"Updated PO {po.po_number}", "purchase_order", po_id)
     await db.commit()

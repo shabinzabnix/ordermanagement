@@ -4,6 +4,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+import asyncio
 import logging
 from database import init_db, async_session_maker
 from models import User, UserRole, AuditLog
@@ -37,6 +38,16 @@ app.add_middleware(
 
 
 # Audit middleware - logs all POST/PUT/DELETE actions
+async def _write_audit_log(user_id: int, user_name: str, action: str, entity_type: str):
+    """Fire-and-forget audit log writer — runs outside the request/response cycle."""
+    try:
+        async with async_session_maker() as session:
+            session.add(AuditLog(user_id=user_id, user_name=user_name, action=action, entity_type=entity_type))
+            await session.commit()
+    except Exception:
+        pass
+
+
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -49,9 +60,7 @@ async def audit_middleware(request: Request, call_next):
                 user_name = token_data.get("full_name", "")
                 path = request.url.path.replace("/api/", "")
                 action = f"{request.method} /{path}"
-                async with async_session_maker() as session:
-                    session.add(AuditLog(user_id=user_id, user_name=user_name, action=action, entity_type=path.split("/")[0]))
-                    await session.commit()
+                asyncio.create_task(_write_audit_log(user_id, user_name, action, path.split("/")[0]))
         except Exception:
             pass
     return response
@@ -87,9 +96,27 @@ async def startup():
 
     # Migrate: add enum values
     from database import engine
-    from sqlalchemy import text
+    from sqlalchemy import text, inspect
+    
+    # Quick check: if users table exists and we are in dev reload, we can skip heavy migration checks
+    def table_exists(conn, name):
+        # This is a synchronous check helper
+        pass # We will use a try-catch on a fast query instead
+
     try:
         async with engine.connect() as conn:
+            # Check if basic table exists to skip migration loop
+            try:
+                await conn.execute(text("SELECT 1 FROM users LIMIT 1"))
+                migration_required = False
+            except Exception:
+                migration_required = True
+
+            if not migration_required:
+                logger.info("Database schema already exists, skipping migration checks for speed.")
+                await init_db()
+                return
+
             await conn.execution_options(isolation_level="AUTOCOMMIT")
             for sql in [
                 "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'crm_staff'",
@@ -110,7 +137,34 @@ async def startup():
     try:
         async with engine.connect() as conn:
             await conn.execution_options(isolation_level="AUTOCOMMIT")
-        try:
+            # Performance and Search Optimization Indexes
+            for sql in [
+                "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+                # Search trgm indexes
+                "CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING gin (product_name gin_trgm_ops)",
+                "CREATE INDEX IF NOT EXISTS idx_crm_cust_name_trgm ON crm_customers USING gin (customer_name gin_trgm_ops)",
+                "CREATE INDEX IF NOT EXISTS idx_crm_cust_mobile_trgm ON crm_customers USING gin (mobile_number gin_trgm_ops)",
+                
+                # Sort/Filter indexes
+                "CREATE INDEX IF NOT EXISTS idx_sales_invoice_date ON sales_records(invoice_date DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_purchase_date_sort ON purchase_records(purchase_date DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_st_req_created_at ON store_requests(created_at DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_transfer_stores ON inter_store_transfers(requesting_store_id, source_store_id)",
+                "CREATE INDEX IF NOT EXISTS idx_store_stock_pname ON store_stock_batches(product_name)",
+                
+                # Reporting & Dashboard Composite Indexes
+                "CREATE INDEX IF NOT EXISTS idx_sales_reporting ON sales_records (store_id, invoice_date, total_amount)",
+                "CREATE INDEX IF NOT EXISTS idx_stock_lookup ON store_stock_batches (store_id, ho_product_id, closing_stock_strips)",
+                "CREATE INDEX IF NOT EXISTS idx_purchase_reporting ON purchase_records (store_id, purchase_date, total_amount)",
+                "CREATE INDEX IF NOT EXISTS idx_sales_pname_trgm ON sales_records USING gin (product_name gin_trgm_ops)",
+                "CREATE INDEX IF NOT EXISTS idx_stock_pname_trgm ON store_stock_batches USING gin (product_name gin_trgm_ops)",
+            ]:
+                try:
+                    await conn.execute(text(sql))
+                except Exception:
+                    pass
+
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS assigned_store_id INTEGER REFERENCES stores(id)"))
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS adherence_score VARCHAR(20) DEFAULT 'unknown'"))
             await conn.execute(text("ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS clv_value FLOAT DEFAULT 0"))
@@ -167,8 +221,12 @@ async def startup():
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS force_password_change BOOLEAN DEFAULT FALSE"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP WITH TIME ZONE"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_crm_assigned_staff ON crm_customers(assigned_staff_id) WHERE assigned_staff_id IS NOT NULL"))
-        except Exception:
-            pass
+            # Composite indexes for high-frequency query patterns
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_notif_user_read ON notifications(user_id, is_read)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchase_req_store_status ON purchase_requests(store_id, status)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_store_req_store_status ON store_requests(store_id, status)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_medpurchase_store_status_due ON medicine_purchases(store_id, status, next_due_date)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_store_stock_expiry ON store_stock_batches(expiry_date) WHERE expiry_date IS NOT NULL AND closing_stock_strips > 0"))
     except Exception as e:
         logger.warning(f"Migration block failed (non-critical): {e}")
 

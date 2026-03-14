@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete, and_
+from sqlalchemy import select, func, delete, and_, or_, text
 from database import get_db
 from models import (
     Product, Store, HOStockBatch, StoreStockBatch,
@@ -17,6 +17,7 @@ from io import BytesIO
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 import json
+import math
 
 router = APIRouter()
 
@@ -80,126 +81,140 @@ async def aging_report(
     cache_key = f"aging_{location}_{status}_{bucket}_{search}_{page}"
     cached = get_cached(cache_key, ttl=90)
     if cached: return cached
-    now = datetime.now(timezone.utc)
-    d90 = now - timedelta(days=90)
     stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    # Optimized Pure SQL Aging Report via CTE
+    # This offloads calculations (age, bucket, status) to the DB
+    base_sql = """
+        WITH FirstPurchases AS (
+            SELECT product_id, store_id, MIN(purchase_date) as first_date
+            FROM purchase_records
+            GROUP BY product_id, store_id
+        ),
+        Sales90d AS (
+            SELECT product_name, SUM(quantity) as qty
+            FROM sales_records
+            WHERE invoice_date >= NOW() - INTERVAL '90 days'
+            GROUP BY product_name
+        ),
+        AllStock AS (
+            -- Store Stock
+            SELECT 
+                s.product_name, s.ho_product_id as product_id, s.batch, s.closing_stock_strips as stock,
+                s.cost_value as value, s.store_id, st.store_name as location,
+                s.created_at, s.expiry_date
+            FROM store_stock_batches s
+            JOIN stores st ON s.store_id = st.id
+            WHERE s.closing_stock_strips > 0
+            UNION ALL
+            -- HO Stock
+            SELECT 
+                h.product_name, h.product_id, h.batch, h.closing_stock as stock,
+                h.landing_cost_value as value, NULL as store_id, 'Head Office' as location,
+                h.created_at, h.expiry_date
+            FROM ho_stock_batches h
+            WHERE h.closing_stock > 0
+        ),
+        AgedStock AS (
+            SELECT 
+                ask.*,
+                EXTRACT(DAY FROM (NOW() - COALESCE(fp.first_date, ask.created_at))) as age_days,
+                COALESCE(s90.qty, 0) as sales_90d
+            FROM AllStock ask
+            LEFT JOIN FirstPurchases fp ON ask.product_id = fp.product_id 
+                AND (ask.store_id = fp.store_id OR (ask.store_id IS NULL AND fp.store_id IS NULL))
+            LEFT JOIN Sales90d s90 ON ask.product_name = s90.product_name
+        ),
+        ClassifiedStock AS (
+            SELECT *,
+                CASE 
+                    WHEN age_days <= 30 THEN '0-30'
+                    WHEN age_days <= 60 THEN '30-60'
+                    WHEN age_days <= 90 THEN '60-90'
+                    ELSE '90+'
+                END as bucket_name,
+                CASE
+                    WHEN sales_90d = 0 AND age_days > 60 THEN 'dead'
+                    WHEN sales_90d < 5 AND age_days > 30 THEN 'slow'
+                    ELSE 'active'
+                END as status_name
+            FROM AgedStock
+        )
+        SELECT * FROM ClassifiedStock
+    """
+    
+    # Build dynamic filters
+    filters = []
+    params = {"limit": limit, "offset": (page - 1) * limit}
+    
+    if location and location != "all":
+        filters.append("location = :location")
+        params["location"] = location
+    if bucket and bucket != "all":
+        filters.append("bucket_name = :bucket")
+        params["bucket"] = bucket
+    if status and status != "all":
+        filters.append("status_name = :status")
+        params["status"] = status
+    if search:
+        filters.append("(product_name ILIKE :search OR product_id ILIKE :search)")
+        params["search"] = f"%{search}%"
+        
+    filtered_sql = base_sql
+    if filters:
+        filtered_sql += " WHERE " + " AND ".join(filters)
+    
+    # Run all three queries in parallel to eliminate sequential round trips
+    tasks = [
+        db.execute(text(f"SELECT COUNT(*) FROM ({filtered_sql}) AS total"), params),
+        db.execute(text(filtered_sql + " ORDER BY age_days DESC LIMIT :limit OFFSET :offset"), params),
+        db.execute(text(f"""
+            SELECT 
+                COUNT(*) FILTER (WHERE bucket_name = '0-30') as b0_30,
+                COUNT(*) FILTER (WHERE bucket_name = '30-60') as b30_60,
+                COUNT(*) FILTER (WHERE bucket_name = '60-90') as b60_90,
+                COUNT(*) FILTER (WHERE bucket_name = '90+') as b90plus,
+                COUNT(*) FILTER (WHERE status_name = 'dead') as dead_count,
+                COUNT(*) FILTER (WHERE status_name = 'slow') as slow_count,
+                SUM(value) FILTER (WHERE status_name = 'dead') as dead_value,
+                SUM(value) FILTER (WHERE status_name = 'slow') as slow_value
+            FROM ({filtered_sql}) AS summary
+        """), params)
+    ]
+    
+    results = await asyncio.gather(*tasks)
+    
+    total = results[0].scalar() or 0
+    report_rows = results[1].all()
+    s_agg = results[2].first()
+    
     items = []
-
-    # Pre-load purchase dates: product_id + store_id → earliest purchase date
-    from models import PurchaseRecord
-    purchase_dates = {}
-    pd_rows = (await db.execute(
-        select(PurchaseRecord.product_id, PurchaseRecord.store_id, func.min(PurchaseRecord.purchase_date).label("first_date"))
-        .where(PurchaseRecord.product_id.isnot(None))
-        .group_by(PurchaseRecord.product_id, PurchaseRecord.store_id)
-    )).all()
-    for r in pd_rows:
-        if r[0]:
-            pid_clean = str(r[0]).strip().split('.')[0]
-            purchase_dates[(pid_clean, r[1])] = r[2]
-    # Also HO-level (store_id=None) from all stores
-    pd_ho = (await db.execute(
-        select(PurchaseRecord.product_id, func.min(PurchaseRecord.purchase_date).label("first_date"))
-        .where(PurchaseRecord.product_id.isnot(None))
-        .group_by(PurchaseRecord.product_id)
-    )).all()
-    for r in pd_ho:
-        if r[0]:
-            pid_clean = str(r[0]).strip().split('.')[0]
-            purchase_dates[(pid_clean, None)] = r[1]
-
-    def get_age(product_id, store_id, created_at):
-        """Get aging days from purchase date, fallback to created_at."""
-        pid = str(product_id).strip().split('.')[0] if product_id else None
-        pdate = None
-        if pid:
-            pdate = purchase_dates.get((pid, store_id)) or purchase_dates.get((pid, None))
-        ref_date = pdate or created_at
-        if not ref_date: return 0, None
-        return (now - ref_date).days, ref_date
-
-    # Pre-load actual 90-day sales from SalesRecord (by product_name, all stores)
-    from models import SalesRecord as SR
-    actual_sales_90d = {}
-    for r in (await db.execute(
-        select(SR.product_name, func.sum(SR.quantity).label("qty"))
-        .where(SR.invoice_date >= d90)
-        .group_by(SR.product_name)
-    )).all():
-        actual_sales_90d[r[0]] = float(r[1] or 0)
-
-    def classify(product_name, days):
-        """Classify based on actual SalesRecord data: dead=0 sales 90d + 60d old, slow=<5 sales 90d + 30d old."""
-        qty_90d = actual_sales_90d.get(product_name, 0)
-        if qty_90d == 0 and days > 60: return "dead"
-        if qty_90d < 5 and days > 30: return "slow"
-        return "active"
-
-    # --- HO Stock ---
-    if not location or location == "all" or location == "Head Office":
-        ho_q = select(HOStockBatch).where(HOStockBatch.closing_stock > 0)
-        if search:
-            ho_q = ho_q.where(HOStockBatch.product_name.ilike(f"%{search}%") | HOStockBatch.product_id.ilike(f"%{search}%"))
-        for s in (await db.execute(ho_q)).scalars().all():
-            days, ref_date = get_age(s.product_id, None, s.created_at)
-            b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
-            st = classify(s.product_name, days)
-            if bucket and bucket != "all" and b != bucket: continue
-            if status and status != "all" and st != status: continue
-            items.append({
-                "location": "Head Office", "store_id": None,
-                "product_id": s.product_id, "product_name": s.product_name,
-                "batch": s.batch, "stock": s.closing_stock, "mrp": s.mrp or 0,
-                "days": days, "value": s.landing_cost_value or 0,
-                "sales_90d": actual_sales_90d.get(s.product_name, 0),
-                "stock_date": ref_date.isoformat() if ref_date else None,
-                "expiry_date": s.expiry_date.isoformat() if s.expiry_date else None,
-                "bucket": b, "status": st,
-            })
-
-    # --- Store Stock ---
-    for sid, sname in stores.items():
-        if location and location != "all" and location != sname: continue
-        ss_q = select(StoreStockBatch).where(StoreStockBatch.store_id == sid, StoreStockBatch.closing_stock_strips > 0)
-        if search:
-            ss_q = ss_q.where(StoreStockBatch.product_name.ilike(f"%{search}%") | StoreStockBatch.ho_product_id.ilike(f"%{search}%"))
-        for s in (await db.execute(ss_q)).scalars().all():
-            pid = s.ho_product_id or s.store_product_id or ""
-            days, ref_date = get_age(pid, sid, s.created_at)
-            b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
-            st = classify(s.product_name, days)
-            if bucket and bucket != "all" and b != bucket: continue
-            if status and status != "all" and st != status: continue
-            items.append({
-                "location": sname, "store_id": sid,
-                "product_id": pid, "product_name": s.product_name,
-                "batch": s.batch, "stock": s.closing_stock_strips, "mrp": s.mrp or 0,
-                "days": days, "value": s.cost_value or 0,
-                "sales_90d": actual_sales_90d.get(s.product_name, 0),
-                "stock_date": ref_date.isoformat() if ref_date else None,
-                "expiry_date": s.expiry_date.isoformat() if s.expiry_date else None,
-                "bucket": b, "status": st,
-            })
-
-    items.sort(key=lambda x: -x["days"])
-    total = len(items)
-    paged = items[(page - 1) * limit: page * limit]
-
-    buckets = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
-    dead_count = slow_count = dead_value = slow_value = 0
-    for i in items:
-        buckets[i["bucket"]] += 1
-        if i["status"] == "dead": dead_count += 1; dead_value += i["value"]
-        if i["status"] == "slow": slow_count += 1; slow_value += i["value"]
+    for r in report_rows:
+        items.append({
+            "location": r.location, "store_id": r.store_id,
+            "product_id": r.product_id, "product_name": r.product_name,
+            "batch": r.batch, "stock": float(r.stock or 0.0), 
+            "days": int(r.age_days or 0), "value": float(r.value or 0.0),
+            "sales_90d": float(r.sales_90d or 0.0),
+            "stock_date": r.created_at.isoformat() if r.created_at else None,
+            "expiry_date": r.expiry_date.isoformat() if r.expiry_date else None,
+            "bucket": r.bucket_name, "status": r.status_name,
+        })
 
     result = {
-        "items": paged, "total": total, "page": page, "limit": limit,
-        "summary": buckets,
-        "dead_count": dead_count, "slow_count": slow_count,
-        "dead_value": round(dead_value, 2), "slow_value": round(slow_value, 2),
+        "items": items, "total": total, "page": page, "limit": limit,
+        "summary": {
+            "0-30": s_agg.b0_30 if s_agg else 0,
+            "30-60": s_agg.b30_60 if s_agg else 0,
+            "60-90": s_agg.b60_90 if s_agg else 0,
+            "90+": s_agg.b90plus if s_agg else 0
+        },
+        "dead_count": s_agg.dead_count if s_agg else 0,
+        "slow_count": s_agg.slow_count if s_agg else 0,
+        "dead_value": math.floor(float((s_agg.dead_value if s_agg else 0) or 0.0) * 100 + 0.5) / 100.0,
+        "slow_value": math.floor(float((s_agg.slow_value if s_agg else 0) or 0.0) * 100 + 0.5) / 100.0,
         "locations": ["Head Office"] + list(stores.values()),
     }
-    return set_cached(cache_key, result, ttl=90)
+    return set_cached(cache_key, result, ttl=120)
 
 
 @router.get("/intelligence/summary")
@@ -208,6 +223,7 @@ async def intelligence_summary(
     user: dict = Depends(get_current_user),
 ):
     from cache import get_cached, set_cached
+    import asyncio
     is_store_staff = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store_staff else None
     cache_key = f"intel_summary_{user_store_id or 'all'}"
@@ -215,81 +231,112 @@ async def intelligence_summary(
     if cached: return cached
 
     now = datetime.now(timezone.utc)
-    stores = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    d30 = now - timedelta(days=30)
+    d60 = now - timedelta(days=60)
 
-    dead_items, slow_items, recommendations = [], [], []
+    # 1. Parallelize data fetching
+    tasks = [
+        db.execute(select(Store).where(Store.is_active == True)),
+    ]
 
-    ss_query = select(StoreStockBatch)
+    # Dead and Slow Moving Stock via SQL Aggregation
+    agg_stmt = select(
+        func.count(StoreStockBatch.id).filter(StoreStockBatch.created_at < d60).label("dc"),
+        func.sum(StoreStockBatch.cost_value).filter(StoreStockBatch.created_at < d60).label("dv"),
+        func.count(StoreStockBatch.id).filter(and_(StoreStockBatch.created_at < d30, StoreStockBatch.created_at >= d60)).label("sc"),
+        func.sum(StoreStockBatch.cost_value).filter(and_(StoreStockBatch.created_at < d30, StoreStockBatch.created_at >= d60)).label("sv")
+    ).where(and_(
+        StoreStockBatch.closing_stock_strips > 0,
+        or_(StoreStockBatch.sales == 0, StoreStockBatch.sales.is_(None))
+    ))
+
     if user_store_id:
-        ss_query = ss_query.where(StoreStockBatch.store_id == user_store_id)
-    for s in (await db.execute(ss_query)).scalars().all():
-        if s.closing_stock_strips <= 0:
-            continue
+        tasks.append(db.execute(
+            select(StoreStockBatch)
+            .where(and_(StoreStockBatch.store_id == user_store_id, StoreStockBatch.closing_stock_strips > 0, 
+                        or_(StoreStockBatch.sales == 0, StoreStockBatch.sales.is_(None)), 
+                        StoreStockBatch.created_at < d30))
+            .order_by(StoreStockBatch.created_at.asc()).limit(50)
+        ))
+        agg_stmt = agg_stmt.where(StoreStockBatch.store_id == user_store_id)
+    else:
+        tasks.append(db.execute(
+            select(StoreStockBatch)
+            .where(and_(StoreStockBatch.closing_stock_strips > 0, 
+                        or_(StoreStockBatch.sales == 0, StoreStockBatch.sales.is_(None)), 
+                        StoreStockBatch.created_at < d30))
+            .order_by(StoreStockBatch.created_at.asc()).limit(50)
+        ))
+    
+    tasks.append(db.execute(agg_stmt))
+
+    results = await asyncio.gather(*tasks)
+    stores_map = {s.id: s.store_name for s in results[0].scalars().all()}
+    
+    candidate_items = results[1].scalars().all()
+    # Unpack the single aggregate row containing dc, dv, sc, sv
+    agg_res = results[2].first()
+    dead_count = int(agg_res[0] or 0) if agg_res else 0
+    dead_val = float(agg_res[1] or 0.0) if agg_res else 0.0
+    slow_count = int(agg_res[2] or 0) if agg_res else 0
+    slow_val = float(agg_res[3] or 0.0) if agg_res else 0.0
+
+    dead_items = []
+    slow_items = []
+
+    for s in candidate_items:
         days = (now - s.created_at).days if s.created_at else 0
         item = {
-            "store": stores.get(s.store_id, ""), "store_id": s.store_id,
+            "store": stores_map.get(s.store_id, "Head Office"), "store_id": s.store_id,
             "product_id": s.ho_product_id or s.store_product_id or "",
             "product_name": s.product_name, "batch": s.batch,
-            "stock": s.closing_stock_strips, "days": days, "sales": s.sales or 0,
-            "value": s.cost_value or 0,
+            "stock": s.closing_stock_strips, "days": days, "sales": 0,
+            "value": float(s.cost_value or 0),
         }
-        if (s.sales or 0) == 0 and days > 60:
+        if days >= 60:
             dead_items.append(item)
-        elif (s.sales or 0) == 0 and days > 30:
+        else:
             slow_items.append(item)
 
-    # HO dead stock (only for admin/ho_staff)
-    if not user_store_id:
-        for s in (await db.execute(select(HOStockBatch))).scalars().all():
-            if s.closing_stock <= 0:
-                continue
-            days = (now - s.created_at).days if s.created_at else 0
-            if days > 60:
-                dead_items.append({
-                    "store": "Head Office", "store_id": None,
-                    "product_id": s.product_id, "product_name": s.product_name,
-                    "batch": s.batch, "stock": s.closing_stock, "days": days,
-                    "sales": 0, "value": s.landing_cost_value or 0,
-                })
-            elif days > 30:
-                slow_items.append({
-                    "store": "Head Office", "store_id": None,
-                    "product_id": s.product_id, "product_name": s.product_name,
-                    "batch": s.batch, "stock": s.closing_stock, "days": days,
-                    "sales": 0, "value": s.landing_cost_value or 0,
-                })
-
-    # Transfer recommendations: dead stock in one store, sales in another
-    product_sales = {}
-    for s in (await db.execute(select(StoreStockBatch).where(StoreStockBatch.sales > 0))).scalars().all():
-        pid = s.ho_product_id or s.store_product_id
-        if pid:
-            product_sales.setdefault(pid, []).append({
-                "store": stores.get(s.store_id, ""), "store_id": s.store_id, "sales": s.sales,
-            })
-
-    for d in dead_items:
-        if d["product_id"] in product_sales and d["store_id"] is not None:
-            for buyer in product_sales[d["product_id"]]:
-                if buyer["store_id"] != d["store_id"]:
-                    recommendations.append({
-                        "product_name": d["product_name"], "product_id": d["product_id"],
-                        "from_store": d["store"], "to_store": buyer["store"],
-                        "from_store_id": d["store_id"], "to_store_id": buyer["store_id"],
-                        "quantity": d["stock"], "reason": f"Dead stock ({d['days']}d) with demand at {buyer['store']}",
-                    })
-                    break
+    # Transfer recommendations (Simplified: only check if Top Dead Items have sales elsewhere)
+    recommendations = []
+    if dead_items:
+        pids = [d["product_id"] for d in dead_items if d["product_id"]]
+        if pids:
+            # Check for demand in other stores
+            demand_res = await db.execute(
+                select(StoreStockBatch.ho_product_id, StoreStockBatch.store_id, StoreStockBatch.sales)
+                .where(and_(StoreStockBatch.ho_product_id.in_(pids), StoreStockBatch.sales > 0))
+            )
+            product_sales = {}
+            for r in demand_res.all():
+                product_sales.setdefault(r[0], []).append({"store_id": r[1], "sales": r[2]})
+            
+            for d in dead_items:
+                if d["product_id"] in product_sales:
+                    for buyer in product_sales[d["product_id"]]:
+                        if buyer["store_id"] != d["store_id"]:
+                            rec_store_name = stores_map.get(buyer["store_id"], f"Store {buyer['store_id']}")
+                            recommendations.append({
+                                "product_name": d["product_name"], "product_id": d["product_id"],
+                                "from_store": d["store"], "to_store": rec_store_name,
+                                "from_store_id": d["store_id"], "to_store_id": buyer["store_id"],
+                                "quantity": d["stock"], "reason": f"Dead stock ({d['days']}d) with demand at {rec_store_name}",
+                            })
+                            break
+                if len(recommendations) >= 10: break
 
     result = {
-        "dead_stock": sorted(dead_items, key=lambda x: -x["days"])[:20],
-        "slow_moving": sorted(slow_items, key=lambda x: -x["days"])[:20],
-        "dead_stock_count": len(dead_items),
-        "dead_stock_value": round(sum(i["value"] for i in dead_items), 2),
-        "slow_moving_count": len(slow_items),
-        "slow_moving_value": round(sum(i["value"] for i in slow_items), 2),
-        "recommendations": recommendations[:10],
+        "dead_stock": dead_items[:20],
+        "slow_moving": slow_items[:20],
+        "dead_stock_count": dead_count,
+        "dead_stock_value": math.floor(dead_val * 100 + 0.5) / 100.0,
+        "slow_moving_count": slow_count,
+        "slow_moving_value": math.floor(slow_val * 100 + 0.5) / 100.0,
+        "recommendations": recommendations,
     }
     return set_cached(cache_key, result, ttl=120)
+
 
 
 # ─── Batch Details ────────────────────────────────────────
@@ -308,7 +355,7 @@ async def check_transfer_availability(
     )).all()
     total = sum(float(s.closing_stock_strips or 0) for s in stocks)
     batches = [{"batch": s.batch, "stock": float(s.closing_stock_strips or 0), "mrp": s.mrp or 0} for s in stocks if (s.closing_stock_strips or 0) > 0]
-    return {"total_available": round(total, 1), "batches": batches}
+    return {"total_available": math.floor(float(total) * 10 + 0.5) / 10.0, "batches": batches}
 
 
 @router.get("/stock/batch-details/{product_id}")
@@ -425,9 +472,9 @@ async def export_consolidated(db: AsyncSession = Depends(get_db), user: dict = D
         total = ho
         for s in stores_list:
             qty = ss_map.get(p.product_id, {}).get(s.id, 0)
-            row[f"store_{s.id}"] = round(qty, 1)
+            row[f"store_{s.id}"] = math.floor(float(qty) * 10 + 0.5) / 10.0
             total += qty
-        row["total"] = round(total, 1)
+        row["total"] = math.floor(float(total) * 10 + 0.5) / 10.0
         rows.append(row)
 
     await _log(db, user, "Exported consolidated stock", "consolidated")
@@ -668,10 +715,10 @@ async def store_scorecard(
                     slow_items += 1
 
         sku_count = len(set((r.ho_product_id or r.store_product_id or r.product_name) for r in stock_rows if r.closing_stock_strips and r.closing_stock_strips > 0))
-        turnover = round(total_sales / total_stock, 2) if total_stock > 0 else 0
-        dead_pct = round(dead_items / total_items * 100, 1) if total_items > 0 else 0
-        slow_pct = round(slow_items / total_items * 100, 1) if total_items > 0 else 0
-        avg_aging = round(total_aging_days / total_items, 0) if total_items > 0 else 0
+        turnover = math.floor(float(total_sales / total_stock) * 100 + 0.5) / 100.0 if total_stock > 0 else 0.0
+        dead_pct = math.floor(float(dead_items / total_items * 100) * 10 + 0.5) / 10.0 if total_items > 0 else 0.0
+        slow_pct = math.floor(float(slow_items / total_items * 100) * 10 + 0.5) / 10.0 if total_items > 0 else 0.0
+        avg_aging = math.floor(float(total_aging_days / total_items) + 0.5) if total_items > 0 else 0.0
 
         # Transfer compliance
         t_all = (await db.execute(
@@ -687,7 +734,7 @@ async def store_scorecard(
                 )
             )
         )).scalar() or 0
-        compliance = round(t_approved / t_all * 100, 1) if t_all > 0 else 100.0
+        compliance = math.floor(float(t_approved / t_all * 100) * 10 + 0.5) / 10.0 if t_all > 0 else 100.0
 
         # Purchase request count
         pr_count = (await db.execute(
@@ -696,7 +743,7 @@ async def store_scorecard(
 
         # Composite score: Turnover 40% (cap at 1.0 = 100), Dead Stock 30% (invert), Compliance 30%
         norm_turnover = min(turnover * 100, 100)
-        score = round(norm_turnover * 0.4 + (100 - dead_pct) * 0.3 + compliance * 0.3, 1)
+        score = math.floor(float(norm_turnover * 0.4 + (100 - dead_pct) * 0.3 + compliance * 0.3) * 10 + 0.5) / 10.0
 
         scorecards.append({
             "store_id": sid,
@@ -704,9 +751,9 @@ async def store_scorecard(
             "store_code": store.store_code,
             "location": store.location or "",
             "sku_count": sku_count,
-            "total_stock": round(total_stock, 1),
-            "total_sales": round(total_sales, 1),
-            "stock_value": round(total_value, 2),
+            "total_stock": math.floor(float(total_stock) * 10 + 0.5) / 10.0,
+            "total_sales": math.floor(float(total_sales) * 10 + 0.5) / 10.0,
+            "stock_value": math.floor(float(total_value) * 100 + 0.5) / 100.0,
             "turnover_ratio": turnover,
             "dead_stock_pct": dead_pct,
             "slow_moving_pct": slow_pct,
@@ -727,11 +774,11 @@ async def store_scorecard(
     # Network averages
     n = len(scorecards) or 1
     network_avg = {
-        "avg_turnover": round(sum(s["turnover_ratio"] for s in scorecards) / n, 2),
-        "avg_dead_pct": round(sum(s["dead_stock_pct"] for s in scorecards) / n, 1),
-        "avg_compliance": round(sum(s["transfer_compliance"] for s in scorecards) / n, 1),
-        "avg_score": round(sum(s["score"] for s in scorecards) / n, 1),
-        "total_network_value": round(sum(s["stock_value"] for s in scorecards), 2),
+        "avg_turnover": math.floor(float(sum(s["turnover_ratio"] for s in scorecards) / n) * 100 + 0.5) / 100.0,
+        "avg_dead_pct": math.floor(float(sum(s["dead_stock_pct"] for s in scorecards) / n) * 10 + 0.5) / 10.0,
+        "avg_compliance": math.floor(float(sum(s["transfer_compliance"] for s in scorecards) / n) * 10 + 0.5) / 10.0,
+        "avg_score": math.floor(float(sum(s["score"] for s in scorecards) / n) * 10 + 0.5) / 10.0,
+        "total_network_value": math.floor(float(sum(s["stock_value"] for s in scorecards)) * 100 + 0.5) / 100.0,
     }
 
     return {"stores": scorecards, "network_avg": network_avg}
@@ -767,6 +814,7 @@ async def get_chart_data(
     user: dict = Depends(get_current_user),
 ):
     from cache import get_cached, set_cached
+    import asyncio
     is_store = user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id")
     user_store_id = user.get("store_id") if is_store else None
     cache_key = f"chart_data_{user_store_id or 'all'}"
@@ -774,57 +822,96 @@ async def get_chart_data(
     if cached: return cached
 
     now = datetime.now(timezone.utc)
-    stores_map = {s.id: s.store_name for s in (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()}
+    d30 = now - timedelta(days=30)
+    d60 = now - timedelta(days=60)
+    d90 = now - timedelta(days=90)
 
-    # 1. Aging distribution buckets
-    aging_buckets = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
-    aging_values = {"0-30": 0, "30-60": 0, "60-90": 0, "90+": 0}
+    # Parallelize independent queries
+    tasks = [
+        db.execute(select(Store).where(Store.is_active == True)),
+        # Aging chart (Store Stock)
+        db.execute(
+            select(
+                func.sum(case((StoreStockBatch.created_at >= d30, StoreStockBatch.closing_stock_strips), else_=0)).label("u30"),
+                func.sum(case((and_(StoreStockBatch.created_at < d30, StoreStockBatch.created_at >= d60), StoreStockBatch.closing_stock_strips), else_=0)).label("u60"),
+                func.sum(case((and_(StoreStockBatch.created_at < d60, StoreStockBatch.created_at >= d90), StoreStockBatch.closing_stock_strips), else_=0)).label("u90"),
+                func.sum(case((StoreStockBatch.created_at < d90, StoreStockBatch.closing_stock_strips), else_=0)).label("u90p"),
+                func.sum(case((StoreStockBatch.created_at >= d30, StoreStockBatch.cost_value), else_=0)).label("v30"),
+                func.sum(case((and_(StoreStockBatch.created_at < d30, StoreStockBatch.created_at >= d60), StoreStockBatch.cost_value), else_=0)).label("v60"),
+                func.sum(case((and_(StoreStockBatch.created_at < d60, StoreStockBatch.created_at >= d90), StoreStockBatch.cost_value), else_=0)).label("v90"),
+                func.sum(case((StoreStockBatch.created_at < d90, StoreStockBatch.cost_value), else_=0)).label("v90p"),
+            ).where(StoreStockBatch.closing_stock_strips > 0 if not user_store_id else and_(StoreStockBatch.closing_stock_strips > 0, StoreStockBatch.store_id == user_store_id))
+        ),
+        # Stock distribution
+        db.execute(
+            select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t"))
+            .where(StoreStockBatch.closing_stock_strips > 0 if not user_store_id else and_(StoreStockBatch.closing_stock_strips > 0, StoreStockBatch.store_id == user_store_id))
+            .group_by(StoreStockBatch.store_id)
+        ),
+        # Top categories
+        db.execute(
+            select(Product.category, func.count(Product.id).label("cnt"))
+            .where(Product.category.isnot(None))
+            .group_by(Product.category).order_by(func.count(Product.id).desc()).limit(8)
+        ),
+        # Transfer status
+        db.execute(
+            select(InterStoreTransfer.status, func.count(InterStoreTransfer.id).label("cnt"))
+            .group_by(InterStoreTransfer.status)
+        )
+    ]
+
+    # HO Aging (if admin)
     if not user_store_id:
-        for s in (await db.execute(select(HOStockBatch))).scalars().all():
-            if s.closing_stock <= 0: continue
-            days = (now - s.created_at).days if s.created_at else 0
-            b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
-            aging_buckets[b] += float(s.closing_stock or 0)
-            aging_values[b] += float(s.landing_cost_value or 0)
-    ss_chart_q = select(StoreStockBatch)
-    if user_store_id: ss_chart_q = ss_chart_q.where(StoreStockBatch.store_id == user_store_id)
-    for s in (await db.execute(ss_chart_q)).scalars().all():
-        if s.closing_stock_strips <= 0: continue
-        days = (now - s.created_at).days if s.created_at else 0
-        b = "0-30" if days <= 30 else "30-60" if days <= 60 else "60-90" if days <= 90 else "90+"
-        aging_buckets[b] += float(s.closing_stock_strips or 0)
-        aging_values[b] += float(s.cost_value or 0)
+        from sqlalchemy import case
+        tasks.append(db.execute(
+            select(
+                func.sum(case((HOStockBatch.created_at >= d30, HOStockBatch.closing_stock), else_=0)).label("u30"),
+                func.sum(case((and_(HOStockBatch.created_at < d30, HOStockBatch.created_at >= d60), HOStockBatch.closing_stock), else_=0)).label("u60"),
+                func.sum(case((and_(HOStockBatch.created_at < d60, HOStockBatch.created_at >= d90), HOStockBatch.closing_stock), else_=0)).label("u90"),
+                func.sum(case((HOStockBatch.created_at < d90, HOStockBatch.closing_stock), else_=0)).label("u90p"),
+                func.sum(case((HOStockBatch.created_at >= d30, HOStockBatch.landing_cost_value), else_=0)).label("v30"),
+                func.sum(case((and_(HOStockBatch.created_at < d30, HOStockBatch.created_at >= d60), HOStockBatch.landing_cost_value), else_=0)).label("v60"),
+                func.sum(case((and_(HOStockBatch.created_at < d60, HOStockBatch.created_at >= d90), HOStockBatch.landing_cost_value), else_=0)).label("v90"),
+                func.sum(case((HOStockBatch.created_at < d90, HOStockBatch.landing_cost_value), else_=0)).label("v90p"),
+            ).where(HOStockBatch.closing_stock > 0)
+        ))
+        tasks.append(db.execute(select(func.sum(HOStockBatch.closing_stock))))
 
-    aging_chart = [{"bucket": k, "units": round(v, 0), "value": round(aging_values[k], 0)} for k, v in aging_buckets.items()]
+    results = await asyncio.gather(*tasks)
+    
+    stores_map = {s.id: s.store_name for s in results[0].scalars().all()}
+    ss_aging = results[1].one()
+    ss_dist = results[2].all()
+    cat_q = results[3].all()
+    trans_q = results[4].all()
 
-    # 2. Stock distribution by location
+    # Process aging
+    buckets = ["0-30", "30-60", "60-90", "90+"]
+    u_sums = [float(ss_aging[0] or 0), float(ss_aging[1] or 0), float(ss_aging[2] or 0), float(ss_aging[3] or 0)]
+    v_sums = [float(ss_aging[4] or 0), float(ss_aging[5] or 0), float(ss_aging[6] or 0), float(ss_aging[7] or 0)]
+
+    if not user_store_id:
+        ho_aging = results[5].one()
+        for i in range(4):
+            u_sums[i] += float(ho_aging[i] or 0)
+            v_sums[i] += float(ho_aging[i+4] or 0)
+
+    aging_chart = [{"bucket": buckets[i], "units": math.floor(float(u_sums[i]) + 0.5), "value": math.floor(float(v_sums[i]) + 0.5)} for i in range(4)]
+
+    # Process distribution
     store_dist = []
     if not user_store_id:
-        ho_total = float((await db.execute(select(func.sum(HOStockBatch.closing_stock)))).scalar() or 0)
+        ho_total = float(results[6].scalar() or 0)
         if ho_total > 0:
-            store_dist.append({"name": "Head Office", "value": round(ho_total, 0)})
-    ss_dist_q = select(StoreStockBatch.store_id, func.sum(StoreStockBatch.closing_stock_strips).label("t")).group_by(StoreStockBatch.store_id)
-    if user_store_id: ss_dist_q = ss_dist_q.where(StoreStockBatch.store_id == user_store_id)
-    store_stock_q = (await db.execute(ss_dist_q)).all()
-    for r in store_stock_q:
-        v = float(r[1] or 0)  # Access by index instead of attribute
+            store_dist.append({"name": "Head Office", "value": math.floor(ho_total + 0.5)})
+    for r in ss_dist:
+        v = float(r[1] or 0)
         if v > 0:
-            store_dist.append({"name": stores_map.get(r[0], f"Store {r[0]}"), "value": round(v, 0)})
+            store_dist.append({"name": stores_map.get(r[0], f"Store {r[0]}"), "value": math.floor(v + 0.5)})
 
-    # 3. Top categories by product count
-    cat_q = (await db.execute(
-        select(Product.category, func.count(Product.id).label("cnt"))
-        .where(Product.category.isnot(None))
-        .group_by(Product.category).order_by(func.count(Product.id).desc()).limit(8)
-    )).all()
-    category_chart = [{"name": r.category or "Uncategorized", "count": r.cnt} for r in cat_q]
-
-    # 4. Transfer status breakdown
-    transfer_q = (await db.execute(
-        select(InterStoreTransfer.status, func.count(InterStoreTransfer.id).label("cnt"))
-        .group_by(InterStoreTransfer.status)
-    )).all()
-    transfer_chart = [{"status": r.status.value if hasattr(r.status, 'value') else r.status, "count": r.cnt} for r in transfer_q]
+    category_chart = [{"name": r[0] or "Uncategorized", "count": r[1]} for r in cat_q]
+    transfer_chart = [{"status": r[0].value if hasattr(r[0], 'value') else r[0], "count": r[1]} for r in trans_q]
 
     result = {
         "aging_chart": aging_chart,
@@ -833,6 +920,7 @@ async def get_chart_data(
         "transfer_chart": transfer_chart,
     }
     return set_cached(cache_key, result, ttl=120)
+
 
 
 @router.get("/audit-logs")

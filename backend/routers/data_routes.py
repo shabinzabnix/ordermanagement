@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 from io import BytesIO
 import json
+import asyncio
 
 router = APIRouter()
 
@@ -213,10 +214,9 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
 
                 content = Path(file_path).read_bytes()
                 Path(file_path).unlink(missing_ok=True)  # Clean up temp file
-                Path(file_path.replace('.tmp', '.meta')).unlink(missing_ok=True)
                 log.info(f"Processing chunked: {meta['filename']}, {len(content)} bytes, type={meta['upload_type']}")
 
-                df = pd.read_excel(BytesIO(content))
+                df = await asyncio.to_thread(pd.read_excel, BytesIO(content))
                 if df.empty:
                     del content
                     return
@@ -302,7 +302,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                         df_final = None
                         for skip in [0, 1, 2, 3]:
                             try:
-                                test_df = pd.read_excel(BytesIO(content), skiprows=skip)
+                                test_df = await asyncio.to_thread(pd.read_excel, BytesIO(content), skiprows=skip)
                                 cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
                                 matched = sum(1 for c in cols_lower if c in SALES_COLUMNS)
                                 if matched >= 3 and test_df.shape[0] > 0:
@@ -396,7 +396,7 @@ async def receive_chunk(data: ChunkReq, user: dict = Depends(get_current_user)):
                             "category": "category", "sub category": "sub_category"}
                         for skip in [0, 1, 2, 3]:
                             try:
-                                test_df = pd.read_excel(BytesIO(content), skiprows=skip)
+                                test_df = await asyncio.to_thread(pd.read_excel, BytesIO(content), skiprows=skip)
                                 cols_lower = [str(c).strip().lower().replace('_', ' ') for c in test_df.columns]
                                 matched = sum(1 for c in cols_lower if c in purchase_cols)
                                 if matched >= 3 and test_df.shape[0] > 0:
@@ -491,7 +491,7 @@ async def generic_chunked_upload(data: ChunkedUploadReq, db: AsyncSession = Depe
         try:
             from database import async_session_maker
             from models import HOStockBatch, StoreStockBatch, Product, UploadHistory, UploadType as UT
-            df = pd.read_excel(BytesIO(content))
+            df = await asyncio.to_thread(pd.read_excel, BytesIO(content))
             if df.empty: return
             import logging
             log = logging.getLogger(__name__)
@@ -564,7 +564,7 @@ async def upload_products_chunked(data: ChunkedUploadReq, db: AsyncSession = Dep
 
     async def bg():
         try:
-            df = pd.read_excel(BytesIO(content))
+            df = await asyncio.to_thread(pd.read_excel, BytesIO(content))
             if df.empty: return
             df_mapped, missing, _ = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
             if missing: return
@@ -628,7 +628,7 @@ async def upload_products(
 
         async def bg_process():
             try:
-                df = pd.read_excel(BytesIO(content))
+                df = await asyncio.to_thread(pd.read_excel, BytesIO(content))
                 if df.empty: return
                 df_mapped, missing, col_info = map_columns(df, PRODUCT_COLUMNS, PRODUCT_REQUIRED)
                 if missing: return
@@ -682,7 +682,7 @@ async def upload_products(
 
     # Small files: process immediately
     try:
-        df = pd.read_excel(BytesIO(content))
+        df = await asyncio.to_thread(pd.read_excel, BytesIO(content))
     except Exception as e:
         raise HTTPException(400, f"Failed to read Excel file: {str(e)}")
     if df.empty:

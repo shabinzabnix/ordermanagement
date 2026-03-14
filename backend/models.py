@@ -55,13 +55,12 @@ class LoginActivity(Base):
     __tablename__ = "login_activity"
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), nullable=False, index=True)
-    user_id = Column(Integer, nullable=True)
-    success = Column(Boolean, default=False)
+    user_id = Column(Integer, nullable=True, index=True)
+    success = Column(Boolean, default=False, index=True)
     ip_address = Column(String(100))
     user_agent = Column(String(500))
     failure_reason = Column(String(255), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
 
 class Store(Base):
@@ -216,7 +215,7 @@ class AuditLog(Base):
     user_name = Column(String(255))
     action = Column(String(500), nullable=False)
     entity_type = Column(String(100))
-    entity_id = Column(String(100))
+    entity_id = Column(String(100), index=True)
     details = Column(Text)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

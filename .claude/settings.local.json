@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wmic process:*)",
+      "Bash(powershell -Command \"Get-NetTCPConnection -State Listen | Where-Object {$_LocalPort -in @\\(3000,3001,8000,8001,8080,5000,5173,4173\\)} | Select-Object LocalAddress,LocalPort,@{N=''PID'';E={$_OwningProcess}},@{N=''Name'';E={\\(Get-Process -Id $_OwningProcess -ErrorAction SilentlyContinue\\).ProcessName}} | Format-Table -AutoSize\")",
+      "Bash(netstat -ano)"
+    ]
+  }
+}
