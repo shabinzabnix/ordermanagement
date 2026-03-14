@@ -1,0 +1,78 @@
+# render.yaml — Render Blueprint for Order Management System
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Deploy in one click:
+#   1. Push this file to GitHub
+#   2. Go to render.com → New → Blueprint
+#   3. Connect your repo — Render reads this file automatically
+#   4. Fill in the environment variable values when prompted
+
+services:
+  # ── Backend: FastAPI ────────────────────────────────────────
+  - type: web
+    name: ordermanagement-backend
+    runtime: python
+    region: singapore          # closest to India — change to: ohio, oregon, frankfurt
+    branch: main
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    plan: starter              # $7/mo — use 'free' to start (sleeps after 15min idle)
+    healthCheckPath: /health   # FastAPI should expose GET /health returning {"status":"ok"}
+
+    envVars:
+      - key: DATABASE_URL
+        sync: false            # You fill this in the Render dashboard (never hardcode!)
+      - key: SECRET_KEY
+        generateValue: true    # Render auto-generates a secure random value
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: https://ordermanagement-frontend.onrender.com
+        # ↑ Update this to your actual frontend URL after first deploy
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+
+  # ── Frontend: React (Static Site) ──────────────────────────
+  - type: web
+    name: ordermanagement-frontend
+    runtime: static
+    region: singapore
+    branch: main
+    rootDir: frontend
+    buildCommand: yarn install && yarn build
+    staticPublishPath: build
+    pullRequestPreviewsEnabled: true   # Shows preview URL on every PR
+
+    headers:
+      # Security headers for production
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+    routes:
+      # Required for React Router — sends all 404s to index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        value: https://ordermanagement-backend.onrender.com
+        # ↑ Update this to your actual backend URL after first deploy
+      - key: REACT_APP_SUPABASE_URL
+        sync: false
+      - key: REACT_APP_SUPABASE_ANON_KEY
+        sync: false
