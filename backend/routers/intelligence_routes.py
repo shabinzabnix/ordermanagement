@@ -1313,18 +1313,25 @@ async def upload_purchase_report(
     if df.empty:
         raise HTTPException(400, "Excel file is empty")
 
-    # Map columns
-    original_cols = list(df.columns)
-    df.columns = pd.Index([str(col).strip().lower().replace('_', ' ') for col in df.columns])
+    # Map columns — use rename dict instead of direct .columns assignment
+    col_rename: Dict[str, str] = {}
+    for col in list(df.columns):  # type: ignore[union-attr]
+        col_norm = str(col).strip().lower().replace('_', ' ')
+        if col_norm in PURCHASE_COLUMNS:
+            col_rename[str(col)] = PURCHASE_COLUMNS[col_norm]
+    # Also normalize any unmapped cols
+    normalize_map = {str(col): str(col).strip().lower().replace('_', ' ') for col in list(df.columns)}  # type: ignore[union-attr]
+    df = df.rename(columns=normalize_map)  # type: ignore[union-attr]
     mapped: Dict[str, str] = {}
-    for col in df.columns:
+    for col in list(df.columns):  # type: ignore[union-attr]
         col_str = str(col)
         if col_str in PURCHASE_COLUMNS:
             mapped[col_str] = PURCHASE_COLUMNS[col_str]
     missing = [f for f in PURCHASE_REQUIRED if f not in set(mapped.values())]
+    original_cols = list(df.columns)  # type: ignore[union-attr]
     if missing:
         raise HTTPException(400, f"Missing required columns: {', '.join(missing)}. Your columns: {original_cols}")
-    df = df.rename(columns=mapped)
+    df = df.rename(columns=mapped)  # type: ignore[union-attr]
 
     store = (await db.execute(select(Store).where(Store.id == store_id))).scalar_one_or_none()
     if not store:
@@ -1344,7 +1351,7 @@ async def upload_purchase_report(
     records = []
     errors = []
 
-    for idx, row in df.iterrows():
+    for idx, row in df.iterrows():  # type: ignore[union-attr]
         try:
             product = str(row.get("product_name", "")).strip()
             supplier = str(row.get("supplier_name", "")).strip()
@@ -1362,7 +1369,7 @@ async def upload_purchase_report(
             if entry_num in ("", "nan", "None"):
                 entry_num = None
             if entry_num and (entry_num, product) in existing:
-                skipped = int(skipped) + 1
+                skipped = int(skipped) + 1  # type: ignore[arg-type]
                 continue
 
             # Parse date
@@ -1383,8 +1390,9 @@ async def upload_purchase_report(
                     pass
 
             pid = str(row.get("product_id", "")).strip() if pd.notna(row.get("product_id")) else None
-            if pid and str(pid).endswith(".0"):
-                pid = str(pid)[:-2]
+            pid_str: str = str(pid) if pid else ""
+            if pid_str.endswith(".0"):
+                pid = pid_str[:-2]
             if pid in ("", "nan", "None"):
                 pid = None
 
@@ -1397,18 +1405,19 @@ async def upload_purchase_report(
                 upload_batch_id=batch_id,
             ))
             success += 1
-        except Exception as e:
+        except Exception as exc:
             failed = int(failed) + 1
-            _err_msg = str(e)
-            errors.append(f"Row {_row_n}: {_err_msg[:80]}")
+            _exc_str: str = str(exc)
+            errors.append(f"Row {_row_n}: {_exc_str[:80]}")
 
     for r in records:
         db.add(r)
     try:
         await db.commit()
-    except Exception as e:
+    except Exception as exc_save:
         await db.rollback()
-        raise HTTPException(500, f"Failed to save: {str(e)[:200]}")
+        _save_err: str = str(exc_save)
+        raise HTTPException(500, f"Failed to save: {_save_err[:200]}")
 
     # Save upload history
     try:
