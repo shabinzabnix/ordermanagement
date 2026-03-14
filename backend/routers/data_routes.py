@@ -777,12 +777,16 @@ class StoreUpdate(BaseModel):
 
 @router.get("/stores")
 async def get_stores(db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
+    from cache import get_cached, set_cached
+    store_id = user.get("store_id") if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") else None
+    ck = f"stores_{store_id or 'all'}"
+    cached = get_cached(ck, ttl=300)
+    if cached: return cached
     query = select(Store).where(Store.is_active == True).order_by(Store.store_name)
-    # Store roles can only see their own store
-    if user.get("role") in ("STORE_STAFF", "STORE_MANAGER") and user.get("store_id"):
-        query = query.where(Store.id == user["store_id"])
+    if store_id:
+        query = query.where(Store.id == store_id)
     stores = (await db.execute(query)).scalars().all()
-    return {
+    result = {
         "stores": [
             {
                 "id": s.id,
@@ -795,6 +799,7 @@ async def get_stores(db: AsyncSession = Depends(get_db), user: dict = Depends(ge
             for s in stores
         ]
     }
+    return set_cached(ck, result, ttl=300)
 
 
 @router.post("/stores")
@@ -964,6 +969,10 @@ async def get_uploads(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
+    from cache import get_cached, set_cached, cache_key
+    ck = cache_key("uploads", upload_type, page, limit)
+    cached = get_cached(ck, ttl=60)
+    if cached: return cached
     query = select(UploadHistory)
     if upload_type:
         query = query.where(UploadHistory.upload_type == UploadType(upload_type))
@@ -979,7 +988,7 @@ async def get_uploads(
     if uids:
         umap = {u.id: u.full_name for u in (await db.execute(select(User).where(User.id.in_(uids)))).scalars().all()}
 
-    return {
+    result = {
         "uploads": [
             {
                 "id": u.id,
@@ -999,6 +1008,7 @@ async def get_uploads(
         "page": page,
         "limit": limit,
     }
+    return set_cached(ck, result, ttl=60)
 
 
 

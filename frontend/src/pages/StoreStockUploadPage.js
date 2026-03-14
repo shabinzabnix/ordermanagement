@@ -124,6 +124,8 @@ export default function StoreStockUploadPage() {
                   <Archive className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">Select a store to view stock</p>
                 </TableCell></TableRow>
+              ) : loading ? (
+                [...Array(8)].map((_, i) => <TableRow key={i}>{[...Array(9)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-100 rounded animate-pulse" /></TableCell>)}</TableRow>)
               ) : stocks.length === 0 ? (
                 <TableRow><TableCell colSpan={9} className="text-center py-16">
                   <Archive className="w-10 h-10 text-slate-200 mx-auto mb-2" />

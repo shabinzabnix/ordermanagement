@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -17,6 +17,7 @@ export default function ConsolidatedStockPage() {
   const [data, setData] = useState({ consolidated: [], stores: [] });
   const salesMap = useSales90d(data.consolidated.map(p => p.product_name));
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [category, setCategory] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -24,6 +25,13 @@ export default function ConsolidatedStockPage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const timerRef = useRef(null);
+
+  const handleSearch = (val) => {
+    setSearch(val);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { setDebouncedSearch(val); setPage(1); }, 500);
+  };
 
   const openProfile = (productId) => {
     if (!productId || productId === 'LOCAL') return;
@@ -38,13 +46,13 @@ export default function ConsolidatedStockPage() {
   useEffect(() => {
     setLoading(true);
     const params = { page, limit };
-    if (search) params.search = search;
+    if (debouncedSearch) params.search = debouncedSearch;
     if (category) params.category = category;
     api.get('/stock/consolidated', { params })
       .then(r => { setData(r.data); setTotal(r.data.total || 0); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [search, category, page]);
+  }, [debouncedSearch, category, page]);
 
   return (
     <div data-testid="consolidated-stock-page" className="space-y-5">
@@ -64,7 +72,7 @@ export default function ConsolidatedStockPage() {
           <div className="flex gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <Input data-testid="consolidated-search" placeholder="Search products..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 font-body text-sm rounded-sm" />
+              <Input data-testid="consolidated-search" placeholder="Search products..." value={search} onChange={e => handleSearch(e.target.value)} className="pl-9 font-body text-sm rounded-sm" />
             </div>
             <Select value={category || 'all'} onValueChange={v => setCategory(v === 'all' ? '' : v)}>
               <SelectTrigger className="w-[180px] font-body text-sm rounded-sm"><SelectValue placeholder="All Categories" /></SelectTrigger>
@@ -98,6 +106,8 @@ export default function ConsolidatedStockPage() {
                   <BarChart3 className="w-10 h-10 text-slate-200 mx-auto mb-2" />
                   <p className="text-sm text-slate-400 font-body">No consolidated data. Upload product master and stock data first.</p>
                 </TableCell></TableRow>
+              ) : loading ? (
+                [...Array(10)].map((_, i) => <TableRow key={i}>{[...Array(6)].map((_, j) => <TableCell key={j}><div className="h-4 bg-slate-100 rounded animate-pulse" /></TableCell>)}</TableRow>)
               ) : data.consolidated.map((p, idx) => (
                 <TableRow key={`${p.product_id}-${idx}`} className={`hover:bg-slate-50/50 ${p.is_local ? 'bg-amber-50/30' : ''}`}>
                   <TableCell className="font-mono text-[11px] text-slate-500">{p.is_local ? <Badge className="text-[8px] rounded-sm bg-amber-100 text-amber-700">LOCAL</Badge> : p.product_id}</TableCell>
