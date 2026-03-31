@@ -1,69 +1,63 @@
-# Order Management System
+# Order Management
 
-## Overview
-The Order Management System is designed to streamline the process of order processing for businesses. It provides a complete solution for managing orders from various channels in a centralized manner.
+## Comprehensive Documentation
 
-## Project Structure
-```
-ordermanagement/
-├── src/
-│   ├── controllers/
-│   ├── models/
-│   ├── routes/
-│   └── services/
-├── tests/
-└── README.md
-```
+### Features
+- Easy order placement and tracking
+- User-friendly interface for managing orders
+- Real-time notifications for order status updates
+- Comprehensive reporting tools
+- Support for multiple payment methods
 
-## Getting Started
+### Architecture
+The application is built on a microservices architecture, using Node.js for the backend and React for the frontend. The services communicate through REST APIs, ensuring scalability and maintainability.
+
+### Installation
 1. Clone the repository:
+   ```bash
+   git clone https://github.com/shabinzabnix/ordermanagement.git
    ```
-git clone https://github.com/shabinzabnix/ordermanagement.git
-```
 2. Navigate to the project directory:
+   ```bash
+   cd ordermanagement
    ```
-cwd ordermanagement
-```
-3. Install the dependencies:
+3. Install dependencies:
+   ```bash
+   npm install
    ```
-npm install
-```
-4. Run the application:
+4. Set up environment variables in a `.env` file.
+5. Start the application:
+   ```bash
+   npm start
    ```
-npm start
-```
 
-## Features
-- User authentication
-- Real-time order tracking
-- Reporting and analytics
-- Multi-channel support
+### API Documentation
+- **GET /api/orders**: Retrieve a list of orders.
+- **POST /api/orders**: Create a new order.
+- **GET /api/orders/:id**: Retrieve a specific order by ID.
+- **PUT /api/orders/:id**: Update an order.
+- **DELETE /api/orders/:id**: Delete an order.
 
-## Testing
-To run the tests, execute:
-```bash
-npm test
-```
+### Deployment
+- Use Docker for containerization.
+- Run the following command to build the Docker image:
+   ```bash
+   docker build -t ordermanagement .
+   ```
+- Use Docker Compose for multi-container deployment.
 
-## Technologies
-- Node.js
-- Express
-- MongoDB
-- React
+### Testing
+- Run tests using Jest:
+   ```bash
+   npm test
+   ```
+- Ensure all tests pass before deployment.
 
-## Deployment
-For deployment, build the application using:
-```bash
-npm run build
-```
-And follow the instructions for your hosting provider.
+### Troubleshooting
+- If the application fails to start, check for missing environment variables.
+- For database connection issues, verify your database configuration and credentials.
 
-## Contributing Guidelines
-1. Fork the repository.
-2. Create a branch (`git checkout -b feature/YourFeature`).
-3. Commit your changes (`git commit -m 'Add some feature'`).
-4. Push to the branch (`git push origin feature/YourFeature`).
-5. Open a pull request.
-
-## Support
-For support, please create an issue on GitHub or contact the maintainers.
+### Security
+- Always validate and sanitize user inputs to prevent SQL injection and XSS attacks.
+- Use HTTPS to secure API endpoints.
+- Implement logging and monitoring to detect unusual activities.
